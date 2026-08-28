@@ -2,16 +2,6 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <script>
-        // ?fresh=1 用来强制甩掉旧的服务工作者与缓存（旧版 sw.js 会缓存自己，可能把页面钉在旧版本）
-        if (location.search.indexOf('fresh') > -1 && typeof caches !== 'undefined') {
-            navigator.serviceWorker && navigator.serviceWorker.getRegistrations()
-                .then(function (rs) { rs.forEach(function (r) { r.unregister(); }); })
-                .then(function () { return caches.keys(); })
-                .then(function (ks) { ks.forEach(function (k) { caches.delete(k); }); })
-                .then(function () { location.href = location.pathname; });
-        }
-    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -24,6 +14,7 @@
     <link rel="preconnect" href="https://cdnjs.cloudflare.com">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.2/dist/chartjs-plugin-datalabels.min.js"></script>
     <script src="js/xlsx.full.min.js"></script>
 </head>
 <body>
@@ -94,6 +85,10 @@
                             </button>
                         </div>
                     </div>
+                    <!-- Mobile floating add button -->
+                    <button class="fab-add" onclick="openTransactionModal()" title="记一笔">
+                        <i class="fa-solid fa-plus"></i>
+                    </button>
                     <div class="filter-bar">
                         <div class="filter-tabs">
                             <button class="filter-tab active" data-filter="all">全部</button>
@@ -142,76 +137,58 @@
                                 <button class="period-btn" data-period="year">年报</button>
                                 <button class="period-btn" data-period="all">总</button>
                             </div>
-                            <div class="report-period-picker" id="reportYearWrap">
-                                <select class="filter-select" id="reportYearSelect"></select>
-                            </div>
-                            <div class="report-period-picker" id="reportMonthWrap">
-                                <select class="filter-select" id="reportMonthSelect"></select>
-                            </div>
+                            <select class="filter-select" id="reportYearSelect"></select>
+                            <select class="filter-select" id="reportMonthSelect"></select>
                         </div>
                     </div>
                     <div class="report-summary">
-                        <div class="report-card clickable" data-metric="income">
-                            <div class="report-card-top">
-                                <span class="report-label">总收入</span>
-                                <i class="fa-solid fa-chevron-down report-card-hint"></i>
-                            </div>
+                        <div class="report-card clickable" onclick="openReportDetail('income')">
+                            <span class="report-label">总收入</span>
                             <span class="report-value income" id="reportIncome">¥0.00</span>
                         </div>
-                        <div class="report-card clickable active" data-metric="expense">
-                            <div class="report-card-top">
-                                <span class="report-label">总支出</span>
-                                <i class="fa-solid fa-chevron-down report-card-hint"></i>
-                            </div>
+                        <div class="report-card clickable" onclick="openReportDetail('expense')">
+                            <span class="report-label">总支出</span>
                             <span class="report-value expense" id="reportExpense">¥0.00</span>
                         </div>
-                        <div class="report-card clickable" data-metric="balance">
-                            <div class="report-card-top">
-                                <span class="report-label">净结余</span>
-                                <i class="fa-solid fa-chevron-down report-card-hint"></i>
-                            </div>
+                        <div class="report-card clickable" onclick="openReportDetail('balance')">
+                            <span class="report-label">净结余</span>
                             <span class="report-value" id="reportBalance">¥0.00</span>
                         </div>
                         <div class="report-card">
-                            <div class="report-card-top">
-                                <span class="report-label">日均支出</span>
-                            </div>
+                            <span class="report-label">日均支出</span>
                             <span class="report-value" id="reportDailyAvg">¥0.00</span>
                         </div>
                     </div>
-                    <div class="chart-card drill-card">
-                        <div class="chart-header">
-                            <div class="drill-title-wrap">
-                                <h3 id="drillChartTitle">支出走势</h3>
-                                <span class="chart-subtitle" id="drillChartSubtitle"></span>
+                    <div class="report-charts">
+                        <div class="chart-card chart-wide">
+                            <div class="chart-header">
+                                <h3 id="monthlyChartTitle">月度收支对比</h3>
+                                <span class="chart-subtitle" id="monthlyChartSubtitle"></span>
                             </div>
-                            <div class="drill-controls">
-                                <div class="drill-toggle" id="drillGranularity">
-                                    <button class="gran-btn" data-gran="day">按日</button>
-                                    <button class="gran-btn" data-gran="month">按月</button>
-                                    <button class="gran-btn" data-gran="year">按年</button>
-                                </div>
-                                <div class="drill-toggle chart-type-toggle">
-                                    <button class="type-ico-btn" data-chart="line" title="折线图"><i class="fa-solid fa-chart-simple"></i></button>
-                                    <button class="type-ico-btn" data-chart="bar" title="柱状图"><i class="fa-solid fa-chart-column"></i></button>
-                                    <button class="type-ico-btn" data-chart="pie" title="饼图"><i class="fa-solid fa-chart-pie"></i></button>
-                                </div>
+                            <div class="chart-container">
+                                <canvas id="monthlyChart"></canvas>
                             </div>
                         </div>
-                        <div class="chart-container tall">
-                            <canvas id="drillChart"></canvas>
+                        <div class="chart-card">
+                            <div class="chart-header">
+                                <h3>支出分类排行</h3>
+                            </div>
+                            <div class="category-rank-content">
+                                <div class="category-rank-chart">
+                                    <canvas id="rankPieChart"></canvas>
+                                </div>
+                                <div class="category-rank-list" id="categoryRankList"></div>
+                            </div>
                         </div>
-                        <div class="pie-legend hidden" id="pieLegend"></div>
-                        <div class="drill-chart-empty hidden" id="drillChartEmpty"></div>
                     </div>
                     <div class="chart-card">
                         <div class="chart-header">
-                            <div class="drill-title-wrap">
-                                <h3 id="drillBreakdownTitle">支出分类明细</h3>
-                                <span class="chart-subtitle" id="drillBreakdownHint">点击分类查看每笔流水</span>
-                            </div>
+                            <h3>每日支出走势</h3>
+                            <span class="chart-subtitle" id="dailyChartSubtitle">本月</span>
                         </div>
-                        <div class="breakdown-list" id="drillBreakdownList"></div>
+                        <div class="chart-container tall">
+                            <canvas id="dailyChart"></canvas>
+                        </div>
                     </div>
                 </section>
 
@@ -360,7 +337,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.6.6</div>
+                                    <div class="about-version">版本 1.0.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -530,35 +507,32 @@
             </div>
         </div>
 
-        <!-- Category Transactions Modal -->
-        <div class="modal-overlay hidden" id="categoryTxnModal">
-            <div class="modal cat-txn-modal">
+        <!-- Report Detail Modal -->
+        <div class="modal-overlay hidden" id="reportDetailModal">
+            <div class="modal report-detail-modal">
                 <div class="modal-header">
-                    <div class="cat-txn-heading">
-                        <div class="cat-txn-icon" id="catTxnIcon"></div>
-                        <div class="cat-txn-heading-text">
-                            <h2 id="catTxnTitle">流水明细</h2>
-                            <div class="cat-txn-sub" id="catTxnSubtitle"></div>
-                        </div>
-                    </div>
-                    <button class="modal-close" onclick="closeCategoryTxnModal()"><i class="fa-solid fa-xmark"></i></button>
+                    <h2 id="reportDetailTitle">收入明细</h2>
+                    <button class="modal-close-btn" onclick="closeReportDetail()"><i class="fa-solid fa-xmark"></i></button>
                 </div>
-                <div class="cat-txn-summary" id="catTxnSummary"></div>
-                <div class="modal-body cat-txn-body">
-                    <div class="transaction-list" id="catTxnList"></div>
-                    <div class="empty-state hidden" id="catTxnEmpty">
-                        <i class="fa-solid fa-inbox"></i>
-                        <p>该分类暂无流水</p>
+                <div class="modal-body">
+                    <div class="chart-type-tabs">
+                        <button class="chart-type-btn active" data-chart-type="line" onclick="switchReportDetailChart('line')">
+                            <i class="fa-solid fa-chart-line"></i> 折线图
+                        </button>
+                        <button class="chart-type-btn" data-chart-type="bar" onclick="switchReportDetailChart('bar')">
+                            <i class="fa-solid fa-chart-column"></i> 柱状图
+                        </button>
+                        <button class="chart-type-btn" data-chart-type="pie" onclick="switchReportDetailChart('pie')">
+                            <i class="fa-solid fa-chart-pie"></i> 饼图
+                        </button>
                     </div>
+                    <div class="report-detail-chart-container">
+                        <canvas id="reportDetailChart"></canvas>
+                    </div>
+                    <div class="report-detail-categories" id="reportDetailCategories"></div>
                 </div>
             </div>
         </div>
-
-        <!-- Mobile floating add button (outside the scrolling view so its position
-             is never affected by the window's overflow / height clipping) -->
-        <button class="fab-add" onclick="openTransactionModal()" title="记一笔">
-            <i class="fa-solid fa-plus"></i>
-        </button>
 
         <!-- Toast -->
         <div class="toast-container" id="toastContainer"></div>
@@ -566,12 +540,10 @@
 
     <script src="js/app.js"></script>
     <script>
-        // Register Service Worker for PWA offline support.
-        // The version query bypasses any stale cached copy of sw.js, which would
-        // otherwise let an old cache-first worker pin the app to an outdated build.
+        // Register Service Worker for PWA offline support
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.6.6').catch(() => {});
+                navigator.serviceWorker.register('sw.js').catch(() => {});
             });
         }
     </script>
