@@ -84,9 +84,9 @@ let state = {
     reportPeriod: 'month',
     reportYear: null,
     reportMonth: null,
-    reportMetric: 'expense',
-    reportChartType: 'line',
-    reportGranularity: null,
+    reportDetailType: null,
+    reportDetailChartType: 'line',
+    reportDetailExpandedCat: null,
     editingTransactionId: null,
     editingCategoryId: null,
     selectedTransactionType: 'expense',
@@ -441,19 +441,6 @@ function formatDate(dateStr) {
     return `${year}年${month}月${day}日`;
 }
 
-// Short form used on narrow screens where the full date squeezes the row
-function formatDateShort(dateStr) {
-    const d = parseLocalDate(dateStr);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dOnly = new Date(d); dOnly.setHours(0, 0, 0, 0);
-    if (dOnly.getTime() === today.getTime()) return '今天';
-    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
-    if (dOnly.getTime() === yesterday.getTime()) return '昨天';
-    if (d.getFullYear() !== today.getFullYear()) return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
-    return `${d.getMonth() + 1}月${d.getDate()}日`;
-}
-
 function formatDateFull(dateStr) {
     const d = new Date(dateStr);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -706,7 +693,7 @@ function transactionItemHTML(t) {
                 <div class="transaction-category">${name}</div>
                 <div class="transaction-note">${noteText} <span class="txn-payment"><i class="${paymentIcon}"></i> ${payment}</span></div>
             </div>
-            <div class="transaction-date"><span class="date-full">${formatDate(t.date)}</span><span class="date-short">${formatDateShort(t.date)}</span></div>
+            <div class="transaction-date">${formatDate(t.date)}</div>
             <div class="transaction-amount ${t.type}">${sign}${formatCurrency(t.amount)}</div>
         </div>
     `;
@@ -1130,7 +1117,6 @@ function saveTransaction(opts = {}) {
         closeTransactionModal();
         renderView(state.currentView);
     }
-    refreshCategoryLedger();
 }
 
 function editTransaction(id) {
@@ -1142,7 +1128,6 @@ function deleteTransaction(id) {
     saveState();
     showToast('交易已删除', 'success');
     renderView(state.currentView);
-    refreshCategoryLedger();
 }
 
 function deleteTransactionFromModal() {
@@ -1155,8 +1140,6 @@ function deleteTransactionFromModal() {
 
 // ---- Reports ----
 function renderReportSelectors() {
-    const yearWrap = document.getElementById('reportYearWrap');
-    const monthWrap = document.getElementById('reportMonthWrap');
     const yearSelect = document.getElementById('reportYearSelect');
     const monthSelect = document.getElementById('reportMonthSelect');
     const now = new Date();
@@ -1166,721 +1149,658 @@ function renderReportSelectors() {
     years.push(now.getFullYear());
     const uniqueYears = [...new Set(years)].sort((a, b) => b - a);
 
-    // Keep the selected year valid for the available data
-    let currentYear = state.reportYear || now.getFullYear();
-    if (!uniqueYears.includes(currentYear)) currentYear = uniqueYears[0];
-    state.reportYear = currentYear;
-
+    const currentYear = state.reportYear || now.getFullYear();
     yearSelect.innerHTML = uniqueYears.map(y =>
         `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}年</option>`
     ).join('');
 
-    const period = state.reportPeriod;
-    yearWrap.classList.toggle('hidden', period === 'all');
-    monthWrap.classList.toggle('hidden', period !== 'month');
-
-    if (period === 'month') {
+    // Show/hide selectors based on period
+    if (state.reportPeriod === 'all') {
+        yearSelect.style.display = 'none';
+        monthSelect.style.display = 'none';
+    } else if (state.reportPeriod === 'month') {
+        yearSelect.style.display = '';
+        monthSelect.style.display = '';
         const currentMonth = state.reportMonth || (now.getMonth() + 1);
-        monthSelect.innerHTML = Array.from({ length: 12 }, (_, i) => i + 1).map(m =>
+        monthSelect.innerHTML = Array.from({length: 12}, (_, i) => i + 1).map(m =>
             `<option value="${m}" ${m === currentMonth ? 'selected' : ''}>${m}月</option>`
         ).join('');
-    }
-}
-
-// ---- Reports: period helpers ----
-function getReportRange() {
-    const now = new Date();
-    const period = state.reportPeriod;
-    const selYear = state.reportYear || now.getFullYear();
-    const selMonth = state.reportMonth || (now.getMonth() + 1);
-    let start, end, label;
-
-    if (period === 'all') {
-        start = null;
-        end = null;
-        label = '全部时间';
-    } else if (period === 'year') {
-        start = new Date(selYear, 0, 1);
-        end = new Date(selYear, 11, 31, 23, 59, 59);
-        label = `${selYear}年`;
     } else {
-        start = new Date(selYear, selMonth - 1, 1);
-        end = new Date(selYear, selMonth, 0, 23, 59, 59);
-        label = `${selYear}年${selMonth}月`;
+        yearSelect.style.display = '';
+        monthSelect.style.display = 'none';
     }
-    return { period, selYear, selMonth, start, end, label };
 }
-
-// Stored dates are "YYYY-MM-DD..." strings; new Date() would read them as UTC
-// midnight and shift the calendar day in non-UTC timezones. Build a local date.
-function parseLocalDate(dateStr) {
-    const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
-    if (!y || !m || !d) return new Date(dateStr);
-    return new Date(y, m - 1, d, 12, 0, 0);
-}
-
-function inRange(dateStr, range) {
-    if (!range.start) return true;
-    const days = parseLocalDate(dateStr);
-    return days >= range.start && days <= range.end;
-}
-
-function getReportFiltered() {
-    const range = getReportRange();
-    return { range, txns: state.transactions.filter(t => inRange(t.date, range)) };
-}
-
-// getDaysInMonth() takes a 0-indexed month; reports carry 1-indexed months
-function monthDays(year, month1) {
-    return getDaysInMonth(year, month1 + 1);
-}
-
-// Number of days covered by the current report period (for daily average)
-function getReportDays(txns, range) {
-    const now = new Date();
-    if (range.period === 'all') {
-        if (txns.length === 0) return 1;
-        const times = txns.map(t => parseLocalDate(t.date).getTime());
-        const first = new Date(Math.min(...times));
-        first.setHours(0, 0, 0, 0);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        return Math.max(1, Math.floor((today - first) / 86400000) + 1);
-    }
-    if (range.period === 'year') {
-        if (range.selYear === now.getFullYear()) {
-            return Math.floor((now - new Date(range.selYear, 0, 1)) / 86400000) + 1;
-        }
-        return ((range.selYear % 4 === 0 && range.selYear % 100 !== 0) || range.selYear % 400 === 0) ? 366 : 365;
-    }
-    if (range.selYear === now.getFullYear() && range.selMonth === now.getMonth() + 1) {
-        return now.getDate();
-    }
-    return monthDays(range.selYear, range.selMonth);
-}
-
-const METRIC_META = {
-    income:  { name: '收入', color: '#34c759', light: 'rgba(52, 199, 89, 0.14)' },
-    expense: { name: '支出', color: '#ff3b30', light: 'rgba(255, 59, 48, 0.14)' },
-    balance: { name: '结余', color: '#007aff', light: 'rgba(0, 122, 255, 0.14)' },
-};
 
 function renderReports() {
     renderReportSelectors();
 
-    const { range, txns } = getReportFiltered();
-    const income = txns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-    const expense = txns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const isYear = state.reportPeriod === 'year';
+    const isAll = state.reportPeriod === 'all';
+    const now = new Date();
+    const selYear = state.reportYear || now.getFullYear();
+    const selMonth = state.reportMonth || (now.getMonth() + 1);
+    let filtered;
+
+    if (isAll) {
+        filtered = state.transactions.slice();
+    } else if (isYear) {
+        filtered = state.transactions.filter(t => new Date(t.date).getFullYear() === selYear);
+    } else {
+        const mk = `${selYear}-${String(selMonth).padStart(2, '0')}`;
+        filtered = state.transactions.filter(t => getMonthKey(t.date) === mk);
+    }
+
+    const income = filtered.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const expense = filtered.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
     const balance = income - expense;
-    const dailyAvg = expense / getReportDays(txns, range);
+
+    // Calculate days for daily average
+    let days;
+    if (isAll) {
+        if (filtered.length === 0) {
+            days = 1;
+        } else {
+            const dates = filtered.map(t => new Date(t.date).getTime()).sort((a, b) => a - b);
+            const first = new Date(dates[0]); first.setHours(0, 0, 0, 0);
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            days = Math.max(1, Math.floor((today - first) / 86400000) + 1);
+        }
+    } else if (isYear) {
+        if (selYear === now.getFullYear()) {
+            const start = new Date(selYear, 0, 1);
+            days = Math.floor((now - start) / 86400000) + 1;
+        } else {
+            days = 365;
+        }
+    } else {
+        if (selYear === now.getFullYear() && selMonth === now.getMonth() + 1) {
+            days = now.getDate();
+        } else {
+            days = getDaysInMonth(selYear, selMonth);
+        }
+    }
+    const dailyAvg = expense / days;
 
     document.getElementById('reportIncome').textContent = formatCurrency(income);
     document.getElementById('reportExpense').textContent = formatCurrency(expense);
     document.getElementById('reportBalance').textContent = formatCurrency(balance);
     document.getElementById('reportDailyAvg').textContent = formatCurrency(dailyAvg);
 
-    renderDrillChart();
-}
-
-// ---- Reports: drill-down ----
-const GRANULARITY_LABELS = { day: '按日', month: '按月', year: '按年' };
-let drillRenderToken = 0;
-let catLedgerTxns = [];
-let catLedgerIds = [];
-let catLedgerBucket = null;   // set when the ledger came from a trend point
-
-function defaultGranularity(period) {
-    return period === 'all' ? 'year' : (period === 'year' ? 'month' : 'day');
-}
-
-function activeGranularity() {
-    return state.reportGranularity || defaultGranularity(state.reportPeriod);
-}
-
-function granularityValue(d, gran) {
-    if (gran === 'year') return d.getFullYear();
-    if (gran === 'month') return d.getFullYear() * 100 + d.getMonth();
-    return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
-}
-
-function granularityLabel(v, gran) {
-    if (gran === 'year') return `${v}年`;
-    if (gran === 'month') return `${Math.floor(v / 100)}年${(v % 100) + 1}月`;
-    return `${Math.floor((v % 10000) / 100)}月${v % 100}日`;
-}
-
-// Time buckets for the trend chart. A fixed calendar frame is used for the
-// month/year periods so empty days and months still show up.
-function buildBuckets(txns, range, gran) {
-    let values = [];
-    if (gran === 'day' && range.period === 'month') {
-        const days = getDaysInMonth(range.selYear, range.selMonth);
-        for (let d = 1; d <= days; d++) values.push(range.selYear * 10000 + range.selMonth * 100 + d);
-    } else if (gran === 'month' && range.period === 'year') {
-        for (let m = 0; m < 12; m++) values.push(range.selYear * 100 + m);
-    } else if (gran === 'year' && range.period === 'year') {
-        values = [range.selYear];
+    if (isAll) {
+        document.getElementById('dailyChartSubtitle').textContent = '全部年份';
+        document.getElementById('monthlyChartTitle').textContent = '年度收支对比';
+        document.getElementById('monthlyChartSubtitle').textContent = '全部年份';
+    } else if (isYear) {
+        document.getElementById('dailyChartSubtitle').textContent = `${selYear}年`;
+        document.getElementById('monthlyChartTitle').textContent = '月度收支对比';
+        document.getElementById('monthlyChartSubtitle').textContent = `${selYear}年`;
     } else {
-        values = [...new Set(txns.map(t => granularityValue(parseLocalDate(t.date), gran)))].sort((a, b) => a - b);
+        const mk = `${selYear}-${String(selMonth).padStart(2, '0')}`;
+        document.getElementById('dailyChartSubtitle').textContent = getMonthLabel(mk);
+        document.getElementById('monthlyChartTitle').textContent = '每日收支对比';
+        document.getElementById('monthlyChartSubtitle').textContent = getMonthLabel(mk);
     }
-    const map = new Map(values.map(v => [v, []]));
-    txns.forEach(t => {
-        const bucket = map.get(granularityValue(parseLocalDate(t.date), gran));
-        if (bucket) bucket.push(t);
-    });
-    return values.map(v => ({ value: v, label: granularityLabel(v, gran), txns: map.get(v) || [] }));
+
+    renderMonthlyChart(filtered, isYear, isAll, selYear, selMonth);
+    renderCategoryRank(filtered);
+    renderDailyChart(filtered, isYear, isAll, selYear, selMonth);
 }
 
-function bucketTotal(txns, metric) {
-    const inc = txns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-    const exp = txns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
-    return metric === 'income' ? inc : (metric === 'expense' ? exp : inc - exp);
-}
+function renderMonthlyChart(filtered, isYear, isAll, selYear, selMonth) {
+    const ctx = document.getElementById('monthlyChart');
+    if (!ctx) return;
 
-// Category totals for the selected metric, plus the net/gross sums they add up to
-function categoryTotals(txns, metric) {
-    const type = metric === 'balance' ? null : metric;
-    const totals = {};
-    txns.forEach(t => {
-        if (type && t.type !== type) return;
-        const signed = (metric === 'balance' && t.type === 'expense') ? -t.amount : t.amount;
-        totals[t.categoryId] = (totals[t.categoryId] || 0) + signed;
-    });
-    const entries = Object.entries(totals).map(([id, amount]) => ({ id, amount, signed: Math.abs(amount) }));
-    const sums = {
-        net: entries.reduce((s, e) => s + e.amount, 0),
-        gross: entries.reduce((s, e) => s + e.signed, 0),
-    };
-    entries.sort((a, b) => b.signed - a.signed);
-    return { entries, sums };
-}
+    const labels = [];
+    const incomeData = [];
+    const expenseData = [];
 
-function updateReportToggleStates() {
-    document.querySelectorAll('.report-card.clickable').forEach(card => {
-        card.classList.toggle('active', card.dataset.metric === state.reportMetric);
-    });
-    document.querySelectorAll('.chart-type-toggle .type-ico-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.chart === state.reportChartType);
-    });
-    document.querySelectorAll('.gran-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.gran === activeGranularity());
-    });
-    const granWrap = document.getElementById('drillGranularity');
-    if (granWrap) granWrap.classList.toggle('hidden', state.reportChartType === 'pie');
-}
-
-function setReportMetric(metric) {
-    if (state.reportMetric === metric) return;
-    state.reportMetric = metric;
-    renderDrillChart();
-}
-
-function setReportChartType(type) {
-    if (state.reportChartType === type) return;
-    state.reportChartType = type;
-    renderDrillChart();
-}
-
-function setReportGranularity(gran) {
-    if (state.reportGranularity === gran) return;
-    state.reportGranularity = gran;
-    renderDrillChart();
-}
-
-function showDrillEmpty(message) {
-    const empty = document.getElementById('drillChartEmpty');
-    const canvasWrap = document.getElementById('drillChart').parentElement;
-    empty.textContent = message;
-    empty.classList.remove('hidden');
-    canvasWrap.classList.add('hidden');
-    if (charts.drill) { charts.drill.destroy(); charts.drill = null; }
-    updateReportToggleStates();
-}
-
-function hideDrillEmpty() {
-    document.getElementById('drillChartEmpty').classList.add('hidden');
-    document.getElementById('drillChart').parentElement.classList.remove('hidden');
-}
-
-function drillTitles(metric, chartType, gran, range) {
-    const meta = METRIC_META[metric];
-    document.getElementById('drillChartTitle').textContent =
-        chartType === 'pie' ? `${meta.name}构成占比` : `${meta.name}走势`;
-    const parts = [range.label];
-    if (chartType !== 'pie') parts.push(GRANULARITY_LABELS[gran]);
-    parts.push('点击图表可查看明细');
-    document.getElementById('drillChartSubtitle').textContent = parts.join(' · ');
-}
-
-function renderDrillChart() {
-    const { range, txns } = getReportFiltered();
-    const metric = state.reportMetric;
-    const chartType = state.reportChartType;
-    const gran = activeGranularity();
-    const total = bucketTotal(txns, metric);
-
-    drillTitles(metric, chartType, gran, range);
-    updateReportToggleStates();
-    renderBreakdownList();
-
-    if (total === 0) {
-        showDrillEmpty(`${range.label}暂无${METRIC_META[metric].name}记录`);
-        return;
+    if (isAll) {
+        // All-time report: bars per year
+        const years = [...new Set(filtered.map(t => new Date(t.date).getFullYear()))].sort();
+        for (const y of years) {
+            labels.push(`${y}年`);
+            const txns = filtered.filter(t => new Date(t.date).getFullYear() === y);
+            incomeData.push(txns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0));
+            expenseData.push(txns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0));
+        }
+    } else if (isYear) {
+        // Yearly report: bars for Jan ~ Dec of the selected year
+        for (let m = 0; m < 12; m++) {
+            labels.push(`${m + 1}月`);
+            const txns = filtered.filter(t => new Date(t.date).getMonth() === m);
+            incomeData.push(txns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0));
+            expenseData.push(txns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0));
+        }
+    } else {
+        // Monthly report: bars for day 1 ~ end of the selected month
+        const daysInMonth = getDaysInMonth(selYear, selMonth);
+        for (let d = 1; d <= daysInMonth; d++) {
+            labels.push(`${d}日`);
+            const txns = filtered.filter(t => new Date(t.date).getDate() === d);
+            incomeData.push(txns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0));
+            expenseData.push(txns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0));
+        }
     }
-    hideDrillEmpty();
 
-    // Wait a frame so the canvas has a laid-out size (the view may have just become visible)
-    const token = ++drillRenderToken;
-    requestAnimationFrame(() => {
-        if (token !== drillRenderToken) return;
-        const ctx = document.getElementById('drillChart');
-        if (!ctx) return;
-        if (chartType === 'pie') renderDrillPie(ctx, txns, metric);
-        else renderDrillTrend(ctx, txns, range, gran, metric, chartType);
-    });
-}
+    if (charts.monthly) charts.monthly.destroy();
 
-function chartPalette() {
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    return {
-        isDark,
-        text: isDark ? '#98989d' : '#6e6e73',
-        grid: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)',
-    };
-}
+    const textColor = isDark ? '#98989d' : '#6e6e73';
+    const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
 
-function openBucketLedger(bucketIndex) {
-    const { range, txns } = getReportFiltered();
-    const bucket = buildBuckets(txns, range, activeGranularity())[bucketIndex];
-    if (!bucket) return;
-    const metric = state.reportMetric;
-    const scoped = metric === 'balance' ? bucket.txns : bucket.txns.filter(t => t.type === metric);
-    openLedger({
-        title: bucket.label,
-        subtitle: `${METRIC_META[metric].name}明细 · ${range.label}`,
-        ids: [],
-        bucket: bucket.value,
-        txns: scoped,
-    });
-}
-
-function renderDrillTrend(ctx, txns, range, gran, metric, chartType) {
-    if (charts.drill) { charts.drill.destroy(); charts.drill = null; }
-    const legendBox = document.getElementById('pieLegend');
-    if (legendBox) { legendBox.innerHTML = ''; legendBox.classList.add('hidden'); }
-    const buckets = buildBuckets(txns, range, gran);
-    const values = buckets.map(b => Math.round(bucketTotal(b.txns, metric) * 100) / 100);
-    const palette = chartPalette();
-    const meta = METRIC_META[metric];
-    const accent = chartType === 'bar'
-        ? values.map(v => (metric === 'balance' && v < 0) ? '#ff3b30' : meta.color)
-        : meta.color;
-
-    charts.drill = new Chart(ctx, {
-        type: chartType,
+    charts.monthly = new Chart(ctx, {
+        type: 'bar',
         data: {
-            labels: buckets.map(b => b.label),
-            datasets: [{
-                label: meta.name,
-                data: values,
-                borderColor: meta.color,
-                backgroundColor: chartType === 'line' ? meta.light : accent,
-                borderWidth: chartType === 'line' ? 2 : 0,
-                fill: chartType === 'line',
-                tension: 0.35,
-                pointRadius: buckets.length > 20 ? 0 : 3,
-                pointHoverRadius: 6,
-                pointBackgroundColor: meta.color,
-                borderRadius: 5,
-                maxBarThickness: 44,
-            }],
+            labels,
+            datasets: [
+                { label: '收入', data: incomeData, backgroundColor: '#34c759', borderRadius: 4, barPercentage: 0.5, categoryPercentage: 0.8 },
+                { label: '支出', data: expenseData, backgroundColor: '#ff3b30', borderRadius: 4, barPercentage: 0.5, categoryPercentage: 0.8 },
+            ],
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            onClick: (evt, elements) => {
-                if (elements && elements.length) openBucketLedger(elements[0].index);
-            },
-            onHover: (evt, elements) => {
-                const target = evt.native && evt.native.target;
-                if (target) target.style.cursor = (elements && elements.length) ? 'pointer' : 'default';
-            },
             plugins: {
-                legend: { display: false },
-                tooltip: { callbacks: { label: (c) => `${meta.name}: ${formatCurrency(c.raw)}` } },
+                legend: { position: 'bottom', labels: { color: textColor, font: { size: 12, family: '-apple-system' }, usePointStyle: true, pointStyle: 'circle', padding: 12 } },
+                tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${formatCurrency(ctx.raw)}` } },
             },
             scales: {
-                x: {
-                    grid: { display: false },
-                    ticks: {
-                        color: palette.text,
-                        font: { size: 10, family: '-apple-system' },
-                        maxRotation: 0,
-                        autoSkip: true,
-                        maxTicksLimit: gran === 'day' ? 12 : 14,
-                    },
-                },
-                y: {
-                    grid: { color: palette.grid },
-                    ticks: { color: palette.text, font: { size: 10 }, callback: (v) => state.settings.currency + v },
-                },
+                x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: isAll ? 20 : (isYear ? 12 : 16) } },
+                y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 10 }, callback: (v) => state.settings.currency + v } },
             },
         },
     });
 }
 
-// Draws "分类名 12.3%" beside each slice with a leader line (no extra plugin needed)
-const pieLabelPlugin = {
-    id: 'qwenPieLabels',
-    afterDatasetsDraw(chart) {
-        const arcs = chart.getDatasetMeta(0).data;
-        if (!arcs.length) return;
-        const cx = arcs[0].x;
-        const cy = arcs[0].y;
-        const r = arcs[0].outerRadius || 0;
-        if (!r) return;
+function renderCategoryRank(filtered) {
+    const container = document.getElementById('categoryRankList');
+    const expenses = filtered.filter(t => t.type === 'expense');
 
-        const ctx = chart.ctx;
-        const data = chart.data.datasets[0].data;
-        const total = data.reduce((s, v) => s + Math.abs(v), 0);
-        if (!total) return;
-        const compact = chart.width < 520;
-        // on phones the category names live in the legend under the chart instead
-        if (compact) return;
-
-        ctx.save();
-        ctx.font = `500 ${compact ? 10 : 11}px -apple-system, "PingFang SC", sans-serif`;
-        ctx.textBaseline = 'middle';
-
-        const sides = { right: [], left: [] };
-        arcs.forEach((arc, i) => {
-            const pct = (Math.abs(data[i]) / total) * 100;
-            if (pct < 2.5) return; // too thin to label — the breakdown list still shows it
-            const mid = (arc.startAngle + arc.endAngle) / 2;
-            sides[Math.cos(mid) < 0 ? 'left' : 'right'].push({
-                color: arc.options.backgroundColor,
-                mid,
-                y: cy + Math.sin(mid) * r,
-                full: `${chart.data.labels[i]} ${pct.toFixed(1)}%`,
-                short: `${pct.toFixed(0)}%`,
-                text: '',
-            });
-        });
-
-        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-        const textColor = isDark ? '#d1d1d6' : '#3a3a3c';
-        const halo = isDark ? 'rgba(44,44,46,0.85)' : 'rgba(255,255,255,0.85)';
-
-        ['right', 'left'].forEach(side => {
-            const sign = side === 'right' ? 1 : -1;
-            const items = sides[side];
-            if (!items.length) return;
-            const measure = t => ctx.measureText(t).width;
-            const widestFull = items.reduce((w, it) => Math.max(w, measure(it.full)), 0);
-            // narrow screens fall back to percentage-only labels so nothing is clipped
-            const useFull = chart.width / 2 - widestFull - 22 >= r * 0.75;
-            items.forEach(it => { it.text = useFull ? it.full : it.short; });
-            const textW = items.reduce((w, it) => Math.max(w, measure(it.text)), 0);
-            const labelR = Math.min(r + (compact ? 16 : 24), chart.width / 2 - textW - 22);
-            if (labelR <= r * 0.7) return;
-            const anchorX = cx + sign * (labelR + 10);
-            const gap = compact ? 14 : 16;
-            // spread the column evenly around the circle centre, then de-collide downwards
-            const n = items.length;
-            items.forEach((it, i) => { it.y = cy + (i - (n - 1) / 2) * gap; });
-            items.sort((a, b) => a.y - b.y);
-            for (let i = 1; i < n; i++) items[i].y = Math.max(items[i].y, items[i - 1].y + gap);
-            const overflow = items[n - 1].y - (chart.height - 10);
-            if (overflow > 0) items.forEach(it => { it.y -= overflow; });
-            items.forEach(it => {
-                const y = it.y;
-                ctx.strokeStyle = it.color;
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(cx + Math.cos(it.mid) * r, cy + Math.sin(it.mid) * r);
-                ctx.lineTo(cx + sign * (labelR + 2), y);
-                ctx.lineTo(anchorX - sign * 4, y);
-                ctx.stroke();
-                ctx.fillStyle = it.color;
-                ctx.fillRect(sign > 0 ? anchorX : anchorX - 6, y - 3, 6, 6);
-                ctx.textAlign = sign > 0 ? 'left' : 'right';
-                const textX = sign > 0 ? anchorX + 10 : anchorX - 10;
-                ctx.lineJoin = 'round';
-                ctx.lineWidth = 4;
-                ctx.strokeStyle = halo;
-                ctx.strokeText(it.text, textX, y);
-                ctx.fillStyle = textColor;
-                ctx.fillText(it.text, textX, y);
-            });
-        });
-        ctx.restore();
-    },
-};
-
-const doughnutTotalPlugin = {
-    id: 'qwenDoughnutTotal',
-    afterDraw(chart) {
-        const area = chart.chartArea;
-        if (!area) return;
-        const cx = (area.left + area.right) / 2;
-        const cy = (area.top + area.bottom) / 2;
-        const r = Math.min(area.right - area.left, area.bottom - area.top) / 2;
-        if (!r) return;
-        const text = chart.$centerText || {};
-        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-        const { ctx } = chart;
-        ctx.save();
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = isDark ? '#98989d' : '#8e8e93';
-        ctx.font = '500 11px -apple-system, "PingFang SC", sans-serif';
-        ctx.fillText(text.label || '', cx, cy - r * 0.24);
-        ctx.fillStyle = isDark ? '#f5f5f7' : '#1d1d1f';
-        ctx.font = `700 ${Math.max(12, Math.min(19, r * 0.28))}px -apple-system, "PingFang SC", sans-serif`;
-        ctx.fillText(text.value || '', cx, cy + r * 0.1);
-        ctx.restore();
-    },
-};
-
-// A doughnut with 20+ slivers is unreadable — keep the top slices and merge the tail
-const PIE_MAX_SLICES = 10;
-const PIE_OTHERS_COLOR = '#b2b2b7';
-
-function topPieEntries(entries) {
-    if (entries.length <= PIE_MAX_SLICES) return entries.map(e => ({ ...e, ids: [e.id] }));
-    const top = entries.slice(0, PIE_MAX_SLICES).map(e => ({ ...e, ids: [e.id] }));
-    const rest = entries.slice(PIE_MAX_SLICES);
-    top.push({
-        id: '__others__',
-        ids: rest.map(e => e.id),
-        name: `其余 ${rest.length} 项`,
-        amount: rest.reduce((s, e) => s + e.amount, 0),
-        signed: rest.reduce((s, e) => s + e.signed, 0),
+    const catTotals = {};
+    expenses.forEach(t => {
+        catTotals[t.categoryId] = (catTotals[t.categoryId] || 0) + t.amount;
     });
-    return top;
+
+    const entries = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
+    const totalExpense = entries.reduce((s, [, v]) => s + v, 0);
+    const maxVal = entries.length > 0 ? entries[0][1] : 1;
+
+    // Render pie chart
+    renderCategoryRankChart(entries);
+
+    if (entries.length === 0) {
+        container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-tertiary);font-size:13px;">暂无支出数据</div>';
+        return;
+    }
+
+    container.innerHTML = entries.map(([id, val]) => {
+        const cat = getCategoryById(id);
+        const pct = Math.round((val / maxVal) * 100);
+        const sharePct = totalExpense > 0 ? ((val / totalExpense) * 100).toFixed(1) : '0';
+        return `
+            <div class="category-rank-item">
+                <div class="category-rank-header">
+                    <span class="category-rank-name">
+                        <i class="fa-solid ${cat?.icon || 'fa-ellipsis'}" style="color:${cat?.color || '#636e72'}"></i>
+                        ${cat?.name || '未知'}
+                    </span>
+                    <span class="category-rank-amount">${formatCurrency(val)} <span style="color:var(--text-tertiary);font-size:11px;font-weight:400">(${sharePct}%)</span></span>
+                </div>
+                <div class="category-rank-bar">
+                    <div class="category-rank-fill" style="width:${pct}%;background:${cat?.color || '#636e72'}"></div>
+                </div>
+            </div>
+        `;
+    }).join('');
 }
 
-function renderDrillPie(ctx, txns, metric) {
-    if (charts.drill) { charts.drill.destroy(); charts.drill = null; }
-    const { entries: allEntries, sums } = categoryTotals(txns, metric);
-    const entries = topPieEntries(allEntries);
-    const labels = entries.map(e => e.name || getCategoryById(e.id)?.name || '未知分类');
-    const data = entries.map(e => e.signed);
-    const colors = entries.map(e => e.id === '__others__' ? PIE_OTHERS_COLOR : (getCategoryById(e.id)?.color || '#8e8e8e'));
-    const gross = sums.gross;
+function renderCategoryRankChart(entries) {
+    const ctx = document.getElementById('rankPieChart');
+    if (!ctx) return;
 
-    charts.drill = new Chart(ctx, {
+    const labels = entries.map(([id]) => getCategoryById(id)?.name || '未知');
+    const data = entries.map(([, v]) => v);
+    const colors = entries.map(([id]) => getCategoryById(id)?.color || '#636e72');
+
+    if (charts.rankPie) charts.rankPie.destroy();
+
+    if (data.length === 0) {
+        charts.rankPie = new Chart(ctx, {
+            type: 'doughnut',
+            data: { labels: ['暂无数据'], datasets: [{ data: [1], backgroundColor: ['#e0e0e0'], borderWidth: 0 }] },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false }, tooltip: { enabled: false } },
+            },
+        });
+        return;
+    }
+
+    charts.rankPie = new Chart(ctx, {
         type: 'doughnut',
-        data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0, hoverOffset: 10 }] },
-        plugins: [pieLabelPlugin, doughnutTotalPlugin],
+        data: {
+            labels,
+            datasets: [{ data, backgroundColor: colors, borderWidth: 0, hoverOffset: 6 }],
+        },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            cutout: '52%',
-            layout: { padding: { left: 28, right: 28, top: 10, bottom: 10 } },
-            onClick: (evt, elements) => {
-                if (!elements || !elements.length) return;
-                const entry = entries[elements[0].index];
-                if (entry) openLedgerForEntries(entry);
-            },
-            onHover: (evt, elements) => {
-                const target = evt.native && evt.native.target;
-                if (target) target.style.cursor = (elements && elements.length) ? 'pointer' : 'default';
-            },
+            cutout: '55%',
             plugins: {
                 legend: { display: false },
                 tooltip: {
                     callbacks: {
-                        label: (c) => {
-                            const pct = gross ? ((c.raw / gross) * 100).toFixed(1) : '0.0';
-                            const value = metric === 'balance' ? entries[c.dataIndex].amount : c.raw;
-                            return `${c.label}: ${formatCurrency(value)} (${pct}%)`;
+                        label: (ctx) => {
+                            const total = data.reduce((s, v) => s + v, 0);
+                            const pct = ((ctx.raw / total) * 100).toFixed(1);
+                            return `${ctx.label}: ${formatCurrency(ctx.raw)} (${pct}%)`;
                         },
                     },
                 },
             },
         },
     });
-    charts.drill.$centerText = { label: `${METRIC_META[metric].name}合计`, value: formatCurrency(sums.net) };
-    renderPieLegend(entries, gross, metric);
 }
 
-// Colour-key list under the doughnut: the canvas labels drop to percent-only on
-// narrow screens, so the category names live here instead
-function renderPieLegend(entries, gross, metric) {
-    const box = document.getElementById('pieLegend');
-    if (!box) return;
-    if (!entries || entries.length === 0 || gross <= 0) {
-        box.innerHTML = '';
-        pieLegendEntries = [];
-        box.classList.add('hidden');
-        return;
+function renderDailyChart(filtered, isYear, isAll, selYear, selMonth) {
+    const ctx = document.getElementById('dailyChart');
+    if (!ctx) return;
+
+    let labels, dailyExpenses;
+
+    if (isAll) {
+        const years = [...new Set(filtered.map(t => new Date(t.date).getFullYear()))].sort();
+        labels = years.map(y => `${y}年`);
+        dailyExpenses = years.map(y =>
+            filtered.filter(t => t.type === 'expense' && new Date(t.date).getFullYear() === y).reduce((s, t) => s + t.amount, 0)
+        );
+    } else if (isYear) {
+        labels = [];
+        dailyExpenses = [];
+        for (let m = 0; m < 12; m++) {
+            labels.push(`${m + 1}月`);
+            const monthExp = filtered.filter(t => t.type === 'expense' && new Date(t.date).getMonth() === m).reduce((s, t) => s + t.amount, 0);
+            dailyExpenses.push(monthExp);
+        }
+    } else {
+        const daysInMonth = getDaysInMonth(selYear, selMonth);
+        labels = [];
+        dailyExpenses = [];
+        for (let d = 1; d <= daysInMonth; d++) {
+            labels.push(d);
+            const dayExp = filtered.filter(t => t.type === 'expense' && new Date(t.date).getDate() === d).reduce((s, t) => s + t.amount, 0);
+            dailyExpenses.push(dayExp);
+        }
     }
-    pieLegendEntries = entries;
-    box.innerHTML = entries.map((e, i) => {
-        const cat = e.id === '__others__' ? null : getCategoryById(e.id);
-        const color = e.id === '__others__' ? PIE_OTHERS_COLOR : (cat?.color || '#8e8e8e');
-        const name = cat?.name || e.name || '未知分类';
-        const pct = ((e.signed / gross) * 100).toFixed(1);
-        return `<div class="pie-legend-item" onclick="openPieLegendEntry(${i})">
-            <span class="pl-dot" style="background:${color}"></span>
-            <span class="pl-name">${name}</span>
-            <span class="pl-pct">${pct}%</span>
-        </div>`;
-    }).join('');
-    box.classList.remove('hidden');
+
+    if (charts.daily) charts.daily.destroy();
+
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const textColor = isDark ? '#98989d' : '#6e6e73';
+    const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
+
+    charts.daily = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: '支出',
+                data: dailyExpenses,
+                borderColor: '#ff3b30',
+                backgroundColor: 'rgba(255,59,48,0.1)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: (isYear || isAll) ? 4 : 0,
+                pointHoverRadius: 6,
+                borderWidth: 2,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: (ctx) => `支出: ${formatCurrency(ctx.raw)}` } },
+            },
+            scales: {
+                x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: isAll ? 20 : (isYear ? 12 : 10) } },
+                y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 10 }, callback: (v) => state.settings.currency + v } },
+            },
+        },
+    });
 }
 
-let pieLegendEntries = [];
+// ---- Report Detail Modal ----
+function getReportFilteredTransactions() {
+    const isYear = state.reportPeriod === 'year';
+    const isAll = state.reportPeriod === 'all';
+    const now = new Date();
+    const selYear = state.reportYear || now.getFullYear();
+    const selMonth = state.reportMonth || (now.getMonth() + 1);
 
-function openPieLegendEntry(i) {
-    const entry = pieLegendEntries[i];
-    if (entry) openLedgerForEntries(entry);
+    if (isAll) return state.transactions.slice();
+    if (isYear) return state.transactions.filter(t => new Date(t.date).getFullYear() === selYear);
+    const mk = `${selYear}-${String(selMonth).padStart(2, '0')}`;
+    return state.transactions.filter(t => getMonthKey(t.date) === mk);
 }
 
-function renderBreakdownList() {
-    const container = document.getElementById('drillBreakdownList');
-    if (!container) return;
-    const { range, txns } = getReportFiltered();
-    const metric = state.reportMetric;
-    const hint = document.getElementById('drillBreakdownHint');
-    document.getElementById('drillBreakdownTitle').textContent = `${METRIC_META[metric].name}分类明细`;
+function openReportDetail(type) {
+    state.reportDetailType = type;
+    state.reportDetailChartType = 'line';
+    state.reportDetailExpandedCat = null;
 
-    const { entries, sums } = categoryTotals(txns, metric);
+    const titles = { income: '收入明细', expense: '支出明细', balance: '结余明细' };
+    document.getElementById('reportDetailTitle').textContent = titles[type] || '明细';
+
+    // Reset chart type tabs
+    document.querySelectorAll('.chart-type-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector('.chart-type-btn[data-chart-type="line"]').classList.add('active');
+
+    document.getElementById('reportDetailModal').classList.remove('hidden');
+    renderReportDetail();
+}
+
+function closeReportDetail() {
+    document.getElementById('reportDetailModal').classList.add('hidden');
+    if (charts.reportDetail) { charts.reportDetail.destroy(); charts.reportDetail = null; }
+    state.reportDetailType = null;
+    state.reportDetailExpandedCat = null;
+}
+
+function switchReportDetailChart(chartType) {
+    state.reportDetailChartType = chartType;
+    document.querySelectorAll('.chart-type-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.chartType === chartType);
+    });
+    renderReportDetailChart();
+}
+
+function renderReportDetail() {
+    renderReportDetailChart();
+    renderReportDetailCategories();
+}
+
+function renderReportDetailChart() {
+    const ctx = document.getElementById('reportDetailChart');
+    if (!ctx) return;
+    const type = state.reportDetailType;
+    if (!type) return;
+
+    const filtered = getReportFilteredTransactions();
+    const isAll = state.reportPeriod === 'all';
+    const isYear = state.reportPeriod === 'year';
+    const now = new Date();
+    const selYear = state.reportYear || now.getFullYear();
+    const selMonth = state.reportMonth || (now.getMonth() + 1);
+
+    if (charts.reportDetail) charts.reportDetail.destroy();
+
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const textColor = isDark ? '#98989d' : '#6e6e73';
+    const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
+
+    const chartType = state.reportDetailChartType;
+
+    // Helper: filter transactions for this detail type
+    const getTypedTxns = (t) => {
+        if (type === 'income') return t.type === 'income';
+        if (type === 'expense') return t.type === 'expense';
+        return true; // balance: all
+    };
+
+    if (chartType === 'pie') {
+        // Pie chart: by category
+        const typedTxns = filtered.filter(getTypedTxns);
+        const catTotals = {};
+        typedTxns.forEach(t => {
+            const key = t.categoryId || 'unknown';
+            catTotals[key] = (catTotals[key] || 0) + (type === 'balance' ? (t.type === 'income' ? t.amount : -t.amount) : t.amount);
+        });
+        const entries = Object.entries(catTotals)
+            .filter(([, v]) => Math.abs(v) > 0.01)
+            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+
+        if (entries.length === 0) {
+            charts.reportDetail = new Chart(ctx, {
+                type: 'doughnut',
+                data: { labels: ['暂无数据'], datasets: [{ data: [1], backgroundColor: ['#e0e0e0'], borderWidth: 0 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false }, datalabels: { display: false } } },
+            });
+            return;
+        }
+
+        const labels = entries.map(([id]) => getCategoryById(id)?.name || '未知');
+        const data = entries.map(([, v]) => Math.abs(v));
+        const colors = entries.map(([id]) => getCategoryById(id)?.color || '#636e72');
+        const total = data.reduce((s, v) => s + v, 0);
+
+        // Register datalabels plugin
+        if (window.ChartDataLabels) Chart.register(window.ChartDataLabels);
+
+        charts.reportDetail = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels,
+                datasets: [{ data, backgroundColor: colors, borderWidth: 2, borderColor: isDark ? '#1c1c1e' : '#fff', hoverOffset: 8 }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '42%',
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'right',
+                        labels: { color: textColor, font: { size: 11, family: '-apple-system' }, usePointStyle: true, pointStyle: 'circle', padding: 8, boxWidth: 10 },
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: (c) => {
+                                const pct = ((c.raw / total) * 100).toFixed(1);
+                                return `${c.label}: ${formatCurrency(c.raw)} (${pct}%)`;
+                            },
+                        },
+                    },
+                    datalabels: {
+                        color: '#fff',
+                        font: { size: 11, weight: 'bold', family: '-apple-system' },
+                        formatter: (value, context) => {
+                            const pct = ((value / total) * 100).toFixed(0);
+                            const label = context.chart.data.labels[context.dataIndex];
+                            if (pct < 5) return ''; // Hide small slices
+                            return label.length > 4 ? label.slice(0, 3) + '..' : label + '\n' + pct + '%';
+                        },
+                        textAlign: 'center',
+                        textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+                    },
+                },
+            },
+        });
+    } else if (chartType === 'bar') {
+        // Bar chart: by category
+        const typedTxns = filtered.filter(getTypedTxns);
+        const catTotals = {};
+        typedTxns.forEach(t => {
+            const key = t.categoryId || 'unknown';
+            const val = type === 'balance' ? (t.type === 'income' ? t.amount : -t.amount) : t.amount;
+            catTotals[key] = (catTotals[key] || 0) + val;
+        });
+        const entries = Object.entries(catTotals)
+            .filter(([, v]) => Math.abs(v) > 0.01)
+            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+
+        const labels = entries.map(([id]) => getCategoryById(id)?.name || '未知');
+        const data = entries.map(([, v]) => v);
+        const colors = entries.map(([id]) => {
+            const cat = getCategoryById(id);
+            if (type === 'balance') return v >= 0 ? (cat?.color || '#34c759') : '#ff3b30';
+            return cat?.color || '#636e72';
+        });
+
+        charts.reportDetail = new Chart(ctx, {
+            type: 'bar',
+            data: { labels, datasets: [{ label: titles[type] || '金额', data, backgroundColor: colors, borderRadius: 6, barPercentage: 0.6 }] },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: 'y',
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: (c) => formatCurrency(c.raw) } },
+                    datalabels: { display: false },
+                },
+                scales: {
+                    x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 10 }, callback: (v) => state.settings.currency + Math.abs(v) } },
+                    y: { grid: { display: false }, ticks: { color: textColor, font: { size: 11 } } },
+                },
+            },
+        });
+    } else {
+        // Line chart: trend over time
+        let labels, dataValues;
+        const lineColor = type === 'income' ? '#34c759' : type === 'expense' ? '#ff3b30' : '#007aff';
+        const fillColor = type === 'income' ? 'rgba(52,199,89,0.1)' : type === 'expense' ? 'rgba(255,59,48,0.1)' : 'rgba(0,122,255,0.1)';
+
+        if (isAll) {
+            const years = [...new Set(filtered.map(t => new Date(t.date).getFullYear()))].sort();
+            labels = years.map(y => `${y}年`);
+            dataValues = years.map(y => {
+                const txns = filtered.filter(t => new Date(t.date).getFullYear() === y && getTypedTxns(t));
+                return txns.reduce((s, t) => s + (type === 'balance' ? (t.type === 'income' ? t.amount : -t.amount) : t.amount), 0);
+            });
+        } else if (isYear) {
+            labels = [];
+            dataValues = [];
+            for (let m = 0; m < 12; m++) {
+                labels.push(`${m + 1}月`);
+                const txns = filtered.filter(t => new Date(t.date).getMonth() === m && getTypedTxns(t));
+                dataValues.push(txns.reduce((s, t) => s + (type === 'balance' ? (t.type === 'income' ? t.amount : -t.amount) : t.amount), 0));
+            }
+        } else {
+            const daysInMonth = getDaysInMonth(selYear, selMonth);
+            labels = [];
+            dataValues = [];
+            for (let d = 1; d <= daysInMonth; d++) {
+                labels.push(d);
+                const txns = filtered.filter(t => new Date(t.date).getDate() === d && getTypedTxns(t));
+                dataValues.push(txns.reduce((s, t) => s + (type === 'balance' ? (t.type === 'income' ? t.amount : -t.amount) : t.amount), 0));
+            }
+        }
+
+        charts.reportDetail = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    label: titles[type] || '金额',
+                    data: dataValues,
+                    borderColor: lineColor,
+                    backgroundColor: fillColor,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: (isYear || isAll) ? 3 : 0,
+                    pointHoverRadius: 6,
+                    borderWidth: 2,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: (c) => formatCurrency(c.raw) } },
+                    datalabels: { display: false },
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: isAll ? 20 : (isYear ? 12 : 10) } },
+                    y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 10 }, callback: (v) => state.settings.currency + v } },
+                },
+            },
+        });
+    }
+}
+
+const titles = { income: '收入', expense: '支出', balance: '结余' };
+
+function renderReportDetailCategories() {
+    const container = document.getElementById('reportDetailCategories');
+    const type = state.reportDetailType;
+    if (!type) return;
+
+    const filtered = getReportFilteredTransactions();
+    const typedTxns = filtered.filter(t => {
+        if (type === 'income') return t.type === 'income';
+        if (type === 'expense') return t.type === 'expense';
+        return true;
+    });
+
+    const catTotals = {};
+    const catTxns = {};
+    typedTxns.forEach(t => {
+        const key = t.categoryId || 'unknown';
+        const val = type === 'balance' ? (t.type === 'income' ? t.amount : -t.amount) : t.amount;
+        catTotals[key] = (catTotals[key] || 0) + val;
+        if (!catTxns[key]) catTxns[key] = [];
+        catTxns[key].push(t);
+    });
+
+    const entries = Object.entries(catTotals)
+        .filter(([, v]) => Math.abs(v) > 0.01)
+        .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+
     if (entries.length === 0) {
-        hint.textContent = '点击分类查看每笔流水';
-        container.innerHTML = `<div class="breakdown-empty">${range.label}暂无${METRIC_META[metric].name}记录</div>`;
+        container.innerHTML = '<div class="rdc-empty">暂无数据</div>';
         return;
     }
-    // 结余按净额的占比展示，收入/支出按流水总额的占比展示
-    const denominator = metric === 'balance' ? sums.net : sums.gross;
-    hint.textContent = metric === 'balance' ? '占比 = 该分类净额 ÷ 净结余' : '点击分类查看每笔流水';
-    const top = entries[0].signed || 1;
-    const rows = entries.slice(0, 12).map((e, i) => {
-        const cat = getCategoryById(e.id);
-        const color = cat?.color || '#8e8e8e';
-        const pct = denominator ? ((metric === 'balance' ? e.amount : e.signed) / denominator) * 100 : 0;
-        const sign = metric === 'balance' && e.amount < 0 ? '-' : '';
-        return `
-            <div class="breakdown-item" onclick="openLedgerForCategory('${e.id}')">
-                <div class="breakdown-icon" style="background:${color}22;color:${color}">
-                    <i class="fa-solid ${cat?.icon || 'fa-ellipsis'}"></i>
-                </div>
-                <div class="breakdown-main">
-                    <div class="breakdown-head">
-                        <span class="breakdown-name">${cat?.name || '未知分类'}<span class="breakdown-rank">${i + 1}</span></span>
-                        <span class="breakdown-amount">${sign}${formatCurrency(Math.abs(e.amount))}<em>${pct.toFixed(1)}%</em></span>
+
+    const totalAbs = entries.reduce((s, [, v]) => s + Math.abs(v), 0);
+    const expandedCat = state.reportDetailExpandedCat;
+
+    container.innerHTML = entries.map(([catId, val]) => {
+        const cat = getCategoryById(catId);
+        const absVal = Math.abs(val);
+        const pct = totalAbs > 0 ? ((absVal / totalAbs) * 100).toFixed(1) : '0';
+        const isExpanded = expandedCat === catId;
+        const isIncome = val >= 0;
+        const valColor = type === 'balance' ? (isIncome ? 'var(--income)' : 'var(--expense)') : (type === 'income' ? 'var(--income)' : 'var(--expense)');
+        const iconName = cat?.icon || 'fa-ellipsis';
+        const iconColor = cat?.color || '#636e72';
+
+        let txnsHtml = '';
+        if (isExpanded && catTxns[catId]) {
+            const sortedTxns = catTxns[catId].sort((a, b) => new Date(b.date) - new Date(a.date) || (b.time || '').localeCompare(a.time || ''));
+            txnsHtml = sortedTxns.map(t => `
+                <div class="rdc-txn">
+                    <div class="rdc-txn-info">
+                        <span class="rdc-txn-note">${t.note || cat?.name || ''}</span>
+                        <span class="rdc-txn-date">${formatDate(t.date)} ${t.time || ''}</span>
                     </div>
-                    <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (e.signed / top) * 100)}%;background:${color}"></div></div>
+                    <span class="rdc-txn-amount ${t.type}">${t.type === 'income' ? '+' : '-'}${formatCurrency(t.amount).replace(/^[¥-]+/, '¥')}</span>
                 </div>
-                <i class="fa-solid fa-chevron-right breakdown-arrow"></i>
-            </div>`;
+            `).join('');
+        }
+
+        return `
+            <div class="rdc-item ${isExpanded ? 'expanded' : ''}" onclick="toggleReportDetailCategory('${catId}')">
+                <div class="rdc-header">
+                    <div class="rdc-icon" style="background:${iconColor}">
+                        <i class="fa-solid ${iconName}"></i>
+                    </div>
+                    <span class="rdc-name">${cat?.name || '未知'}</span>
+                    <span class="rdc-amount" style="color:${valColor}">${val < 0 ? '-' : ''}${formatCurrency(absVal)}</span>
+                    <span class="rdc-pct">${pct}%</span>
+                    <i class="fa-solid fa-chevron-right rdc-chevron"></i>
+                </div>
+                <div class="rdc-transactions">${txnsHtml}</div>
+            </div>
+        `;
     }).join('');
-    const more = entries.length > 12 ? `<div class="breakdown-more">另有 ${entries.length - 12} 个分类未展示</div>` : '';
-    container.innerHTML = rows + more;
 }
 
-// ---- Reports: ledger modal (category / trend bucket) ----
-function openLedgerForCategory(categoryId) {
-    openLedgerForEntries({ id: categoryId, ids: [categoryId] });
-}
-
-function openLedgerForEntries(entry) {
-    const { range, txns } = getReportFiltered();
-    const metric = state.reportMetric;
-    const ids = entry.ids || [entry.id];
-    const cat = ids.length === 1 ? getCategoryById(ids[0]) : null;
-    openLedger({
-        title: cat?.name || entry.name || '其他分类',
-        subtitle: `${range.label} · ${METRIC_META[metric].name}`,
-        ids,
-        txns: ledgerScope(txns, ids, metric),
-    });
-}
-
-function ledgerScope(txns, ids, metric) {
-    const set = new Set(ids || []);
-    return txns.filter(t => {
-        if (set.size && !set.has(t.categoryId)) return false;
-        return metric === 'balance' || t.type === metric;
-    });
-}
-
-function openLedger({ title, subtitle, ids, txns, bucket = null }) {
-    catLedgerTxns = txns;
-    catLedgerIds = ids || [];
-    catLedgerBucket = bucket;
-    const single = catLedgerIds.length === 1 ? getCategoryById(catLedgerIds[0]) : null;
-    const color = single?.color || 'var(--accent)';
-    const iconEl = document.getElementById('catTxnIcon');
-    iconEl.style.background = single ? `${color}22` : 'var(--accent-light)';
-    iconEl.style.color = color;
-    iconEl.innerHTML = `<i class="fa-solid ${single?.icon || 'fa-list-ul'}"></i>`;
-    document.getElementById('catTxnTitle').textContent = title;
-    document.getElementById('catTxnSubtitle').textContent = subtitle;
-    renderCategoryLedger();
-    document.getElementById('categoryTxnModal').classList.remove('hidden');
-}
-
-function renderCategoryLedger() {
-    const list = document.getElementById('catTxnList');
-    const empty = document.getElementById('catTxnEmpty');
-    const sorted = [...catLedgerTxns].sort((a, b) => new Date(b.date) - new Date(a.date) || b.createdAt - a.createdAt);
-    const income = sorted.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-    const expense = sorted.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
-    const summary = document.getElementById('catTxnSummary');
-
-    if (sorted.length === 0) {
-        list.innerHTML = '';
-        summary.innerHTML = '<span class="cat-txn-summary-item">暂无记录</span>';
-        empty.classList.remove('hidden');
-        return;
-    }
-    empty.classList.add('hidden');
-    const parts = [`<span class="cat-txn-summary-item">共 <b>${sorted.length}</b> 笔</span>`];
-    const single = catLedgerIds.length === 1 ? getCategoryById(catLedgerIds[0]) : null;
-    if (single) {
-        parts.push(`<span class="cat-txn-summary-item ${single.type}">${single.type === 'income' ? '收入' : '支出'}合计 <b>${formatCurrency(single.type === 'income' ? income : expense)}</b></span>`);
-    } else {
-        parts.push(`<span class="cat-txn-summary-item income">收入 <b>${formatCurrency(income)}</b></span>`,
-            `<span class="cat-txn-summary-item expense">支出 <b>${formatCurrency(expense)}</b></span>`);
-    }
-    summary.innerHTML = parts.join('');
-    list.innerHTML = sorted.map(t => transactionItemHTML(t)).join('');
-}
-
-function closeCategoryTxnModal() {
-    document.getElementById('categoryTxnModal').classList.add('hidden');
-    catLedgerTxns = [];
-    catLedgerIds = [];
-    catLedgerBucket = null;
-}
-
-// Keep an open ledger in sync after add / edit / delete
-function refreshCategoryLedger() {
-    const modal = document.getElementById('categoryTxnModal');
-    if (modal.classList.contains('hidden')) return;
-    const { txns } = getReportFiltered();
-    if (catLedgerBucket !== null) {
-        const gran = activeGranularity();
-        const inBucket = t => granularityValue(parseLocalDate(t.date), gran) === catLedgerBucket;
-        catLedgerTxns = txns.filter(t => inBucket(t) && (state.reportMetric === 'balance' || t.type === state.reportMetric));
-    } else {
-        catLedgerTxns = ledgerScope(txns, catLedgerIds, state.reportMetric);
-    }
-    renderCategoryLedger();
-}
-
-function initReportDrillListeners() {
-    document.querySelectorAll('.report-card.clickable').forEach(card => {
-        card.addEventListener('click', () => setReportMetric(card.dataset.metric));
-    });
-    document.querySelectorAll('.chart-type-toggle .type-ico-btn').forEach(btn => {
-        btn.addEventListener('click', () => setReportChartType(btn.dataset.chart));
-    });
-    document.querySelectorAll('.gran-btn').forEach(btn => {
-        btn.addEventListener('click', () => setReportGranularity(btn.dataset.gran));
-    });
+function toggleReportDetailCategory(catId) {
+    state.reportDetailExpandedCat = state.reportDetailExpandedCat === catId ? null : catId;
+    renderReportDetailCategories();
 }
 
 // ---- Budget ----
@@ -2710,15 +2630,11 @@ function initEventListeners() {
     document.querySelectorAll('.period-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             state.reportPeriod = btn.dataset.period;
-            state.reportGranularity = null; // fall back to the period's natural granularity
             document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             renderReports();
         });
     });
-
-    // Report drill-down (metric cards / chart type / granularity)
-    initReportDrillListeners();
 
     // Report year/month selectors
     document.getElementById('reportYearSelect').addEventListener('change', (e) => {
@@ -2745,7 +2661,6 @@ function initEventListeners() {
             applyTheme(btn.dataset.theme);
             document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            if (state.currentView === 'reports') renderReports();
         });
     });
 
@@ -2753,8 +2668,11 @@ function initEventListeners() {
     document.querySelectorAll('.modal-overlay').forEach(overlay => {
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay) {
-                if (overlay.id === 'categoryTxnModal') closeCategoryTxnModal();
-                else overlay.classList.add('hidden');
+                overlay.classList.add('hidden');
+                if (overlay.id === 'reportDetailModal' && charts.reportDetail) {
+                    charts.reportDetail.destroy();
+                    charts.reportDetail = null;
+                }
             }
         });
     });
@@ -2773,13 +2691,9 @@ function initEventListeners() {
             switchView('transactions');
             openTransactionModal();
         }
-        // Escape: Close the topmost modal
+        // Escape: Close modals
         if (e.key === 'Escape') {
-            if (!document.getElementById('categoryTxnModal').classList.contains('hidden')) {
-                closeCategoryTxnModal();
-            } else {
-                document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden'));
-            }
+            document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden'));
         }
         // Enter in note input: Save (works since amount input is now readonly)
         if (e.key === 'Enter' && document.activeElement?.id === 'noteInput') {
