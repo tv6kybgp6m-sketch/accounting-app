@@ -616,17 +616,28 @@
                         <div class="settings-section" id="dataMgmtSection">
                             <h3>数据管理</h3>
                             <div class="settings-row">
-                                <div class="settings-label">导出数据</div>
+                                <div class="settings-label">导出数据<div class="settings-sublabel">生成 .xlsx，可用 Numbers / Excel 打开</div></div>
                                 <button class="secondary-btn" onclick="exportData()">
                                     <i class="fa-solid fa-download"></i> 导出 Excel
                                 </button>
                             </div>
                             <div class="settings-row">
-                                <div class="settings-label">导入数据</div>
-                                <button class="secondary-btn" onclick="document.getElementById('importFile').click()">
+                                <div class="settings-label">导入数据<div class="settings-sublabel">从 .xlsx 表格读回账本</div></div>
+                                <button class="secondary-btn" onclick="importExcelFile()">
                                     <i class="fa-solid fa-upload"></i> 导入 Excel
                                 </button>
-                                <input type="file" id="importFile" accept=".xlsx,.xls" style="display:none" onchange="importData(event)">
+                            </div>
+                            <div class="settings-row">
+                                <div class="settings-label">备份为 JSON<div class="settings-sublabel">完整账本，含余额 / 收益 / 成员</div></div>
+                                <button class="secondary-btn" onclick="exportSyncJSON()">
+                                    <i class="fa-solid fa-file-code"></i> 导出 JSON
+                                </button>
+                            </div>
+                            <div class="settings-row">
+                                <div class="settings-label">从 JSON 恢复<div class="settings-sublabel">按记录合并，不会覆盖更新的数据</div></div>
+                                <button class="secondary-btn" onclick="importJsonFile()">
+                                    <i class="fa-solid fa-rotate-left"></i> 导入 JSON
+                                </button>
                             </div>
                             <div class="settings-row">
                                 <div class="settings-label">加载示例数据</div>
@@ -651,7 +662,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.16.0</div>
+                                    <div class="about-version">版本 1.17.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -999,7 +1010,7 @@
         // otherwise let an old cache-first worker pin the app to an outdated build.
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.16.0').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.17.0').catch(() => {});
             });
         }
     </script>

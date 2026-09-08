@@ -644,58 +644,53 @@ function mergeRemoteData(remoteData) {
 }
 
 // PWA: Export to iCloud (download JSON)
-function exportToICloud() {
-    const syncData = {
-        version: 1,
-        lastModified: Date.now(),
-        deviceName: 'iPhone',
-        data: {
-            transactions: state.transactions,
-            categories: state.categories,
-            budgets: state.budgets,
-            paymentMethods: state.paymentMethods,
-            accounts: state.accounts,
-            balances: state.balances,
-            returns: state.returns,
-            fundTargets: state.fundTargets,
-            insuranceMembers: state.insuranceMembers,
-            insurancePolicies: state.insurancePolicies,
-            settings: state.settings,
-            deleted: state.deleted,
-            pmAddedAt: state.pmAddedAt,
-        },
-    };
+// 导出一份完整的账本备份（JSON）。桌面版走原生存储面板。
+function exportSyncJSON() {
+    const syncData = buildSyncPayload();
+    syncData.deviceName = isElectron() ? 'Mac-backup' : 'browser-backup';
     const blob = new Blob([JSON.stringify(syncData, null, 2)], { type: 'application/json' });
-    saveGeneratedFile(blob, 'accounting-sync.json').then(cancelled => {
-        if (cancelled) return;
+    const stamp = new Date().toISOString().slice(0, 10);
+    return saveGeneratedFile(blob, `记账本-备份-${stamp}.json`).then(cancelled => {
+        if (cancelled) return false;
         iCloudLastSyncTime = Date.now();
         updateICloudSyncUI();
         markExported();
-        showToast('已导出同步文件，请保存到 iCloud Drive', 'success');
+        showToast('已导出 JSON 备份', 'success');
+        return true;
     });
 }
 
+// iCloud 区块沿用同一套导出逻辑
+function exportToICloud() { return exportSyncJSON(); }
+
+// 把一份 JSON 备份合并进当前账本
+function applyImportedJSON(text) {
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch (e) { showToast('导入失败：不是有效的 JSON', 'error'); return false; }
+    if (!parsed || !parsed.data) { showToast('导入失败：文件里没有账本数据', 'error'); return false; }
+    mergeRemoteData(parsed);
+    applyTheme(state.settings.theme);
+    renderView(state.currentView);
+    updateSidebarSummary();
+    showToast('已导入并合并 JSON 备份', 'success');
+    return true;
+}
+
+async function importJsonFile() {
+    const picked = await pickLocalFile(['json']);
+    if (!picked) return;
+    applyImportedJSON(base64ToText(picked.base64));
+}
+
 // PWA: Import from iCloud (file input)
+// 旧入口：隐藏 input 的 onchange 仍可用
 function importFromICloud(event) {
-    const file = event.target.files[0];
+    const file = event.target.files && event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (e) => {
-        try {
-            const remoteData = JSON.parse(e.target.result);
-            if (remoteData.data) {
-                mergeRemoteData(remoteData);
-                renderView(state.currentView);
-                showToast('已从 iCloud 导入并合并数据', 'success');
-            } else {
-                showToast('文件格式不正确', 'error');
-            }
-        } catch (err) {
-            showToast('导入失败，文件格式错误', 'error');
-        }
-    };
+    reader.onload = (e) => { applyImportedJSON(String(e.target.result)); event.target.value = ''; };
+    reader.onerror = () => { showToast('读取文件失败', 'error'); event.target.value = ''; };
     reader.readAsText(file);
-    event.target.value = '';
 }
 
 function updateICloudSyncUI() {
@@ -737,11 +732,10 @@ function updateICloudSyncUI() {
         container.innerHTML = `
             <div class="icloud-status">
                 <div class="settings-row">
-                    <div class="settings-label">从 iCloud 导入<div class="settings-sublabel">从 iCloud Drive 选择同步文件</div></div>
-                    <button class="secondary-btn" onclick="document.getElementById('icloudImportFile').click()">
+                    <div class="settings-label">从 iCloud 导入<div class="settings-sublabel">选择之前导出的同步文件</div></div>
+                    <button class="secondary-btn" onclick="importJsonFile()">
                         <i class="fa-solid fa-cloud-arrow-down"></i> 导入
                     </button>
-                    <input type="file" id="icloudImportFile" accept=".json" style="display:none" onchange="importFromICloud(event)">
                 </div>
                 <div class="settings-row">
                     <div class="settings-label">导出到 iCloud<div class="settings-sublabel">保存到 iCloud Drive 供其他设备同步</div></div>
@@ -3469,20 +3463,51 @@ function normalizeImportDate(v) {
     return todayStr();
 }
 
-function importData(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    if (typeof XLSX === 'undefined') {
-        showToast('正在加载 Excel 组件…', 'info');
-        loadXlsxLib().then(() => importData(event)).catch(() => { showToast('Excel 组件加载失败', 'error'); event.target.value = ''; });
-        return;
-    }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        try {
-            const data = new Uint8Array(e.target.result);
-            const wb = XLSX.read(data, { type: 'array', cellDates: true });
+// ---- 选文件：桌面版走原生面板，浏览器走临时 input ----
+function base64ToUint8(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+}
 
+function base64ToText(b64) {
+    try { return new TextDecoder('utf-8').decode(base64ToUint8(b64)); }
+    catch (e) { return atob(b64); }
+}
+
+// 返回 {name, base64}；取消返回 null
+function pickLocalFile(extensions) {
+    const exts = extensions || [];
+    if (isElectron() && window.electronAPI && typeof window.electronAPI.openFile === 'function') {
+        return window.electronAPI.openFile({ extensions: exts })
+            .then(r => (r && !r.cancelled && r.base64) ? { name: r.name, base64: r.base64 } : null)
+            .catch(() => null);
+    }
+    return new Promise(resolve => {
+        const inp = document.createElement('input');
+        inp.type = 'file';
+        if (exts.length) inp.accept = exts.map(e => '.' + e).join(',');
+        inp.style.display = 'none';
+        document.body.appendChild(inp);
+        let settled = false;
+        const done = v => { if (settled) return; settled = true; inp.remove(); resolve(v); };
+        inp.addEventListener('change', () => {
+            const f = inp.files && inp.files[0];
+            if (!f) { done(null); return; }
+            const fr = new FileReader();
+            fr.onload = () => done({ name: f.name, base64: String(fr.result).split(',')[1] || '' });
+            fr.onerror = () => done(null);
+            fr.readAsDataURL(f);
+        });
+        // 浏览器点「取消」不会触发任何事件，超时兜底避免调用方永远挂着
+        setTimeout(() => done(null), 300000);
+        inp.click();
+    });
+}
+
+// 把一本工作簿解析进 state（与文件从哪来无关）
+function applyWorkbook(wb) {
             // Parse categories first (transactions reference them)
             const ws2 = wb.Sheets['分类'];
             if (ws2) {
@@ -3541,17 +3566,54 @@ function importData(event) {
                 });
             }
 
-            saveState();
-            applyTheme(state.settings.theme);
-            renderView(state.currentView);
-            showToast('Excel 数据已导入', 'success');
-        } catch (err) {
-            console.error('Import error:', err);
-            showToast('导入失败，文件格式错误', 'error');
-        }
+    saveState();
+    applyTheme(state.settings.theme);
+    renderView(state.currentView);
+}
+
+async function importExcelFile() {
+    if (typeof XLSX === 'undefined') {
+        showToast('正在加载 Excel 组件…', 'info');
+        try { await loadXlsxLib(); }
+        catch (e) { showToast('Excel 组件加载失败', 'error'); return; }
+    }
+    const picked = await pickLocalFile(['xlsx', 'xls']);
+    if (!picked) return;
+    try {
+        const wb = XLSX.read(base64ToUint8(picked.base64), { type: 'array', cellDates: true });
+        applyWorkbook(wb);
+        showToast('已从 ' + (picked.name || 'Excel') + ' 导入', 'success');
+    } catch (err) {
+        console.error('Import error:', err);
+        showToast('导入失败，文件不是有效的 Excel', 'error');
+    }
+}
+
+// 旧入口：隐藏 input 的 onchange 仍可用
+function importData(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const finish = () => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
+                applyWorkbook(wb);
+                showToast('Excel 数据已导入', 'success');
+            } catch (err) {
+                console.error('Import error:', err);
+                showToast('导入失败，文件格式错误', 'error');
+            }
+            event.target.value = '';
+        };
+        reader.readAsArrayBuffer(file);
     };
-    reader.readAsArrayBuffer(file);
-    event.target.value = '';
+    if (typeof XLSX === 'undefined') {
+        showToast('正在加载 Excel 组件…', 'info');
+        loadXlsxLib().then(() => importData(event)).catch(() => { showToast('Excel 组件加载失败', 'error'); event.target.value = ''; });
+        return;
+    }
+    finish();
 }
 
 function loadSampleData() {
