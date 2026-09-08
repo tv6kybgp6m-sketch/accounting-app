@@ -645,23 +645,29 @@ function mergeRemoteData(remoteData) {
 
 // PWA: Export to iCloud (download JSON)
 // 导出一份完整的账本备份（JSON）。桌面版走原生存储面板。
-function exportSyncJSON() {
+// filename 决定落盘名字：iCloud 通道必须用 Mac 端读取的那个固定名字。
+const ICLOUD_SYNC_FILENAME = 'bookkeeping-sync.json';
+
+function exportSyncJSON(filename, toastText) {
     const syncData = buildSyncPayload();
     syncData.deviceName = isElectron() ? 'Mac-backup' : 'browser-backup';
     const blob = new Blob([JSON.stringify(syncData, null, 2)], { type: 'application/json' });
     const stamp = new Date().toISOString().slice(0, 10);
-    return saveGeneratedFile(blob, `记账本-备份-${stamp}.json`).then(cancelled => {
+    const name = filename || `记账本-备份-${stamp}.json`;
+    return saveGeneratedFile(blob, name).then(cancelled => {
         if (cancelled) return false;
         iCloudLastSyncTime = Date.now();
         updateICloudSyncUI();
         markExported();
-        showToast('已导出 JSON 备份', 'success');
+        showToast(toastText || '已导出 JSON 备份', 'success');
         return true;
     });
 }
 
-// iCloud 区块沿用同一套导出逻辑
-function exportToICloud() { return exportSyncJSON(); }
+// 存到 iCloud Drive 的「记账本」文件夹时请用这个名字，Mac 端按它读取
+function exportToICloud() {
+    return exportSyncJSON(ICLOUD_SYNC_FILENAME, '已导出，请存入 iCloud 的「记账本」文件夹');
+}
 
 // 把一份 JSON 备份合并进当前账本
 function applyImportedJSON(text) {
@@ -738,7 +744,7 @@ function updateICloudSyncUI() {
                     </button>
                 </div>
                 <div class="settings-row">
-                    <div class="settings-label">导出到 iCloud<div class="settings-sublabel">保存到 iCloud Drive 供其他设备同步</div></div>
+                    <div class="settings-label">导出到 iCloud<div class="settings-sublabel">存到 iCloud Drive 的「记账本」文件夹，文件名 ${ICLOUD_SYNC_FILENAME}，Mac 端会自动读到</div></div>
                     <button class="secondary-btn" onclick="exportToICloud()">
                         <i class="fa-solid fa-cloud-arrow-up"></i> 导出
                     </button>
