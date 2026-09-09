@@ -3389,9 +3389,11 @@ function exportData() {
         const wb = XLSX.utils.book_new();
 
         // Sheet 1: Transactions
+        // 带 ID 列，这样同一份表再导回去是按记录匹配而不是重复插入
         const txnData = state.transactions.map(t => {
             const cat = getCategoryById(t.categoryId);
             return {
+                'ID': t.id,
                 '日期': t.date,
                 '时间': t.time || '',
                 '类型': t.type === 'income' ? '收入' : '支出',
@@ -3402,7 +3404,7 @@ function exportData() {
             };
         });
         const ws1 = XLSX.utils.json_to_sheet(txnData);
-        ws1['!cols'] = [{wch:14},{wch:10},{wch:8},{wch:12},{wch:14},{wch:12},{wch:24}];
+        ws1['!cols'] = [{wch:22},{wch:14},{wch:10},{wch:8},{wch:12},{wch:14},{wch:12},{wch:24}];
         XLSX.utils.book_append_sheet(wb, ws1, '交易记录');
 
         // Sheet 2: Categories
@@ -3587,38 +3589,65 @@ function pickLocalFile(extensions) {
 
 // 把一本工作簿解析进 state（与文件从哪来无关）
 function applyWorkbook(wb) {
-            // Parse categories first (transactions reference them)
+            let txnAdded = 0, txnUpdated = 0;
+            // 分类：按 ID 或名称 upsert，绝不删除本地已有分类
             const ws2 = wb.Sheets['分类'];
             if (ws2) {
                 const catRows = XLSX.utils.sheet_to_json(ws2);
-                state.categories = catRows.map(row => ({
-                    id: row['ID'] || ('c_' + uid()),
-                    name: row['名称'] || '未知',
-                    type: row['类型'] === '收入' ? 'income' : 'expense',
-                    icon: row['图标'] || 'fa-ellipsis',
-                    color: row['颜色'] || '#636e72',
-                }));
+                catRows.forEach(row => {
+                    const name = row['名称'] || '未知';
+                    const type = row['类型'] === '收入' ? 'income' : 'expense';
+                    const sheetId = String(row['ID'] || '').trim();
+                    const found = (sheetId && state.categories.find(c => c.id === sheetId))
+                        || state.categories.find(c => c.name === name && c.type === type);
+                    if (found) {
+                        found.icon = row['图标'] || found.icon;
+                        found.color = row['颜色'] || found.color;
+                        found.updatedAt = Date.now();
+                    } else {
+                        state.categories.push({
+                            id: sheetId || ('c_' + uid()), name, type,
+                            icon: row['图标'] || 'fa-ellipsis', color: row['颜色'] || '#636e72',
+                            createdAt: Date.now(), updatedAt: Date.now(),
+                        });
+                    }
+                });
             }
 
-            // Parse transactions
+            // 交易：优先按表里的 ID 匹配，没有 ID 就用自然键，命中就地更新，否则新增。
+            // （以前是整表替换 + 每行重新 uid()，同一份文件导两次数据直接翻倍）
             const ws1 = wb.Sheets['交易记录'];
             if (ws1) {
                 const txnRows = XLSX.utils.sheet_to_json(ws1);
-                state.transactions = txnRows.map(row => {
+                const keyOf = t => `${t.date}|${t.time || ''}|${t.type}|${t.categoryId}|${t.amount}|${t.paymentMethod || ''}|${t.note || ''}`;
+                const byId = new Map(state.transactions.map(t => [t.id, t]));
+                const byKey = new Map(state.transactions.map(t => [keyOf(t), t]));
+                txnAdded = 0; txnUpdated = 0;
+                txnRows.forEach(row => {
                     const catName = row['分类'];
                     const cat = state.categories.find(c => c.name === catName);
-                    const typeStr = row['类型'];
-                    return {
-                        id: uid(),
-                        type: typeStr === '收入' ? 'income' : 'expense',
+                    const type = row['类型'] === '收入' ? 'income' : 'expense';
+                    const rec = {
+                        type,
                         amount: parseFloat(row['金额']) || 0,
-                        categoryId: cat?.id || (typeStr === '收入' ? 'i_other' : 'e_other'),
+                        categoryId: cat?.id || (type === 'income' ? 'i_other' : 'e_other'),
                         date: normalizeImportDate(row['日期']),
                         time: row['时间'] || '',
                         note: row['备注'] || '',
                         paymentMethod: row['支付方式'] || '现金',
-                        createdAt: Date.now(),
                     };
+                    const sheetId = String(row['ID'] || '').trim();
+                    const existing = (sheetId && byId.get(sheetId)) || byKey.get(keyOf(rec));
+                    if (existing) {
+                        Object.assign(existing, rec);
+                        existing.updatedAt = Date.now();
+                        txnUpdated++;
+                    } else {
+                        const t = Object.assign({ id: sheetId || uid(), createdAt: Date.now(), updatedAt: Date.now() }, rec);
+                        state.transactions.push(t);
+                        byId.set(t.id, t); byKey.set(keyOf(t), t);
+                        txnAdded++;
+                    }
                 });
                 // Auto-register unknown payment methods from imported data
                 txnRows.forEach(row => {
@@ -3630,18 +3659,17 @@ function applyWorkbook(wb) {
                 });
             }
 
-            // Parse budgets
+            // 预算：一个分类一条，按 categoryId upsert
             const ws3 = wb.Sheets['预算'];
             if (ws3) {
                 const budRows = XLSX.utils.sheet_to_json(ws3);
-                state.budgets = budRows.map(row => {
-                    const catName = row['分类'];
-                    const cat = state.categories.find(c => c.name === catName);
-                    return {
-                        id: uid(),
-                        categoryId: cat?.id || 'e_other',
-                        amount: parseFloat(row['预算金额']) || 0,
-                    };
+                budRows.forEach(row => {
+                    const cat = state.categories.find(c => c.name === row['分类']);
+                    const categoryId = cat?.id || 'e_other';
+                    const amount = parseFloat(row['预算金额']) || 0;
+                    const existing = state.budgets.find(b => b.categoryId === categoryId);
+                    if (existing) { existing.amount = amount; }
+                    else { state.budgets.push({ id: uid(), categoryId, amount }); }
                 });
             }
 
@@ -3687,7 +3715,7 @@ function applyWorkbook(wb) {
     saveState();
     applyTheme(state.settings.theme);
     renderView(state.currentView);
-    return { unmatched };
+    return { unmatched, txnAdded, txnUpdated };
 }
 
 async function importExcelFile() {
@@ -3701,9 +3729,9 @@ async function importExcelFile() {
     try {
         const wb = XLSX.read(base64ToUint8(picked.base64), { type: 'array', cellDates: true });
         const res = applyWorkbook(wb) || {};
-        showToast(res.unmatched
-            ? `已导入 ${picked.name || 'Excel'}，${res.unmatched} 行账户名没对上已跳过`
-            : '已从 ' + (picked.name || 'Excel') + ' 导入', res.unmatched ? 'error' : 'success');
+        const summary = `新增 ${res.txnAdded || 0} 笔、更新 ${res.txnUpdated || 0} 笔`;
+        showToast(res.unmatched ? `${summary}，${res.unmatched} 行账户名没对上已跳过` : summary,
+            res.unmatched ? 'error' : 'success');
     } catch (err) {
         console.error('Import error:', err);
         showToast('导入失败，文件不是有效的 Excel', 'error');
@@ -3860,6 +3888,24 @@ function loadSampleData() {
 
 function clearAllData() {
     if (!confirm('确定要清空所有数据吗？此操作不可恢复。')) return;
+
+    // 先给每条记录打删除标记，「清空」才能真的同步到别的设备。
+    // 之前这里把 state.deleted 直接清空，结果另一台设备一合并就把旧账全灌回来。
+    state.transactions.forEach(t => addTombstone('transactions', t.id));
+    state.budgets.forEach(b => addTombstone('budgets', b.id));
+    state.balances.forEach(b => addTombstone('balances', b.id));
+    state.returns.forEach(r => addTombstone('returns', r.id));
+    state.insurancePolicies.forEach(p => addTombstone('insurance', p.id));
+
+    // 内置账户/分类清完会立刻恢复默认，所以不给它们打墓碑（否则会被自己的墓碑吃掉）；
+    // 只标记用户自己加的那些。
+    const defaultAccountIds = new Set(DEFAULT_ACCOUNTS.map(a => a.id));
+    const defaultCatIds = new Set([...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES].map(c => c.id));
+    const defaultPm = new Set(DEFAULT_PAYMENT_METHODS);
+    state.accounts.filter(a => !defaultAccountIds.has(a.id)).forEach(a => addTombstone('accounts', a.id));
+    state.categories.filter(c => !defaultCatIds.has(c.id)).forEach(c => addTombstone('categories', c.id));
+    state.paymentMethods.filter(p => !defaultPm.has(p)).forEach(p => addTombstone('paymentMethods', p));
+
     state.transactions = [];
     state.budgets = [];
     state.balances = [];
@@ -3871,10 +3917,12 @@ function clearAllData() {
     state.insuranceMembers = [...DEFAULT_INSURANCE_MEMBERS];
     state.insurancePolicies = [];
     state.categories = [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES];
-    state.deleted = normalizeTombstones(null);
+    state.paymentMethods = [...DEFAULT_PAYMENT_METHODS];
+    // 故意不重置 state.deleted：这些墓碑就是「清空」本身
     state.pmAddedAt = {};
     saveState();
     renderView(state.currentView);
+    refreshAccountLists();
     showToast('所有数据已清空', 'success');
 }
 
@@ -4576,11 +4624,11 @@ function renderAccountManageList() {
     const box = document.getElementById('accountManageList');
     if (!box) return;
     const memberChips = state.balanceMembers.map(m =>
-        `<span class="fam-chip">${_esc(m)}<i class="fa-solid fa-pen" onclick="renameBalanceMember('${_esc(m)}')"></i><i class="fa-solid fa-xmark" onclick="deleteBalanceMember('${_esc(m)}')"></i></span>`).join('');
+        `<span class="fam-chip">${_esc(m)}<i class="fa-solid fa-pen" data-act="rename" data-member="${_esc(m)}"></i><i class="fa-solid fa-xmark" data-act="del" data-member="${_esc(m)}"></i></span>`).join('');
     const sections = [['asset', '资产账户'], ['liability', '负债账户']];
     box.innerHTML = `
         <div class="account-section-title">家庭成员</div>
-        <div class="fam-chips">${memberChips}<button class="fam-add" onclick="addBalanceMember()"><i class="fa-solid fa-plus"></i> 添加</button></div>
+        <div class="fam-chips">${memberChips}<button class="fam-add" data-add="1"><i class="fa-solid fa-plus"></i> 添加</button></div>
         <div class="account-hint">账户类型全家共用；记录余额时再选择是本人的还是家人的。</div>
     ` + sections.map(([kind, label]) => {
         const rows = state.accounts.filter(a => a.kind === kind);
@@ -4589,10 +4637,23 @@ function renderAccountManageList() {
             ${rows.map(a => `
                 <div class="account-row">
                     <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
-                    <div class="ar-name" onclick="renameAccount('${a.id}')">${a.name}<span class="be-kind ${a.kind}">${a.group}</span></div>
+                    <div class="ar-name" onclick="renameAccount('${a.id}')">${_esc(a.name)}<span class="be-kind ${a.kind}">${_esc(a.group || '')}</span></div>
                     <button class="bh-delete" onclick="deleteAccountFromList('${a.id}')" title="删除"><i class="fa-solid fa-trash"></i></button>
                 </div>`).join('') || '<div class="breakdown-empty">暂无账户</div>'}`;
     }).join('');
+
+    if (!box.$memberWired) {
+        box.$memberWired = true;
+        box.addEventListener('click', e => {
+            const el = e.target.closest ? e.target.closest('[data-act],[data-add]') : null;
+            if (!el) return;
+            if (el.dataset.add) { addBalanceMember(); return; }
+            const name = el.dataset.member;
+            if (name === undefined) return;
+            if (el.dataset.act === 'rename') renameBalanceMember(name);
+            else if (el.dataset.act === 'del') deleteBalanceMember(name);
+        });
+    }
 }
 
 function addAccount() {
@@ -4987,17 +5048,28 @@ function initFundListeners() {
 function _esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 function memberBarHTML() {
-    let html = `<button class="bm-chip ${state.balanceOwner === 'all' ? 'active' : ''}" onclick="setBalanceOwner('all')">全部</button>`;
+    // 成员名只作为属性值输出（_esc 已转义 & < > "），不再塞进 onclick 的 JS 字符串里。
+    // 属性里的 HTML 实体解码不会破坏引号边界，所以改名成 `');…` 也无法逃逸。
+    let html = `<button class="bm-chip ${state.balanceOwner === 'all' ? 'active' : ''}" data-owner="all">全部</button>`;
     html += state.balanceMembers.map(m =>
-        `<button class="bm-chip ${state.balanceOwner === m ? 'active' : ''}" onclick="setBalanceOwner('${_esc(m)}')">${_esc(m)}</button>`).join('');
-    html += `<button class="bm-chip bm-add" onclick="addBalanceMember()"><i class="fa-solid fa-user-plus"></i> 成员</button>`;
+        `<button class="bm-chip ${state.balanceOwner === m ? 'active' : ''}" data-owner="${_esc(m)}">${_esc(m)}</button>`).join('');
+    html += `<button class="bm-chip bm-add" data-add="1"><i class="fa-solid fa-user-plus"></i> 成员</button>`;
     return html;
 }
 
 function renderBalanceMemberBar() {
     ['balMemberBar', 'retMemberBar'].forEach(id => {
         const bar = document.getElementById(id);
-        if (bar) bar.innerHTML = memberBarHTML();
+        if (!bar) return;
+        bar.innerHTML = memberBarHTML();
+        if (bar.$wired) return;                 // 监听挂在容器上，重渲染不需要重复加
+        bar.$wired = true;
+        bar.addEventListener('click', e => {
+            const chip = e.target.closest ? e.target.closest('.bm-chip') : null;
+            if (!chip) return;
+            if (chip.dataset.add) { addBalanceMember(); return; }
+            if (chip.dataset.owner !== undefined) setBalanceOwner(chip.dataset.owner);
+        });
     });
 }
 
