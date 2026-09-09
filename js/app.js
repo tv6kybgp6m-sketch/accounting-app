@@ -3429,6 +3429,58 @@ function exportData() {
         ws3['!cols'] = [{wch:20},{wch:14}];
         XLSX.utils.book_append_sheet(wb, ws3, '预算');
 
+        // ---- 资产负债 / 四笔钱 / 投资收益 ----
+        // 空数据也要保留表头，否则导出的表看起来像缺页
+        const addSheet = (name, rows, headers, widths) => {
+            const data = rows.length ? rows : [headers.reduce((o, h) => { o[h] = ''; return o; }, {})];
+            const ws = XLSX.utils.json_to_sheet(data);
+            ws['!cols'] = widths;
+            XLSX.utils.book_append_sheet(wb, ws, name);
+        };
+        const kindName = k => (k === 'liability' ? '负债' : '资产');
+        const bucketName = b => (FUND_BUCKETS.find(x => x.key === b)?.name) || '未归类';
+        const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
+
+        addSheet('账户', state.accounts.map(a => ({
+            '名称': a.name, '类型': kindName(a.kind), '分组': a.group || '', '四笔钱归类': a.kind === 'asset' ? bucketName(a.bucket) : '—',
+        })), ['名称', '类型', '分组', '四笔钱归类'], [{wch:18},{wch:8},{wch:14},{wch:14}]);
+
+        addSheet('余额明细', state.balances.map(b => {
+            const a = accountById(b.accountId);
+            return { '成员': b.member || '本人', '账户': a?.name || b.accountId, '类型': kindName(a?.kind), '月份': b.month, '金额': round2(b.amount) };
+        }).sort((x, y) => x['月份'].localeCompare(y['月份']) || x['成员'].localeCompare(y['成员'])),
+            ['成员', '账户', '类型', '月份', '金额'], [{wch:10},{wch:18},{wch:8},{wch:10},{wch:14}]);
+
+        addSheet('资产负债汇总', balanceMonths().map(m => {
+            const t = totalsFromMap(balancesAtMonth(m, 'all'));
+            return { '月份': m, '总资产': round2(t.asset), '总负债': round2(t.liability), '净资产': round2(t.net), '负债率': (t.ratio * 100).toFixed(1) + '%' };
+        }), ['月份', '总资产', '总负债', '净资产', '负债率'], [{wch:10},{wch:14},{wch:14},{wch:14},{wch:10}]);
+
+        addSheet('投资收益明细', state.returns.map(r => {
+            const a = accountById(r.accountId);
+            return { '成员': r.member || '本人', '账户': a?.name || r.accountId, '月份': r.month, '收益': round2(r.amount) };
+        }).sort((x, y) => x['月份'].localeCompare(y['月份']) || x['成员'].localeCompare(y['成员'])),
+            ['成员', '账户', '月份', '收益'], [{wch:10},{wch:18},{wch:10},{wch:14}]);
+
+        let __cum = 0;
+        addSheet('投资收益汇总', returnMonths().map(m => {
+            const v = returnSummary([m], 'all').total;
+            __cum += v;
+            return { '月份': m, '本期收益': round2(v), '累计收益': round2(__cum) };
+        }), ['月份', '本期收益', '累计收益'], [{wch:10},{wch:14},{wch:14}]);
+
+        const fundActual = fundActualByBucketFor('all');
+        addSheet('四笔钱', FUND_BUCKETS.map(bk => {
+            const tgt = state.fundTargets[bk.key] || 0;
+            const act = fundActual[bk.key] || 0;
+            return { '资金桶': bk.name, '目标金额': round2(tgt), '当前实际': round2(act), '差额': round2(act - tgt), '说明': bk.hint };
+        }), ['资金桶', '目标金额', '当前实际', '差额', '说明'], [{wch:12},{wch:14},{wch:14},{wch:14},{wch:34}]);
+
+        addSheet('保险清单', state.insurancePolicies.map(p => ({
+            '成员': p.member || '本人', '险种': p.type, '是否已配置': p.covered ? '已配置' : '未配置',
+            '保额': round2(p.amount), '年保费': round2(p.premium),
+        })), ['成员', '险种', '是否已配置', '保额', '年保费'], [{wch:10},{wch:14},{wch:12},{wch:14},{wch:12}]);
+
         // Use XLSX.write to generate binary, then hand it to the save path
         const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
         const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -3442,6 +3494,27 @@ function exportData() {
         console.error('Export error:', err);
         showToast('导出失败: ' + err.message, 'error');
     }
+}
+
+// 表格里的月份可能是 "2026-09" / "2026/9" / "2026年09月" / Date / Excel 序列号
+function normalizeImportMonth(v) {
+    if (v == null || v === '') return null;
+    if (typeof v === 'string') {
+        const m = v.trim().match(/^(\d{4})[-/年.]\s*(\d{1,2})/);
+        if (m) {
+            const mm = Number(m[2]);
+            if (mm >= 1 && mm <= 12) return `${m[1]}-${String(mm).padStart(2, '0')}`;
+        }
+        return null;
+    }
+    if (v instanceof Date && !isNaN(v.getTime())) {
+        return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}`;
+    }
+    if (typeof v === 'number' && isFinite(v) && v > 20000 && v < 80000) {
+        const d = new Date(Math.round((v - 25569) * 86400000));
+        if (!isNaN(d.getTime())) return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    }
+    return null;
 }
 
 function normalizeImportDate(v) {
@@ -3572,9 +3645,49 @@ function applyWorkbook(wb) {
                 });
             }
 
+            // 余额 / 收益：按「成员 + 账户名 + 月份」回写。账户名对不上的跳过并计数。
+            const kindFromText = t => (t === '负债' ? 'liability' : (t === '资产' ? 'asset' : null));
+            const accountByName = (name, kind) =>
+                state.accounts.find(a => a.name === name && a.kind === kind) ||
+                state.accounts.find(a => a.name === name);
+            let unmatched = 0;
+
+            const readRows = (sheetName, apply) => {
+                const ws = wb.Sheets[sheetName];
+                if (!ws) return;
+                XLSX.utils.sheet_to_json(ws).forEach(r => apply(r));
+            };
+
+            readRows('余额明细', row => {
+                const month = normalizeImportMonth(row['月份']);
+                const amount = parseFloat(row['金额']);
+                const acc = accountByName(String(row['账户'] || '').trim(), kindFromText(row['类型']));
+                if (!month || !acc || !isFinite(amount)) { if (row['账户']) unmatched++; return; }
+                const member = String(row['成员'] || '本人').trim() || '本人';
+                if (!state.balanceMembers.includes(member)) state.balanceMembers.push(member);
+                const id = `${member}__${acc.id}__${month}`;
+                const existing = state.balances.find(b => b.id === id);
+                if (existing) { existing.amount = amount; existing.updatedAt = Date.now(); }
+                else state.balances.push({ id, member, accountId: acc.id, month, amount, createdAt: Date.now(), updatedAt: Date.now() });
+            });
+
+            readRows('投资收益明细', row => {
+                const month = normalizeImportMonth(row['月份']);
+                const amount = parseFloat(row['收益']);
+                const acc = accountByName(String(row['账户'] || '').trim(), 'asset');
+                if (!month || !acc || !isFinite(amount)) { if (row['账户']) unmatched++; return; }
+                const member = String(row['成员'] || '本人').trim() || '本人';
+                if (!state.balanceMembers.includes(member)) state.balanceMembers.push(member);
+                const id = `${member}__${acc.id}__${month}`;
+                const existing = state.returns.find(r => r.id === id);
+                if (existing) { existing.amount = amount; existing.updatedAt = Date.now(); }
+                else state.returns.push({ id, member, accountId: acc.id, month, amount, createdAt: Date.now(), updatedAt: Date.now() });
+            });
+
     saveState();
     applyTheme(state.settings.theme);
     renderView(state.currentView);
+    return { unmatched };
 }
 
 async function importExcelFile() {
@@ -3587,8 +3700,10 @@ async function importExcelFile() {
     if (!picked) return;
     try {
         const wb = XLSX.read(base64ToUint8(picked.base64), { type: 'array', cellDates: true });
-        applyWorkbook(wb);
-        showToast('已从 ' + (picked.name || 'Excel') + ' 导入', 'success');
+        const res = applyWorkbook(wb) || {};
+        showToast(res.unmatched
+            ? `已导入 ${picked.name || 'Excel'}，${res.unmatched} 行账户名没对上已跳过`
+            : '已从 ' + (picked.name || 'Excel') + ' 导入', res.unmatched ? 'error' : 'success');
     } catch (err) {
         console.error('Import error:', err);
         showToast('导入失败，文件不是有效的 Excel', 'error');
@@ -3604,8 +3719,9 @@ function importData(event) {
         reader.onload = (e) => {
             try {
                 const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
-                applyWorkbook(wb);
-                showToast('Excel 数据已导入', 'success');
+                const res = applyWorkbook(wb) || {};
+                showToast(res.unmatched ? `${res.unmatched} 行账户名没对上已跳过` : 'Excel 数据已导入',
+                    res.unmatched ? 'error' : 'success');
             } catch (err) {
                 console.error('Import error:', err);
                 showToast('导入失败，文件格式错误', 'error');
@@ -4585,6 +4701,18 @@ function fundActualByBucket() {
         const v = map[a.id] || 0;
         if (a.bucket && out[a.bucket] !== undefined) out[a.bucket] += v;
         else out.unassigned += v;
+    });
+    return out;
+}
+
+// 按指定成员口径算三桶实际金额。页面跟随当前筛选，导出固定用家庭口径。
+function fundActualByBucketFor(member) {
+    const month = fundLatestMonth();
+    const map = month ? balancesAtMonth(month, member) : {};
+    const out = { cash: 0, steady: 0, growth: 0 };
+    state.accounts.filter(a => a.kind === 'asset').forEach(a => {
+        if (map[a.id] === undefined || out[a.bucket] === undefined) return;
+        out[a.bucket] += map[a.id];
     });
     return out;
 }
