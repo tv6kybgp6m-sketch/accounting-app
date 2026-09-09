@@ -471,6 +471,7 @@ function buildSyncPayload() {
             accounts: state.accounts,
             balances: state.balances,
             returns: state.returns,
+            balanceMembers: state.balanceMembers,
             fundTargets: state.fundTargets,
             insuranceMembers: state.insuranceMembers,
             insurancePolicies: state.insurancePolicies,
@@ -610,6 +611,8 @@ function mergeRemoteData(remoteData) {
     });
     state.insurancePolicies = Array.from(polMap.values());
     state.insuranceMembers = [...new Set([...(state.insuranceMembers || []), ...(remote.insuranceMembers || [])])];
+    // 家庭成员名单：并集（余额/收益记录的 id 编码了成员名，名单丢了记录就悬空）
+    state.balanceMembers = [...new Set([...(state.balanceMembers || []), ...(remote.balanceMembers || [])])];
     if ((remoteData.lastModified || 0) >= (iCloudLastSyncTime || 0) && remote.fundTargets) {
         state.fundTargets = { ...state.fundTargets, ...remote.fundTargets };
     }
@@ -3568,7 +3571,8 @@ function pickLocalFile(extensions) {
     return new Promise(resolve => {
         const inp = document.createElement('input');
         inp.type = 'file';
-        if (exts.length) inp.accept = exts.map(e => '.' + e).join(',');
+        // 故意不设 accept：iOS 上 accept=".json" 会让「文件」选择器直接是空的
+        // （iOS 只列出它认识的文档类型）。读进来之后我们会再校验内容。
         inp.style.display = 'none';
         document.body.appendChild(inp);
         let settled = false;
@@ -4007,6 +4011,18 @@ function renderBalanceSelectors() {
     const yearSelect = document.getElementById('balanceYearSelect');
     const monthSelect = document.getElementById('balanceMonthSelect');
     const now = new Date();
+
+    // 默认看「有记录的最新月份」，不是今天。
+    // 导入一份旧账本时如果停在当前月，页面会全是 0，看起来像什么都没导进来。
+    // 用户手动选过之后（balanceYear/Month 非 null）就以他的选择为准。
+    if (state.balanceYear == null || state.balanceMonth == null) {
+        const all = balanceMonths();
+        const latest = all[all.length - 1];
+        if (latest) {
+            if (state.balanceYear == null) state.balanceYear = Number(latest.slice(0, 4));
+            if (state.balanceMonth == null) state.balanceMonth = Number(latest.slice(5, 7));
+        }
+    }
 
     const years = balanceYears().map(Number);
     years.push(now.getFullYear());
