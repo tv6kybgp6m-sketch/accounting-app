@@ -662,7 +662,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.20.0</div>
+                                    <div class="about-version">版本 1.21.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -872,13 +872,15 @@
                     <button class="modal-close" onclick="closeReturnModal()"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="modal-body">
-                    <div class="form-group">
-                        <label>成员</label>
-                        <select class="text-input" id="returnMemberSelect"></select>
-                    </div>
-                    <div class="form-group">
-                        <label>归属月份</label>
-                        <input type="month" class="text-input" id="returnMonthInput">
+                    <div class="bal-entry-head">
+                        <div class="form-group">
+                            <label>成员</label>
+                            <select class="text-input" id="returnMemberSelect"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>归属月份</label>
+                            <input type="month" class="text-input" id="returnMonthInput">
+                        </div>
                     </div>
                     <div class="bal-entry-actions">
                         <button class="secondary-btn" onclick="clearReturnInputs()"><i class="fa-solid fa-eraser"></i> 清空</button>
@@ -907,13 +909,15 @@
                     <button class="modal-close" onclick="closeBalanceModal()"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="modal-body">
-                    <div class="form-group">
-                        <label>成员</label>
-                        <select class="text-input" id="balanceMemberSelect"></select>
-                    </div>
-                    <div class="form-group">
-                        <label>归属月份</label>
-                        <input type="month" class="text-input" id="balanceMonthInput">
+                    <div class="bal-entry-head">
+                        <div class="form-group">
+                            <label>成员</label>
+                            <select class="text-input" id="balanceMemberSelect"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>归属月份</label>
+                            <input type="month" class="text-input" id="balanceMonthInput">
+                        </div>
                     </div>
                     <div class="bal-entry-actions">
                         <button class="secondary-btn" onclick="copyLastMonthBalances()"><i class="fa-solid fa-copy"></i> 沿用上期</button>
@@ -934,7 +938,7 @@
                 <div class="modal-header">
                     <div class="drill-title-wrap">
                         <h2>账户管理</h2>
-                        <div class="cat-txn-sub">资产与负债账户，点击可重命名</div>
+                        <div class="cat-txn-sub">改名称点账户名 · 类型 / 分类 / 顺序都在每行上</div>
                     </div>
                     <button class="modal-close" onclick="closeAccountsModal()"><i class="fa-solid fa-xmark"></i></button>
                 </div>
@@ -1010,7 +1014,7 @@
         // otherwise let an old cache-first worker pin the app to an outdated build.
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.20.0').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.21.0').catch(() => {});
             });
         }
     </script>

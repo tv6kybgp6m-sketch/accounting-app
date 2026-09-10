@@ -3399,3 +3399,26 @@ table.bill-stats {
 }
 .ins-member-wrap i[data-insact]:hover { color: var(--accent); }
 .ins-member-wrap i[data-insact="del"]:hover { color: var(--expense); }
+
+/* ---- 记余额/记收益：成员+月份同行；余额分资产/负债两段 ---- */
+.bal-entry-head { display: flex; gap: 10px; align-items: flex-start; }
+.bal-entry-head .form-group { flex: 1 1 0; min-width: 0; }
+/* 原生 month input 有 min-width:auto，不给 min-width:0 两栏会分不匀 */
+.bal-entry-head .form-group select,
+.bal-entry-head .form-group input { width: 100%; min-width: 0; }
+.be-section-title {
+    display: flex; align-items: center; gap: 6px;
+    margin: 12px 0 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary);
+}
+.be-section-title:first-child { margin-top: 0; }
+.be-section-title::before {
+    content: ''; width: 3px; height: 12px; border-radius: 2px; background: var(--income);
+}
+.be-section-title.liability::before { background: var(--expense); }
+
+/* ---- 账户管理：分类下拉 ---- */
+.acct-group-select {
+    padding: 3px 4px; font-size: 12px; border: 1px solid var(--border-strong);
+    border-radius: 6px; background: var(--bg-input); color: var(--text-secondary);
+    font-family: var(--font); cursor: pointer; flex-shrink: 0; max-width: 92px;
+}

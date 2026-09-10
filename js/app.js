@@ -4606,16 +4606,23 @@ function renderBalanceEntry() {
         list.innerHTML = '<div class="breakdown-empty">还没有账户，先到「账户」里添加</div>';
         return;
     }
-    list.innerHTML = state.accounts.map(a => `
+    ensureAccountOrder();
+    const rowHTML = a => `
         <div class="bal-entry-row">
             <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
-            <div class="be-name">${a.name}<span class="be-kind ${a.kind}">${a.kind === 'asset' ? '资产' : '负债'}</span></div>
+            <div class="be-name">${_esc(a.name)}<span class="be-kind ${a.kind}">${_esc(a.group || '')}</span></div>
             <div class="be-input">
                 <span class="currency-symbol">${state.settings.currency}</span>
                 <input type="number" step="0.01" min="0" class="text-input be-field" data-account="${a.id}"
                        value="${existing[a.id] !== undefined ? existing[a.id] : ''}" placeholder="0">
             </div>
-        </div>`).join('');
+        </div>`;
+    const beSections = [['asset', '资产'], ['liability', '负债']];
+    list.innerHTML = beSections.map(([kind, label]) => {
+        const rows = accountsSortedByKind(kind);
+        if (!rows.length) return '';
+        return `<div class="be-section-title ${kind}">${label}账户（${rows.length}）</div>` + rows.map(rowHTML).join('');
+    }).join('');
 }
 
 function previousMonthOf(month) {
@@ -4708,6 +4715,9 @@ function renderAccountManageList() {
                         <option value="asset" ${a.kind === 'asset' ? 'selected' : ''}>资产</option>
                         <option value="liability" ${a.kind === 'liability' ? 'selected' : ''}>负债</option>
                     </select>
+                    <select class="acct-group-select" data-group-account="${a.id}" title="账户分类">
+                        ${groupsForKind(a.kind).map(g => `<option value="${g}" ${a.group === g ? 'selected' : ''}>${g}</option>`).join('')}
+                    </select>
                     <span class="acct-move-group">
                         <button class="acct-move" data-move-account="${a.id}" data-dir="-1" ${i === 0 ? 'disabled' : ''} title="上移"><i class="fa-solid fa-arrow-up"></i></button>
                         <button class="acct-move" data-move-account="${a.id}" data-dir="1" ${i === rows.length - 1 ? 'disabled' : ''} title="下移"><i class="fa-solid fa-arrow-down"></i></button>
@@ -4719,8 +4729,10 @@ function renderAccountManageList() {
     if (!box.$acctWired) {
         box.$acctWired = true;
         box.addEventListener('change', e => {
-            const sel = e.target.closest ? e.target.closest('[data-kind-account]') : null;
-            if (sel) changeAccountType(sel.dataset.kindAccount, sel.value);
+            const kindSel = e.target.closest ? e.target.closest('[data-kind-account]') : null;
+            if (kindSel) { changeAccountType(kindSel.dataset.kindAccount, kindSel.value); return; }
+            const grpSel = e.target.closest ? e.target.closest('[data-group-account]') : null;
+            if (grpSel) changeAccountGroup(grpSel.dataset.groupAccount, grpSel.value);
         });
         box.addEventListener('click', e => {
             const btn = e.target.closest ? e.target.closest('[data-move-account]') : null;
@@ -4847,6 +4859,22 @@ function ensureAccountOrder() {
     return changed;
 }
 
+// 某类型下可选的分类
+function groupsForKind(kind) { return kind === 'liability' ? LIABILITY_GROUPS : ASSET_GROUPS; }
+
+// 修改账户的具体分类（流动资金 / 储蓄存款 / 投资理财 …）
+function changeAccountGroup(id, group) {
+    const a = accountById(id);
+    if (!a || a.group === group) return;
+    if (!groupsForKind(a.kind).includes(group)) { showToast('该分类不适用于此账户类型', 'error'); return; }
+    a.group = group;
+    a.updatedAt = Date.now();
+    saveState();
+    renderAccountManageList();
+    refreshAccountLists();
+    showToast(`「${a.name}」已归到${group}`, 'success');
+}
+
 // 按当前排序取出同类型的账户列表
 function accountsSortedByKind(kind) {
     return state.accounts
@@ -4874,6 +4902,8 @@ function changeAccountType(id, kind) {
     const a = accountById(id);
     if (!a || a.kind === kind) return;
     a.kind = kind;
+    // 原来挂在资产下的分类（如"流动资金"）对负债不成立，落到该类型的第一个分类
+    if (!groupsForKind(kind).includes(a.group)) a.group = groupsForKind(kind)[0];
     a.updatedAt = Date.now();
     saveState();
     renderAccountManageList();
