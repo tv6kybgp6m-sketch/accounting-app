@@ -167,11 +167,12 @@ let state = {
     reportPeriod: 'month',
     reportYear: null,
     reportMonth: null,
-    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insurance: [] },  // soft-delete markers
+    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [] },  // soft-delete markers
     pmAddedAt: {},          // payment method name -> when it was added (names are the identity)
     lastExportAt: 0,        // 最近一次导出的时间戳，用于备份提醒
     fundTargets: { cash: 0, steady: 0, growth: 0 },
     insuranceMembers: [...DEFAULT_INSURANCE_MEMBERS],
+    insuranceMemberAddedAt: {},  // 保险成员名 -> 添加时间（名字即身份，同家庭成员）
     insurancePolicies: [],   // {id, type, member, covered, amount, premium, createdAt, updatedAt}
     balanceMembers: ['本人'],   // 家庭资产负债表的成员名单
     memberAddedAt: {},        // 成员名 -> 添加时间（名字就是身份，同支付方式的做法）
@@ -262,6 +263,7 @@ function saveStateNow() {
         returns: state.returns,
         fundTargets: state.fundTargets,
         insuranceMembers: state.insuranceMembers,
+        insuranceMemberAddedAt: state.insuranceMemberAddedAt,
         insurancePolicies: state.insurancePolicies,
         balanceMembers: state.balanceMembers,
         memberAddedAt: state.memberAddedAt,
@@ -330,6 +332,7 @@ function normalizeTombstones(raw) {
         balances: clean(src.balances),
         returns: clean(src.returns),
         members: clean(src.members),
+        insuranceMembers: clean(src.insuranceMembers),
         insurance: clean(src.insurance),
     };
 }
@@ -391,6 +394,17 @@ function applyTombstones() {
             return (state.memberAddedAt[name] || 0) > at;
         });
         if (keptMembers.length > 0) state.balanceMembers = keptMembers;
+    }
+
+    // 保险成员：同家庭成员，按墓碑 vs 添加时间裁决，至少保留一个
+    const insMarks = new Map(state.deleted.insuranceMembers.map(m => [m.id, m.deletedAt]));
+    if (insMarks.size) {
+        const keptIns = state.insuranceMembers.filter(name => {
+            const at = insMarks.get(name);
+            if (at === undefined) return true;
+            return (state.insuranceMemberAddedAt[name] || 0) > at;
+        });
+        if (keptIns.length > 0) state.insuranceMembers = keptIns;
     }
 
     // Payment methods are plain strings with no per-row timestamp, so "when was
@@ -490,6 +504,7 @@ function buildSyncPayload() {
             memberAddedAt: state.memberAddedAt,
             fundTargets: state.fundTargets,
             insuranceMembers: state.insuranceMembers,
+            insuranceMemberAddedAt: state.insuranceMemberAddedAt,
             insurancePolicies: state.insurancePolicies,
             settings: state.settings,
             deleted: state.deleted,
@@ -616,6 +631,7 @@ function mergeRemoteData(remoteData) {
         balances: mergeTombstoneList(state.deleted.balances, remoteDeleted.balances),
         returns: mergeTombstoneList(state.deleted.returns, remoteDeleted.returns),
         members: mergeTombstoneList(state.deleted.members, remoteDeleted.members),
+        insuranceMembers: mergeTombstoneList(state.deleted.insuranceMembers, remoteDeleted.insuranceMembers),
         insurance: mergeTombstoneList(state.deleted.insurance, remoteDeleted.insurance),
     };
 
@@ -628,6 +644,10 @@ function mergeRemoteData(remoteData) {
     });
     state.insurancePolicies = Array.from(polMap.values());
     state.insuranceMembers = [...new Set([...(state.insuranceMembers || []), ...(remote.insuranceMembers || [])])];
+    const remoteInsAdded = normalizeAddedAtMap(remote.insuranceMemberAddedAt);
+    Object.keys(remoteInsAdded).forEach(k => {
+        if (!state.insuranceMemberAddedAt[k] || remoteInsAdded[k] > state.insuranceMemberAddedAt[k]) state.insuranceMemberAddedAt[k] = remoteInsAdded[k];
+    });
     // 家庭成员名单：并集（余额/收益记录的 id 编码了成员名，名单丢了记录就悬空）
     state.balanceMembers = [...new Set([...(state.balanceMembers || []), ...(remote.balanceMembers || [])])];
     const remoteMemAdded = normalizeAddedAtMap(remote.memberAddedAt);
@@ -646,6 +666,7 @@ function mergeRemoteData(remoteData) {
     state.returns = Array.from(retMap.values());
     pruneTombstones();
     applyTombstones();
+    ensureAccountOrder();   // 云端旧副本没有 order 字段，合并后要补齐
 
     // Settings: prefer remote if newer
     if (remoteData.lastModified > (iCloudLastSyncTime || 0)) {
@@ -1121,10 +1142,12 @@ function loadState() {
             state.accounts = Array.isArray(data.accounts) && data.accounts.length > 0
                 ? data.accounts
                 : DEFAULT_ACCOUNTS.map(a => ({ ...a }));
+            ensureAccountOrder();
             state.balances = Array.isArray(data.balances) ? data.balances : [];
             state.returns = Array.isArray(data.returns) ? data.returns : [];
             state.fundTargets = { cash: 0, steady: 0, growth: 0, ...(data.fundTargets || {}) };
             state.insuranceMembers = Array.isArray(data.insuranceMembers) && data.insuranceMembers.length ? data.insuranceMembers : [...DEFAULT_INSURANCE_MEMBERS];
+            state.insuranceMemberAddedAt = normalizeAddedAtMap(data.insuranceMemberAddedAt);
             state.insurancePolicies = Array.isArray(data.insurancePolicies) ? data.insurancePolicies : [];
             state.balanceMembers = Array.isArray(data.balanceMembers) && data.balanceMembers.length ? data.balanceMembers : ['本人'];
             state.memberAddedAt = normalizeAddedAtMap(data.memberAddedAt);
@@ -3942,7 +3965,9 @@ function clearAllData() {
     state.balanceMembers = ['本人'];
     state.memberAddedAt = { '本人': Date.now() };
     state.balanceOwner = 'all';
+    state.insuranceMembers.filter(m => m !== '本人').forEach(m => addTombstone('insuranceMembers', m));
     state.insuranceMembers = [...DEFAULT_INSURANCE_MEMBERS];
+    state.insuranceMemberAddedAt = { '本人': Date.now() };
     state.insurancePolicies = [];
     state.categories = [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES];
     state.paymentMethods = [...DEFAULT_PAYMENT_METHODS];
@@ -4661,6 +4686,7 @@ function openAccountsModal() {
 function closeAccountsModal() { document.getElementById('accountsModal').classList.add('hidden'); }
 
 function renderAccountManageList() {
+    ensureAccountOrder();
     const box = document.getElementById('accountManageList');
     if (!box) return;
     const memberChips = state.balanceMembers.map(m =>
@@ -4671,16 +4697,37 @@ function renderAccountManageList() {
         <div class="fam-chips">${memberChips}<button class="fam-add" data-add="1"><i class="fa-solid fa-plus"></i> 添加</button></div>
         <div class="account-hint">账户类型全家共用；记录余额时再选择是本人的还是家人的。</div>
     ` + sections.map(([kind, label]) => {
-        const rows = state.accounts.filter(a => a.kind === kind);
+        const rows = accountsSortedByKind(kind);
         return `
-            <div class="account-section-title">${label}（${rows.length}）</div>
-            ${rows.map(a => `
+            <div class="account-section-title">${label}（${rows.length}）<span class="acct-order-hint">↑↓ 可调顺序</span></div>
+            ${rows.map((a, i) => `
                 <div class="account-row">
                     <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
                     <div class="ar-name" onclick="renameAccount('${a.id}')">${_esc(a.name)}<span class="be-kind ${a.kind}">${_esc(a.group || '')}</span></div>
+                    <select class="acct-kind-select" data-kind-account="${a.id}" title="账户类型">
+                        <option value="asset" ${a.kind === 'asset' ? 'selected' : ''}>资产</option>
+                        <option value="liability" ${a.kind === 'liability' ? 'selected' : ''}>负债</option>
+                    </select>
+                    <span class="acct-move-group">
+                        <button class="acct-move" data-move-account="${a.id}" data-dir="-1" ${i === 0 ? 'disabled' : ''} title="上移"><i class="fa-solid fa-arrow-up"></i></button>
+                        <button class="acct-move" data-move-account="${a.id}" data-dir="1" ${i === rows.length - 1 ? 'disabled' : ''} title="下移"><i class="fa-solid fa-arrow-down"></i></button>
+                    </span>
                     <button class="bh-delete" onclick="deleteAccountFromList('${a.id}')" title="删除"><i class="fa-solid fa-trash"></i></button>
                 </div>`).join('') || '<div class="breakdown-empty">暂无账户</div>'}`;
     }).join('');
+
+    if (!box.$acctWired) {
+        box.$acctWired = true;
+        box.addEventListener('change', e => {
+            const sel = e.target.closest ? e.target.closest('[data-kind-account]') : null;
+            if (sel) changeAccountType(sel.dataset.kindAccount, sel.value);
+        });
+        box.addEventListener('click', e => {
+            const btn = e.target.closest ? e.target.closest('[data-move-account]') : null;
+            if (!btn || btn.disabled) return;
+            moveAccount(btn.dataset.moveAccount, Number(btn.dataset.dir));
+        });
+    }
 
     if (!box.$memberWired) {
         box.$memberWired = true;
@@ -4708,6 +4755,7 @@ function addAccount() {
         name, kind, group,
         icon: kind === 'asset' ? 'fa-wallet' : 'fa-credit-card',
         color: palette[state.accounts.length % palette.length],
+        order: state.accounts.reduce((m, a) => Math.max(m, a.order || 0), 0) + 1,
         createdAt: Date.now(), updatedAt: Date.now(),
     });
     document.getElementById('newAccountName').value = '';
@@ -4782,6 +4830,55 @@ function initBalanceListeners() {
         document.getElementById('newAccountGroup').innerHTML =
             (kind === 'asset' ? ASSET_GROUPS : LIABILITY_GROUPS).map(g => `<option>${g}</option>`).join('');
     });
+}
+
+// 账户排序：order 决定「账户管理」里的显示顺序（新增的排最后）
+function ensureAccountOrder() {
+    let max = 0, changed = false;
+    state.accounts.forEach(a => { if (typeof a.order === 'number' && a.order > max) max = a.order; });
+    state.accounts.forEach(a => {
+        if (typeof a.order !== 'number') {
+            max += 1; a.order = max;
+            // 时间戳必须一起刷：合并按 updatedAt 取新，否则这份 order 会被云端旧副本盖掉
+            a.updatedAt = Date.now();
+            changed = true;
+        }
+    });
+    return changed;
+}
+
+// 按当前排序取出同类型的账户列表
+function accountsSortedByKind(kind) {
+    return state.accounts
+        .filter(a => a.kind === kind)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
+}
+
+// 上移 / 下移：与相邻的同类型账户交换 order，并更新时间戳让它同步出去
+function moveAccount(id, dir) {
+    ensureAccountOrder();
+    const siblings = accountsSortedByKind(accountById(id)?.kind);
+    const idx = siblings.findIndex(a => a.id === id);
+    const other = siblings[idx + dir];
+    if (!other) return;
+    const a = accountById(id), b = other;
+    const tmp = a.order; a.order = b.order; b.order = tmp;
+    a.updatedAt = b.updatedAt = Date.now();
+    saveState();
+    renderAccountManageList();
+    showToast('已调整顺序', 'success');
+}
+
+// 修改账户类型：资产 <-> 负债（余额/收益记录不动，统计口径自动变）
+function changeAccountType(id, kind) {
+    const a = accountById(id);
+    if (!a || a.kind === kind) return;
+    a.kind = kind;
+    a.updatedAt = Date.now();
+    saveState();
+    renderAccountManageList();
+    refreshAccountLists();
+    showToast(`「${a.name}」已改为${kind === 'asset' ? '资产' : '负债'}账户`, 'success');
 }
 
 // ==================== 四笔钱 ====================
@@ -5005,8 +5102,24 @@ function renderInsuranceSection() {
     const listBox = document.getElementById('insList');
     if (!membersBox || !listBox) return;
     membersBox.innerHTML = state.insuranceMembers.map(m =>
-        `<button class="ins-member ${m === fundEditMember ? 'active' : ''}" onclick="setInsMember('${m.replace(/'/g, "\\'")}')">${m}</button>`
-    ).join('') + `<button class="ins-member ins-add" onclick="addInsMember()"><i class="fa-solid fa-plus"></i> 成员</button>`;
+        `<span class="ins-member-wrap"><button class="ins-member ${m === fundEditMember ? 'active' : ''}" data-insmember="${_esc(m)}">${_esc(m)}</button>` +
+        `<i class="fa-solid fa-pen" data-insact="rename" data-insmember="${_esc(m)}" title="改名"></i>` +
+        `<i class="fa-solid fa-xmark" data-insact="del" data-insmember="${_esc(m)}" title="删除"></i></span>`
+    ).join('') + `<button class="ins-member ins-add" data-insadd="1"><i class="fa-solid fa-plus"></i> 成员</button>`;
+
+    if (!membersBox.$wired) {
+        membersBox.$wired = true;
+        membersBox.addEventListener('click', e => {
+            const el = e.target.closest ? e.target.closest('[data-insmember],[data-insadd]') : null;
+            if (!el) return;
+            if (el.dataset.insadd) { addInsMember(); return; }
+            const name = el.dataset.insmember;
+            if (name === undefined) return;
+            if (el.tagName === 'BUTTON') { setInsMember(name); return; }
+            if (el.dataset.insact === 'rename') renameInsuranceMember(name);
+            else if (el.dataset.insact === 'del') deleteInsuranceMember(name);
+        });
+    }
 
     listBox.innerHTML = INSURANCE_TYPES.map(type => {
         const p = insPolicy(type, fundEditMember);
@@ -5030,12 +5143,55 @@ function renderInsuranceSection() {
 
 function setInsMember(m) { fundEditMember = m; renderInsuranceSection(); }
 
+// 保险成员改名：名单 + 该成员名下的保单都要跟着改（保单 id 是 险种__成员）
+function renameInsuranceMember(old) {
+    const name = prompt('修改保险成员姓名', old);
+    if (!name || !name.trim() || name.trim() === old) return;
+    const n = name.trim();
+    if (state.insuranceMembers.includes(n)) { showToast('已有同名成员', 'error'); return; }
+    state.insuranceMembers = state.insuranceMembers.map(m => m === old ? n : m);
+    state.insurancePolicies.forEach(p => {
+        if (p.member !== old) return;
+        p.member = n;
+        p.id = `${p.type}__${n}`;
+        p.updatedAt = Date.now();
+    });
+    if (fundEditMember === old) fundEditMember = n;
+    state.insuranceMemberAddedAt[n] = Date.now();
+    addTombstone('insuranceMembers', old);   // 不留墓碑的话，并集合并会把旧名留在别的设备
+    delete state.insuranceMemberAddedAt[old];
+    saveState();
+    renderFourFunds();
+}
+
+function deleteInsuranceMember(name) {
+    if (state.insuranceMembers.length <= 1) { showToast('至少保留一个成员', 'error'); return; }
+    const fallback = state.insuranceMembers.find(m => m !== name);
+    const mine = state.insurancePolicies.filter(p => p.member === name).length;
+    if (!confirm(`删除保险成员「${name}」？${mine ? `TA 的 ${mine} 份保单会并入「${fallback}」。` : ''}`)) return;
+    state.insurancePolicies.forEach(p => {
+        if (p.member !== name) return;
+        p.member = fallback;
+        p.id = `${p.type}__${fallback}`;
+        p.updatedAt = Date.now();
+    });
+    state.insuranceMembers = state.insuranceMembers.filter(m => m !== name);
+    addTombstone('insuranceMembers', name);
+    delete state.insuranceMemberAddedAt[name];
+    if (fundEditMember === name) fundEditMember = fallback;
+    saveState();
+    renderFourFunds();
+}
+
 function addInsMember() {
     const name = prompt('成员姓名（如：配偶、父亲、儿子）');
     if (!name || !name.trim()) return;
     const n = name.trim();
     if (state.insuranceMembers.includes(n)) { showToast('已有该成员', 'error'); return; }
     state.insuranceMembers.push(n);
+    state.insuranceMemberAddedAt[n] = Date.now();
+    const oldMark = state.deleted.insuranceMembers.find(m => m.id === n);
+    if (oldMark) oldMark.deletedAt = Math.min(oldMark.deletedAt, state.insuranceMemberAddedAt[n] - 1);
     fundEditMember = n;
     saveState();
     renderFourFunds();

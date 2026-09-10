@@ -3374,3 +3374,28 @@ table.bill-stats {
     .bm-chip { font-size: 12px; padding: 4px 12px; }
     .ret-tip { font-size: 11px; margin-left: 0; }
 }
+
+/* ---- 账户管理：改类型 / 排序 ---- */
+.acct-order-hint { margin-left: 8px; font-size: 11px; font-weight: 400; color: var(--text-tertiary); }
+.acct-kind-select {
+    padding: 3px 4px; font-size: 12px; border: 1px solid var(--border-strong);
+    border-radius: 6px; background: var(--bg-input); color: var(--text-primary);
+    font-family: var(--font); cursor: pointer; flex-shrink: 0;
+}
+.acct-move-group { display: inline-flex; gap: 2px; flex-shrink: 0; }
+.acct-move {
+    border: none; background: var(--bg-card-hover); color: var(--text-tertiary);
+    width: 24px; height: 24px; border-radius: 6px; cursor: pointer; font-size: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+}
+.acct-move:hover:not(:disabled) { background: var(--accent-light); color: var(--accent); }
+.acct-move:disabled { opacity: .3; cursor: default; }
+
+/* ---- 保险成员：改名 / 删除 ---- */
+.ins-member-wrap { display: inline-flex; align-items: center; gap: 3px; }
+.ins-member-wrap .ins-member { border-radius: 12px 4px 4px 12px; padding-right: 6px; }
+.ins-member-wrap i[data-insact] {
+    cursor: pointer; color: var(--text-tertiary); font-size: 10px; padding: 2px 1px;
+}
+.ins-member-wrap i[data-insact]:hover { color: var(--accent); }
+.ins-member-wrap i[data-insact="del"]:hover { color: var(--expense); }
