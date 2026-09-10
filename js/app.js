@@ -167,13 +167,14 @@ let state = {
     reportPeriod: 'month',
     reportYear: null,
     reportMonth: null,
-    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], insurance: [] },  // soft-delete markers
+    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insurance: [] },  // soft-delete markers
     pmAddedAt: {},          // payment method name -> when it was added (names are the identity)
     lastExportAt: 0,        // 最近一次导出的时间戳，用于备份提醒
     fundTargets: { cash: 0, steady: 0, growth: 0 },
     insuranceMembers: [...DEFAULT_INSURANCE_MEMBERS],
     insurancePolicies: [],   // {id, type, member, covered, amount, premium, createdAt, updatedAt}
     balanceMembers: ['本人'],   // 家庭资产负债表的成员名单
+    memberAddedAt: {},        // 成员名 -> 添加时间（名字就是身份，同支付方式的做法）
     balanceOwner: 'all',       // 当前筛选：'all' 或某成员
     reportMetric: 'expense',
     breakdownExpanded: false,
@@ -263,6 +264,7 @@ function saveStateNow() {
         insuranceMembers: state.insuranceMembers,
         insurancePolicies: state.insurancePolicies,
         balanceMembers: state.balanceMembers,
+        memberAddedAt: state.memberAddedAt,
         settings: state.settings,
         categoryVersion: state.categoryVersion || 2,
         deleted: state.deleted,
@@ -327,6 +329,7 @@ function normalizeTombstones(raw) {
         accounts: clean(src.accounts),
         balances: clean(src.balances),
         returns: clean(src.returns),
+        members: clean(src.members),
         insurance: clean(src.insurance),
     };
 }
@@ -377,6 +380,18 @@ function applyTombstones() {
     state.balances = drop(state.balances, state.deleted.balances);
     state.returns = drop(state.returns, state.deleted.returns);
     state.insurancePolicies = drop(state.insurancePolicies, state.deleted.insurance);
+
+    // 成员名单也是「名字即身份」的纯字符串，所以「什么时候加的」记在 memberAddedAt，
+    // 删除标记按名字裁决：删得比加得晚就消失（和支付方式同一套逻辑）。
+    const memMarks = new Map(state.deleted.members.map(m => [m.id, m.deletedAt]));
+    if (memMarks.size) {
+        const keptMembers = state.balanceMembers.filter(name => {
+            const at = memMarks.get(name);
+            if (at === undefined) return true;
+            return (state.memberAddedAt[name] || 0) > at;
+        });
+        if (keptMembers.length > 0) state.balanceMembers = keptMembers;
+    }
 
     // Payment methods are plain strings with no per-row timestamp, so "when was
     // this added" lives in pmAddedAt. Unknown age counts as 0, i.e. a deletion
@@ -472,6 +487,7 @@ function buildSyncPayload() {
             balances: state.balances,
             returns: state.returns,
             balanceMembers: state.balanceMembers,
+            memberAddedAt: state.memberAddedAt,
             fundTargets: state.fundTargets,
             insuranceMembers: state.insuranceMembers,
             insurancePolicies: state.insurancePolicies,
@@ -599,6 +615,7 @@ function mergeRemoteData(remoteData) {
         accounts: mergeTombstoneList(state.deleted.accounts, remoteDeleted.accounts),
         balances: mergeTombstoneList(state.deleted.balances, remoteDeleted.balances),
         returns: mergeTombstoneList(state.deleted.returns, remoteDeleted.returns),
+        members: mergeTombstoneList(state.deleted.members, remoteDeleted.members),
         insurance: mergeTombstoneList(state.deleted.insurance, remoteDeleted.insurance),
     };
 
@@ -613,6 +630,10 @@ function mergeRemoteData(remoteData) {
     state.insuranceMembers = [...new Set([...(state.insuranceMembers || []), ...(remote.insuranceMembers || [])])];
     // 家庭成员名单：并集（余额/收益记录的 id 编码了成员名，名单丢了记录就悬空）
     state.balanceMembers = [...new Set([...(state.balanceMembers || []), ...(remote.balanceMembers || [])])];
+    const remoteMemAdded = normalizeAddedAtMap(remote.memberAddedAt);
+    Object.keys(remoteMemAdded).forEach(k => {
+        if (!state.memberAddedAt[k] || remoteMemAdded[k] > state.memberAddedAt[k]) state.memberAddedAt[k] = remoteMemAdded[k];
+    });
     if ((remoteData.lastModified || 0) >= (iCloudLastSyncTime || 0) && remote.fundTargets) {
         state.fundTargets = { ...state.fundTargets, ...remote.fundTargets };
     }
@@ -1106,6 +1127,7 @@ function loadState() {
             state.insuranceMembers = Array.isArray(data.insuranceMembers) && data.insuranceMembers.length ? data.insuranceMembers : [...DEFAULT_INSURANCE_MEMBERS];
             state.insurancePolicies = Array.isArray(data.insurancePolicies) ? data.insurancePolicies : [];
             state.balanceMembers = Array.isArray(data.balanceMembers) && data.balanceMembers.length ? data.balanceMembers : ['本人'];
+            state.memberAddedAt = normalizeAddedAtMap(data.memberAddedAt);
             state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'transactions', autoOpenAdd: false }, ...data.settings };
             state.deleted = normalizeTombstones(data.deleted);
             state.pmAddedAt = normalizeAddedAtMap(data.pmAddedAt);
@@ -3916,7 +3938,9 @@ function clearAllData() {
     state.returns = [];
     state.accounts = DEFAULT_ACCOUNTS.map(a => ({ ...a }));
     state.fundTargets = { cash: 0, steady: 0, growth: 0 };
+    state.balanceMembers.filter(m => m !== '本人').forEach(m => addTombstone('members', m));
     state.balanceMembers = ['本人'];
+    state.memberAddedAt = { '本人': Date.now() };
     state.balanceOwner = 'all';
     state.insuranceMembers = [...DEFAULT_INSURANCE_MEMBERS];
     state.insurancePolicies = [];
@@ -5106,6 +5130,10 @@ function addBalanceMember() {
     const n = name.trim();
     if (state.balanceMembers.includes(n)) { showToast('已有该成员', 'error'); return; }
     state.balanceMembers.push(n);
+    state.memberAddedAt[n] = Date.now();
+    // 同名成员被删过又加回来：加的时间必须晚于删除标记，否则会被自己的墓碑吃掉
+    const memMark = state.deleted.members.find(m => m.id === n);
+    if (memMark) memMark.deletedAt = Math.min(memMark.deletedAt, state.memberAddedAt[n] - 1);
     saveState();
     renderFamilyBars();
 }
@@ -5118,6 +5146,8 @@ function renameBalanceMember(old) {
     const n = name.trim();
     if (state.balanceMembers.includes(n)) { showToast('已有同名成员', 'error'); return; }
     state.balanceMembers = state.balanceMembers.map(m => m === old ? n : m);
+    addTombstone('members', old);            // 改名 = 删旧名 + 加新名，否则旧名会被并集留在别的设备
+    state.memberAddedAt[n] = Date.now();
     state.balances.forEach(b => {
         if (b.member !== old) return;
         b.member = n;
@@ -5169,6 +5199,8 @@ function deleteBalanceMember(name) {
     state.balances = _mergeMemberRows(state.balances, name, fallback);
     state.returns = _mergeMemberRows(state.returns, name, fallback);
     state.balanceMembers = state.balanceMembers.filter(m => m !== name);
+    addTombstone('members', name);          // 关键：不写墓碑的话，并集合并会把它带回来
+    delete state.memberAddedAt[name];
     if (state.balanceOwner === name) state.balanceOwner = 'all';
     saveState();
     renderFamilyBars();
