@@ -1736,6 +1736,11 @@ function renderCalc() {
             shown = String(safeEval(calc.expr.slice(0, -1)));
         } else {
             shown = String(safeEval(calc.expr));
+            // safeEval("12.") 得到 12，结尾的小数点会被"吃掉"，用户看不出自己按没按到。
+            // 单段数字（没参与加减）时把小数点原样补回显示。
+            if (last === '.' && !/[+\-]/.test(calc.expr) && !isNaN(parseFloat(shown))) {
+                shown += '.';
+            }
         }
     }
     display.value = shown;
@@ -1744,7 +1749,8 @@ function renderCalc() {
     const evaluated = (() => {
         if (!calc.expr) return '';
         const last = calc.expr[calc.expr.length - 1];
-        if (last === '+' || last === '-') return '';
+        // 运算符后、或小数刚点了一半时不显示结果，避免出现 "12. = 12" 这种怪东西
+        if (last === '+' || last === '-' || last === '.') return '';
         const v = safeEval(calc.expr);
         if (isNaN(v) || !isFinite(v)) return '';
         return calc.expr + ' = ' + formatNum(v);
@@ -1779,7 +1785,8 @@ function numpadPress(key) {
         const seg = currentSegment();
         if (seg.includes('.')) return;
         if (calc.justOp || !calc.expr) {
-            calc.expr += (calc.expr && calc.justOp ? '' : '0.');
+            // 空表达式或刚按完运算符：新数从 "0." 开始（原来这里会拼空串，点被吞掉）
+            calc.expr += '0.';
             calc.justOp = false;
         } else {
             calc.expr += '.';
