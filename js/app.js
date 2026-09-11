@@ -4568,6 +4568,7 @@ function removeAccount(accountId) {
     saveState();
     renderView(state.currentView);
     refreshAccountLists();
+    refreshAccountsModalIfOpen();
 }
 
 function closeAccountHistoryModal() {
@@ -4774,6 +4775,7 @@ function addAccount() {
     saveState();
     renderAccountManageList();
     refreshAccountLists();
+    refreshAccountsModalIfOpen();
     showToast('账户已添加', 'success');
 }
 
@@ -4786,6 +4788,7 @@ function renameAccount(id) {
     a.updatedAt = Date.now();
     saveState();
     renderAccountManageList();
+    refreshAccountsModalIfOpen();
     renderBalance();
     showToast('已重命名', 'success');
 }
@@ -4856,6 +4859,18 @@ function ensureAccountOrder() {
             changed = true;
         }
     });
+    // 去重：两台设备各自分配过同号，合并后会出现并列。并列时排序退化到按名字，
+    // 交换两个同号也等于没交换 —— 这就是"有时能调、有时调不动"的原因。
+    const seen = new Set();
+    let dup = false;
+    state.accounts.forEach(a => { if (seen.has(a.order)) dup = true; else seen.add(a.order); });
+    if (dup) {
+        state.accounts.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)))
+            .forEach((a, i) => {
+                const v = i + 1;
+                if (a.order !== v) { a.order = v; a.updatedAt = Date.now(); changed = true; }
+            });
+    }
     return changed;
 }
 
@@ -4872,7 +4887,15 @@ function changeAccountGroup(id, group) {
     saveState();
     renderAccountManageList();
     refreshAccountLists();
+    refreshAccountsModalIfOpen();
     showToast(`「${a.name}」已归到${group}`, 'success');
+}
+
+// 账户管理弹窗开着时，任何改动都要立刻重画列表
+// （以前 removeAccount 只刷新了页面主体，弹窗里的行还留在原地）
+function refreshAccountsModalIfOpen() {
+    const m = document.getElementById('accountsModal');
+    if (m && !m.classList.contains('hidden')) renderAccountManageList();
 }
 
 // 按当前排序取出同类型的账户列表
@@ -4894,6 +4917,7 @@ function moveAccount(id, dir) {
     a.updatedAt = b.updatedAt = Date.now();
     saveState();
     renderAccountManageList();
+    refreshAccountsModalIfOpen();
     showToast('已调整顺序', 'success');
 }
 
@@ -4908,6 +4932,7 @@ function changeAccountType(id, kind) {
     saveState();
     renderAccountManageList();
     refreshAccountLists();
+    refreshAccountsModalIfOpen();
     showToast(`「${a.name}」已改为${kind === 'asset' ? '资产' : '负债'}账户`, 'success');
 }
 
@@ -5322,6 +5347,7 @@ function addBalanceMember() {
     if (memMark) memMark.deletedAt = Math.min(memMark.deletedAt, state.memberAddedAt[n] - 1);
     saveState();
     renderFamilyBars();
+    refreshAccountsModalIfOpen();
 }
 
 function _rebalanceId(member, accountId, month) { return `${member}__${accountId}__${month}`; }
@@ -5350,6 +5376,7 @@ function renameBalanceMember(old) {
     saveState();
     renderFamilyBars();
     renderAccountManageList();
+    refreshAccountsModalIfOpen();
 }
 
 // 把 from 成员的记录并入 to 成员：同账户同月已存在则金额相加，否则直接改归属
@@ -5391,6 +5418,7 @@ function deleteBalanceMember(name) {
     saveState();
     renderFamilyBars();
     renderAccountManageList();
+    refreshAccountsModalIfOpen();
 }
 
 function renderFamilySummary() {
