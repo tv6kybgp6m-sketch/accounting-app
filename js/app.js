@@ -148,6 +148,7 @@ let state = {
     accounts: DEFAULT_ACCOUNTS.map(a => ({ ...a })),
     balances: [],
     returns: [],               // 投资收益：{id, member, accountId, month, amount}
+    recurring: [],               // 周期记账规则：{id, type, amount, categoryId, paymentMethod, note, member, dayOfMonth, startDate, untilDate, lastRunPeriod, active}
     returnPeriod: 'month',
     returnYear: null,
     returnMonth: null,
@@ -209,6 +210,8 @@ const DEVICE_ID = (function () {
 // 节流写入：连续改动只在约 400ms 内落盘一次，避免每记一笔都把整本账重新序列化。
 // 关页面 / 切后台时强制补写，保证不丢。
 let __saveTimer = null;
+let __lastSavedBytes = 0;      // 最近一次序列化出来的字节数
+let __storageError = '';         // 非空表示存盘失败，需要醒目提示
 
 // 合并远端数据后若本地内容其实没变，就只落盘、不回推 iCloud。
 // 否则两台设备会互相触发对方的「远端有更新」，无限来回写。
@@ -272,13 +275,50 @@ function saveStateNow() {
         deleted: state.deleted,
         pmAddedAt: state.pmAddedAt,
         lastExportAt: state.lastExportAt,
+        recurring: state.recurring,
     };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    const text = JSON.stringify(data);
+    __lastSavedBytes = text.length;
+    try {
+        localStorage.setItem(STORAGE_KEY, text);
+        if (__storageError) { __storageError = ''; renderStorageWarning(); }
+    } catch (e) {
+        // 写不进去绝不能装作成功：内存里还在，但关掉就没了
+        const quota = e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22);
+        __storageError = quota
+            ? '浏览器存储空间已满，新改动无法保存！请立刻用「备份为 JSON」导出，然后删除历史记录。'
+            : ('保存失败：' + ((e && e.message) || '未知错误'));
+        renderStorageWarning();
+        showToast(__storageError, 'error');
+        return;                       // 没存成功，不要触发同步
+    }
+    renderStorageWarning();
 
     // Trigger iCloud sync (debounced)
     if (!__suppressSyncSchedule) {
         scheduleICloudSync();
         scheduleRemoteSync();
+    }
+}
+
+// localStorage 上限约 5MB，到 80% 就先提醒，别等写失败才知道
+const STORAGE_SOFT_LIMIT = 4 * 1024 * 1024;
+
+function renderStorageWarning() {
+    const bar = document.getElementById('storageWarning');
+    if (!bar) return;
+    const nearLimit = __lastSavedBytes > STORAGE_SOFT_LIMIT;
+    if (!__storageError && !nearLimit) { bar.classList.add('hidden'); bar.innerHTML = ''; return; }
+    bar.classList.remove('hidden');
+    const mb = (__lastSavedBytes / 1024 / 1024).toFixed(2);
+    if (__storageError) {
+        bar.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i>
+            <span>${_esc(__storageError)}（当前约 ${mb} MB）</span>
+            <button class="secondary-btn" onclick="exportSyncJSON()"><i class="fa-solid fa-download"></i> 立即备份</button>`;
+    } else {
+        bar.innerHTML = `<i class="fa-solid fa-circle-info"></i>
+            <span>账本已约 ${mb} MB，接近浏览器 5 MB 存储上限，建议先「备份为 JSON」。</span>
+            <button class="secondary-btn" onclick="exportSyncJSON()">备份</button>`;
     }
 }
 
@@ -714,6 +754,55 @@ function exportToICloud() {
     return exportSyncJSON(ICLOUD_SYNC_FILENAME, '已导出，请存入 iCloud 的「记账本」文件夹');
 }
 
+// ---- 备份历史（桌面版由 App 自动留版本；浏览器里没有本地归档）----
+function relTimeText(ms) {
+    const diff = Math.max(0, Date.now() - ms);
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return '刚刚';
+    if (m < 60) return m + ' 分钟前';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + ' 小时前';
+    return Math.floor(h / 24) + ' 天前';
+}
+
+async function renderBackupHistory() {
+    const sub = document.getElementById('backupHistorySub');
+    const btn = document.getElementById('backupFolderBtn');
+    if (!sub) return;
+    if (!(isElectron() && window.electronAPI && typeof window.electronAPI.listBackups === 'function')) {
+        sub.textContent = '网页版没有本地归档，请定期「备份为 JSON」并存到别处';
+        if (btn) btn.classList.add('hidden');
+        return;
+    }
+    try {
+        const info = await window.electronAPI.listBackups();
+        const list = (info && info.snapshots) || [];
+        if (!list.length) {
+            sub.textContent = '还没有生成快照（有改动后约 10 分钟留一份）';
+            if (btn) btn.classList.add('hidden');
+            return;
+        }
+        const newest = list[0];
+        const when = Date.parse(newest.date);
+        sub.textContent = `本机已保留 ${list.length} 份快照，最新一份 ${isNaN(when) ? '' : relTimeText(when)}`
+            + `（约 ${Math.max(1, Math.round((newest.bytes || 0) / 1024))} KB）· 恢复：选中文件后「导入 JSON」`;
+        if (btn) btn.classList.remove('hidden');
+    } catch (e) {
+        sub.textContent = '读取备份列表失败';
+        if (btn) btn.classList.add('hidden');
+    }
+}
+
+function openBackupFolderClick() {
+    if (!(isElectron() && window.electronAPI && typeof window.electronAPI.openBackupFolder === 'function')) {
+        showToast('网页版没有本地备份文件夹', 'error');
+        return;
+    }
+    window.electronAPI.openBackupFolder()
+        .then(() => showToast('已打开备份文件夹', 'success'))
+        .catch(() => showToast('打开备份文件夹失败', 'error'));
+}
+
 // 把一份 JSON 备份合并进当前账本
 function applyImportedJSON(text) {
     let parsed = null;
@@ -829,7 +918,50 @@ const GIST_API = 'https://api.github.com';
 const GIST_FILENAME = 'bookkeeping-sync.json';
 const REMOTE_SYNC_KEY = 'bookkeeping_remote_sync';
 const REMOTE_POLL_MS = 60000;
-const GIST_SIZE_LIMIT = 900 * 1024;          // GitHub 单文件上限约 1MB，留余量
+const GIST_SIZE_LIMIT = 950 * 1024;          // GitHub 单文件上限约 1MB，按"编码后"字节数判断
+const GIST_PREFIX = 'BKZ1:';                 // 压缩标记：BKZ1 + base64(zlib)
+const GIST_COMPRESS_THRESHOLD = 48 * 1024;   // 超过这个大小才值得压缩
+
+// ---- Gist 载荷压缩（账本大了明文会顶到 GitHub 单文件 1MB 上限）----
+function bytesToBase64(bytes) {
+    let bin = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(bin);
+}
+
+function base64ToBytes(b64) {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+}
+
+// 环境不支持 CompressionStream 时返回 null，调用方退回明文
+async function encodeSyncPayload(obj) {
+    const text = JSON.stringify(obj);
+    if (text.length <= GIST_COMPRESS_THRESHOLD || typeof CompressionStream === 'undefined') return text;
+    try {
+        const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('deflate'));
+        const buf = new Uint8Array(await new Response(stream).arrayBuffer());
+        const packed = GIST_PREFIX + bytesToBase64(buf);
+        return packed.length < text.length ? packed : text;   // 压不动就别白折腾
+    } catch (e) { return text; }
+}
+
+// 同时兼容明文（旧数据 / 别的设备写的）
+async function decodeSyncPayload(str) {
+    if (typeof str !== 'string') throw new Error('内容不是字符串');
+    if (str.indexOf(GIST_PREFIX) === 0) {
+        if (typeof DecompressionStream === 'undefined') throw new Error('本浏览器不支持解压，请更新系统浏览器');
+        const raw = base64ToBytes(str.slice(GIST_PREFIX.length));
+        const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate'));
+        return JSON.parse(await new Response(stream).text());
+    }
+    return JSON.parse(str);
+}
 
 let remoteSyncCfg = { enabled: false, token: '', gistId: '', lastSyncAt: 0 };
 let __remotePushTimer = null;
@@ -908,7 +1040,7 @@ async function remoteCreateGist() {
     const r = await gistApi('/gists', 'POST', {
         description: '记账本云同步（自动生成，请勿手动编辑）',
         public: false,
-        files: { [GIST_FILENAME]: { content: JSON.stringify(buildSyncPayload()) } },
+        files: { [GIST_FILENAME]: { content: await encodeSyncPayload(buildSyncPayload()) } },
     });
     if ((r.status === 201 || r.status === 200) && r.body && r.body.id) {
         remoteSyncCfg.gistId = r.body.id;
@@ -941,7 +1073,8 @@ async function remotePullAndMerge() {
     const file = gistLedgerFile(r.body);
     if (!file || !file.content) return false;            // 空库，稍后把本地推上去
     let remoteData = null;
-    try { remoteData = JSON.parse(file.content); } catch (e) { __remoteLastError = '云端内容不是有效 JSON'; return false; }
+    try { remoteData = await decodeSyncPayload(file.content); }
+    catch (e) { __remoteLastError = '云端内容无法解析：' + ((e && e.message) || '格式错误'); return false; }
     if (!remoteData || !remoteData.data) return false;
     const changed = mergeRemoteData(remoteData);
     if (changed) {
@@ -954,9 +1087,10 @@ async function remotePullAndMerge() {
 
 async function remotePush() {
     const payload = buildSyncPayload();
-    const text = JSON.stringify(payload);
+    const text = await encodeSyncPayload(payload);
+    // 上限判断用"编码后"长度：压缩让 1MB 账本降到约 130KB，不至于被误判放不下
     if (text.length > GIST_SIZE_LIMIT) {
-        __remoteLastError = '账本太大（超过 ' + Math.round(GIST_SIZE_LIMIT / 1024) + 'KB），Gist 放不下，请先清理或导出备份';
+        __remoteLastError = '账本太大（压缩后仍 ' + Math.round(text.length / 1024) + 'KB），Gist 放不下，请先清理或导出备份';
         return false;
     }
     const r = await gistApi('/gists/' + encodeURIComponent(remoteSyncCfg.gistId), 'PATCH', {
@@ -1145,6 +1279,9 @@ function loadState() {
             ensureAccountOrder();
             state.balances = Array.isArray(data.balances) ? data.balances : [];
             state.returns = Array.isArray(data.returns) ? data.returns : [];
+            state.recurring = Array.isArray(data.recurring) ? data.recurring : [];
+            state.memberAddedAt = Object.assign({}, data.memberAddedAt || {});
+            state.insuranceMemberAddedAt = Object.assign({}, data.insuranceMemberAddedAt || {});
             state.fundTargets = { cash: 0, steady: 0, growth: 0, ...(data.fundTargets || {}) };
             state.insuranceMembers = Array.isArray(data.insuranceMembers) && data.insuranceMembers.length ? data.insuranceMembers : [...DEFAULT_INSURANCE_MEMBERS];
             state.insuranceMemberAddedAt = normalizeAddedAtMap(data.insuranceMemberAddedAt);
@@ -3410,6 +3547,7 @@ function renderSettings() {
     updateICloudSyncUI();
     updateRemoteSyncUI();
     renderBackupBanner();
+    renderBackupHistory();
 }
 
 function applyTheme(theme) {

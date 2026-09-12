@@ -89,6 +89,7 @@
 
             <!-- Main Content -->
             <main class="main-content">
+                <div class="storage-warning hidden" id="storageWarning"></div>
                 <!-- Transactions View -->
                 <section class="view active" id="view-transactions">
                     <div class="view-header">
@@ -639,6 +640,12 @@
                                     <i class="fa-solid fa-rotate-left"></i> 导入 JSON
                                 </button>
                             </div>
+                            <div class="settings-row" id="backupHistoryRow">
+                                <div class="settings-label">备份历史<div class="settings-sublabel" id="backupHistorySub">加载中…</div></div>
+                                <button class="secondary-btn hidden" id="backupFolderBtn" onclick="openBackupFolderClick()">
+                                    <i class="fa-solid fa-folder-open"></i> 打开文件夹
+                                </button>
+                            </div>
                             <div class="settings-row">
                                 <div class="settings-label">加载示例数据</div>
                                 <button class="secondary-btn" onclick="loadSampleData()">
@@ -662,7 +669,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.22.0</div>
+                                    <div class="about-version">版本 1.23.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -1014,7 +1021,7 @@
         // otherwise let an old cache-first worker pin the app to an outdated build.
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.22.0').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.23.0').catch(() => {});
             });
         }
     </script>

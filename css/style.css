@@ -3422,3 +3422,14 @@ table.bill-stats {
     border-radius: 6px; background: var(--bg-input); color: var(--text-secondary);
     font-family: var(--font); cursor: pointer; flex-shrink: 0; max-width: 92px;
 }
+
+/* ---- 存储告警横幅 ---- */
+.storage-warning {
+    display: flex; align-items: center; gap: 10px;
+    margin: 0 0 12px; padding: 10px 14px;
+    background: #fff4e5; border: 1px solid #ffd9a0; border-radius: 10px;
+    color: #8a5200; font-size: 13px;
+}
+[data-theme="dark"] .storage-warning { background: #3a2a12; border-color: #5c421c; color: #ffcc80; }
+.storage-warning span { flex: 1; min-width: 0; }
+.storage-warning .secondary-btn { flex: 0 0 auto; font-size: 12px; padding: 5px 10px; }
