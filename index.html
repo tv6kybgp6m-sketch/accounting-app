@@ -611,6 +611,11 @@
                             </div>
                         </div>
                         <div class="settings-section">
+                            <h3>周期记账</h3>
+                            <div class="settings-section-hint">按规则自动补记房租、工资、订阅等。生成的记录带规则标记，多台设备不会重复记。</div>
+                            <div id="recurringSection"></div>
+                        </div>
+                        <div class="settings-section">
                             <h3>云同步</h3>
                             <div id="remoteSyncSection"></div>
                         </div>
@@ -669,7 +674,7 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.23.0</div>
+                                    <div class="about-version">版本 1.24.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
                             </div>
@@ -1021,7 +1026,7 @@
         // otherwise let an old cache-first worker pin the app to an outdated build.
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.23.0').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.24.0').catch(() => {});
             });
         }
     </script>

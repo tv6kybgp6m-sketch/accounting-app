@@ -322,6 +322,286 @@ function renderStorageWarning() {
     }
 }
 
+// ==================== 删除撤销 ====================
+// 删除是"打墓碑 + 从数组里摘掉"，所以撤销必须同时做两件事：把行放回去、把刚写的墓碑撤掉，
+// 否则 applyTombstones 会立刻把它再删一遍。
+const UNDO_BUCKET = {
+    transactions: 'transactions', balances: 'balances', returns: 'returns',
+    accounts: 'accounts', categories: 'categories', budgets: 'budgets',
+    insurancePolicies: 'insurance', paymentMethods: 'paymentMethods',
+};
+let __undoStack = [];
+
+// rowsByCollection 例：{ transactions:[rowObj,...], accounts:[...] }；传对象快照，不传引用
+function pushUndo(label, rowsByCollection) {
+    const rows = {};
+    let any = false;
+    Object.keys(rowsByCollection || {}).forEach(coll => {
+        const list = rowsByCollection[coll] || [];
+        if (!list.length) return;
+        rows[coll] = list.map(x => (x && typeof x === 'object' ? Object.assign({}, x) : x));
+        any = true;
+    });
+    if (!any) return false;
+    __undoStack.push({ label, rows, at: Date.now() });
+    if (__undoStack.length > 10) __undoStack.shift();
+    return true;
+}
+
+function undoLastDelete() {
+    const op = __undoStack.pop();
+    if (!op) { showToast('没有可撤销的删除', 'error'); return false; }
+    Object.keys(op.rows).forEach(coll => {
+        const items = op.rows[coll] || [];
+        const bucket = UNDO_BUCKET[coll];
+        if (coll === 'paymentMethods') {
+            items.forEach(name => {
+                if (!state.paymentMethods.includes(name)) {
+                    state.paymentMethods.push(name);
+                    state.pmAddedAt[name] = Date.now();      // 加得比删得晚，才不会被自己的墓碑吃掉
+                }
+            });
+        } else {
+            const target = state[coll];
+            if (!Array.isArray(target)) return;
+            items.forEach(row => {
+                if (target.some(x => x.id === row.id)) return;
+                const clone = Object.assign({}, row);
+                clone.updatedAt = Date.now();
+                target.push(clone);
+            });
+        }
+        if (bucket && Array.isArray(state.deleted[bucket])) {
+            const ids = new Set(items.map(x => (coll === 'paymentMethods' ? x : x.id)));
+            state.deleted[bucket] = state.deleted[bucket].filter(t => !ids.has(t.id));
+        }
+    });
+    saveState();
+    renderView(state.currentView);
+    refreshAccountLists();
+    showToast('已撤销：' + op.label, 'success');
+    return true;
+}
+
+// 带「撤销」按钮的提示条
+function showUndoToast(label) {
+    const container = document.getElementById('toastContainer');
+    if (!container) { showToast('已删除：' + label, 'success'); return; }
+    const toast = document.createElement('div');
+    toast.className = 'toast undo';
+    toast.innerHTML = `<i class="fa-solid fa-trash-arrow-up"></i> 已删除「${_esc(label)}」`
+        + `<button class="toast-undo-btn" type="button">撤销</button>`;
+    const btn = toast.querySelector('.toast-undo-btn');
+    if (btn) btn.addEventListener('click', () => { undoLastDelete(); toast.remove(); });
+    container.appendChild(toast);
+    setTimeout(() => { toast.classList.add('fade-out'); setTimeout(() => toast.remove(), 300); }, 8000);
+}
+
+// ==================== 周期记账 ====================
+// 关键点：生成的交易 id 由「规则 id + 实际日期」决定，是确定性的。
+// 这样同一台设备重复跑不会重复记，两台设备各自生成也会得到相同 id，合并时自然去重。
+const RECUR_INTERVALS = { monthly: '每月', weekly: '每周', daily: '每天', yearly: '每年' };
+
+// parseLocalDate 返回的是"当天中午"（为了躲时区/夏令时边界），
+// 而周期落点建在当天零点；不统一基准的话首期会被 cur >= start 判假而丢掉。
+function dayStart(d) {
+    if (!d || isNaN(d.getTime())) return null;
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function ymdStr(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// 列出规则在 [startDate, min(today, untilDate)] 之间的所有落点
+function recurringOccurrences(rule, today) {
+    const out = [];
+    const start = dayStart(parseLocalDate(rule.startDate));
+    if (!start) return out;
+    const limit = dayStart(today || new Date());
+    const cap = rule.untilDate ? dayStart(parseLocalDate(rule.untilDate)) : null;
+    const end = (cap && cap < limit) ? cap : limit;
+    if (!end || end < start) return out;
+
+    const interval = rule.interval || 'monthly';
+    let guard = 0;
+
+    if (interval === 'monthly') {
+        const day = Math.max(1, Math.min(31, Number(rule.dayOfMonth) || start.getDate()));
+        let y = start.getFullYear(), m = start.getMonth();
+        // 从起始月往后逐月推进，月末不足天数就夹到当月最后一天（31 号在 2 月记成 28/29）
+        while (guard++ < 1200) {
+            const cur = new Date(y, m, Math.min(day, getDaysInMonth(y, m + 1)));
+            if (cur > end) break;
+            if (cur >= start) out.push(cur);
+            m += 1; if (m > 11) { m = 0; y += 1; }
+        }
+    } else if (interval === 'yearly') {
+        let y = start.getFullYear();
+        while (guard++ < 200) {
+            const cur = new Date(y, start.getMonth(),
+                Math.min(start.getDate(), getDaysInMonth(y, start.getMonth() + 1)));
+            if (cur > end) break;
+            if (cur >= start) out.push(cur);
+            y += 1;
+        }
+    } else {
+        const step = interval === 'weekly' ? 7 : 1;
+        let cur = new Date(start);
+        while (guard++ < 5000) {
+            if (cur > end) break;
+            out.push(cur);
+            cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + step);
+        }
+    }
+    return out;
+}
+
+// 补记所有到期的规则；返回新建的交易
+function runRecurringRules(silent) {
+    if (!Array.isArray(state.recurring)) state.recurring = [];
+    const today = new Date(); today.setHours(23, 59, 59, 999);
+    const existing = new Set(state.transactions.map(t => t.id));
+    const created = [];
+    state.recurring.forEach(rule => {
+        if (!rule || !rule.active) return;
+        if (!state.categories.some(c => c.id === rule.categoryId)) return;   // 分类被删了就不记
+        recurringOccurrences(rule, today).forEach(dt => {
+            const dateStr = ymdStr(dt);
+            const id = `rec_${rule.id}_${dateStr}`;
+            if (existing.has(id)) return;
+            const txn = {
+                id,
+                type: rule.type === 'income' ? 'income' : 'expense',
+                amount: Number(rule.amount) || 0,
+                categoryId: rule.categoryId,
+                date: dateStr,
+                time: rule.time || '',
+                note: rule.note || '',
+                paymentMethod: rule.paymentMethod || '现金',
+                recurringRuleId: rule.id,
+                createdAt: Date.now(), updatedAt: Date.now(),
+            };
+            state.transactions.push(txn);
+            existing.add(id);
+            created.push(txn);
+        });
+    });
+    if (created.length) {
+        flushState();
+        renderView(state.currentView);
+        updateSidebarSummary();
+        if (!silent) showToast(`周期记账已补记 ${created.length} 笔`, 'success');
+    }
+    return created;
+}
+
+function nextDueText(rule) {
+    if (!rule.active) return '已暂停';
+    const start = parseLocalDate(rule.startDate);
+    if (!start) return '';
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    if (rule.untilDate) {
+        const u = parseLocalDate(rule.untilDate);
+        if (u && u < today) return '已结束';
+    }
+    const next = recurringOccurrences(rule, new Date(today.getFullYear(), today.getMonth(), today.getDate() + 400))
+        .find(d => d >= today);
+    if (!next) return '—';
+    const label = RECUR_INTERVALS[rule.interval] || '每月';
+    return `${label} · 下次 ${ymdStr(next).replace(/-/g, '/')}`;
+}
+
+function renderRecurringSection() {
+    const box = document.getElementById('recurringSection');
+    if (!box) return;
+    if (!Array.isArray(state.recurring)) state.recurring = [];
+    const cats = state.categories || [];
+    const rows = state.recurring.map(rule => {
+        const cat = cats.find(c => c.id === rule.categoryId);
+        const name = `${rule.type === 'income' ? '收入' : '支出'} · ${cat ? cat.name : '分类已删除'} ${formatCurrency(rule.amount)}`;
+        return `
+        <div class="recur-row ${rule.active ? '' : 'off'}">
+            <div class="recur-main">
+                <div class="recur-name">${_esc(name)}</div>
+                <div class="recur-meta">${_esc(nextDueText(rule))} · 自 ${_esc(rule.startDate || '')}${rule.note ? ' · ' + _esc(rule.note) : ''}</div>
+            </div>
+            <button class="icon-btn" data-recur-toggle="${rule.id}" title="${rule.active ? '暂停' : '启用'}">
+                <i class="fa-solid ${rule.active ? 'fa-pause' : 'fa-play'}"></i>
+            </button>
+            <button class="icon-btn" data-recur-run="${rule.id}" title="立即补记一期"><i class="fa-solid fa-forward"></i></button>
+            <button class="bh-delete" data-recur-del="${rule.id}" title="删除规则"><i class="fa-solid fa-trash"></i></button>
+        </div>`;
+    }).join('');
+
+    box.innerHTML = `
+        ${state.recurring.length ? rows : '<div class="breakdown-empty">还没有周期规则，用下面表单添加一条（如房租、工资、订阅）</div>'}
+        <div class="recur-form">
+            <div class="recur-form-grid">
+                <select class="text-input" id="rfType">
+                    <option value="expense">支出</option><option value="income">收入</option>
+                </select>
+                <select class="text-input" id="rfCat">${cats.map(c => `<option value="${c.id}">${_esc(c.name)}</option>`).join('')}</select>
+                <input class="text-input" id="rfAmount" type="number" step="0.01" min="0" placeholder="金额">
+                <select class="text-input" id="rfInterval">
+                    <option value="monthly">每月</option><option value="weekly">每周</option>
+                    <option value="daily">每天</option><option value="yearly">每年</option>
+                </select>
+                <input class="text-input" id="rfDay" type="number" min="1" max="31" placeholder="每月几号" value="${new Date().getDate()}">
+                <input class="text-input" id="rfStart" type="date" value="${todayStr()}">
+                <input class="text-input" id="rfUntil" type="date" placeholder="结束（可空）">
+                <input class="text-input" id="rfNote" placeholder="备注（可空）">
+            </div>
+            <button class="primary-btn" id="rfAdd"><i class="fa-solid fa-plus"></i> 添加规则</button>
+        </div>`;
+
+    const gv = id => (document.getElementById(id) || {});
+    const addBtn = document.getElementById('rfAdd');
+    if (addBtn) addBtn.addEventListener('click', () => {
+        const amount = parseFloat(gv('rfAmount').value || '');
+        const categoryId = gv('rfCat').value;
+        const startDate = gv('rfStart').value;
+        if (!isFinite(amount) || amount <= 0) { showToast('请输入有效金额', 'error'); return; }
+        if (!categoryId || !startDate) { showToast('请选择分类和开始日期', 'error'); return; }
+        state.recurring.push({
+            id: 'rc_' + uid(),
+            type: gv('rfType').value === 'income' ? 'income' : 'expense',
+            amount, categoryId,
+            paymentMethod: state.settings.defaultPaymentMethod || '现金',
+            note: (gv('rfNote').value || '').trim(),
+            interval: gv('rfInterval').value || 'monthly',
+            dayOfMonth: Math.max(1, Math.min(31, parseInt(gv('rfDay').value, 10) || 1)),
+            startDate,
+            untilDate: (gv('rfUntil').value || '').trim() || null,
+            active: true,
+            createdAt: Date.now(), updatedAt: Date.now(),
+        });
+        saveState();
+        renderRecurringSection();
+        const made = runRecurringRules(true);
+        showToast(made.length ? `规则已添加，并补记了 ${made.length} 笔` : '规则已添加', 'success');
+    });
+
+    box.onclick = e => {
+        const t = e.target.closest ? e.target.closest('[data-recur-toggle],[data-recur-run],[data-recur-del]') : null;
+        if (!t) return;
+        const id = t.dataset.recurToggle || t.dataset.recurRun || t.dataset.recurDel;
+        const rule = state.recurring.find(x => x.id === id);
+        if (!rule) return;
+        if (t.dataset.recurToggle) { rule.active = !rule.active; rule.updatedAt = Date.now(); saveState(); renderRecurringSection(); }
+        else if (t.dataset.recurDel) {
+            if (!confirm(`删除规则「${rule.note || rule.categoryId}」？已生成的交易不会被删除。`)) return;
+            state.recurring = state.recurring.filter(x => x.id !== id);
+            saveState(); renderRecurringSection();
+            showToast('规则已删除', 'success');
+        } else if (t.dataset.recurRun) {
+            const made = runRecurringRules(false);
+            if (!made.length) showToast('这一期已经记过了', 'info');
+            renderRecurringSection();
+        }
+    };
+}
+
 // ---- Modal stacking ----
 // Every overlay used to sit at z-index 1000, so a modal opened from inside another
 // modal (报表分析 → 分类明细 → 点某笔记录) ended up painted *behind* its parent.
@@ -2049,6 +2329,7 @@ function deletePaymentMethod(name) {
         showToast(`该支付方式有 ${count} 笔交易记录，无法删除`, 'error');
         return;
     }
+    pushUndo(`支付方式「${name}」`, { paymentMethods: [name] });
     addTombstone('paymentMethods', name);
     state.paymentMethods = state.paymentMethods.filter(p => p !== name);
     if ((state.settings.defaultPaymentMethod || '微信支付') === name) {
@@ -2177,10 +2458,13 @@ function editTransaction(id) {
 }
 
 function deleteTransaction(id) {
+    const row = state.transactions.find(t => t.id === id);
     addTombstone('transactions', id);
     state.transactions = state.transactions.filter(t => t.id !== id);
     saveState();
-    showToast('交易已删除', 'success');
+    const label = row ? `${formatCurrency(row.amount)} · ${(getCategoryById(row.categoryId) || {}).name || '未知'}` : '交易';
+    if (row && pushUndo(label, { transactions: [row] })) showUndoToast(label);
+    else showToast('交易已删除', 'success');
     renderView(state.currentView);
     refreshCategoryLedger();
 }
@@ -3115,11 +3399,14 @@ function saveBudget() {
 }
 
 function deleteBudget(id) {
+    const row = state.budgets.find(b => b.id === id);
     addTombstone('budgets', id);
     state.budgets = state.budgets.filter(b => b.id !== id);
     saveState();
     renderBudget();
-    showToast('预算已删除', 'success');
+    const label = row ? `「${((getCategoryById(row.categoryId) || {}).name) || '分类'}」预算` : '预算';
+    if (row && pushUndo(label, { budgets: [row] })) showUndoToast(label);
+    else showToast('预算已删除', 'success');
 }
 
 // ---- Categories ----
@@ -3283,13 +3570,15 @@ function deleteCategory(id) {
         return;
     }
     if (!confirm(`确定删除分类「${cat.name}」吗？`)) return;
+    const goneBudgets = state.budgets.filter(b => b.categoryId === id);
     addTombstone('categories', id);
-    state.budgets.filter(b => b.categoryId === id).forEach(b => addTombstone('budgets', b.id));
+    goneBudgets.forEach(b => addTombstone('budgets', b.id));
     state.categories = state.categories.filter(c => c.id !== id);
     state.budgets = state.budgets.filter(b => b.categoryId !== id);
     saveState();
     renderCategories();
-    showToast('分类已删除', 'success');
+    if (pushUndo(`分类「${cat.name}」`, { categories: [cat], budgets: goneBudgets })) showUndoToast(`分类「${cat.name}」`);
+    else showToast('分类已删除', 'success');
 }
 
 // ---- Category action sheet (tap) & drag-to-reorder (long press) ----
@@ -3548,6 +3837,7 @@ function renderSettings() {
     updateRemoteSyncUI();
     renderBackupBanner();
     renderBackupHistory();
+    renderRecurringSection();
 }
 
 function applyTheme(theme) {
@@ -4686,12 +4976,14 @@ function renderAccountHistory() {
 
 function deleteBalanceSnapshot(id) {
     if (!confirm('删除这一期的余额记录？')) return;
+    const row = state.balances.find(b => b.id === id);
     addTombstone('balances', id);
     state.balances = state.balances.filter(b => b.id !== id);
     saveState();
     renderAccountHistory();
     renderBalance();
-    showToast('已删除该期余额', 'success');
+    if (row && pushUndo('该期余额', { balances: [row] })) showUndoToast('该期余额');
+    else showToast('已删除该期余额', 'success');
 }
 
 function deleteAccountFromHistory(accountId) {
@@ -4704,12 +4996,18 @@ function deleteAccountFromHistory(accountId) {
 }
 
 function removeAccount(accountId) {
+    const acct = accountById(accountId);
+    const goneBal = state.balances.filter(b => b.accountId === accountId);
+    const goneRet = state.returns.filter(r => r.accountId === accountId);
     addTombstone('accounts', accountId);
-    state.balances.filter(b => b.accountId === accountId).forEach(b => addTombstone('balances', b.id));
-    state.returns.filter(r => r.accountId === accountId).forEach(r => addTombstone('returns', r.id));
+    goneBal.forEach(b => addTombstone('balances', b.id));
+    goneRet.forEach(r => addTombstone('returns', r.id));
     state.accounts = state.accounts.filter(a => a.id !== accountId);
     state.balances = state.balances.filter(b => b.accountId !== accountId);
     state.returns = state.returns.filter(r => r.accountId !== accountId);
+    if (acct) pushUndo(`账户「${acct.name}」`, {
+        accounts: [acct], balances: goneBal, returns: goneRet,
+    });
     saveState();
     renderView(state.currentView);
     refreshAccountLists();
@@ -6131,12 +6429,14 @@ function renderReturnAccountHistory() {
 
 function deleteReturnSnapshot(id) {
     if (!confirm('删除这一期的收益记录？')) return;
+    const row = state.returns.find(r => r.id === id);
     addTombstone('returns', id);
     state.returns = state.returns.filter(r => r.id !== id);
     saveState();
     renderReturnAccountHistory();
     renderReturns();
-    showToast('已删除该期收益', 'success');
+    if (row && pushUndo('该期收益', { returns: [row] })) showUndoToast('该期收益');
+    else showToast('已删除该期收益', 'success');
 }
 
 // ---------------- 记收益弹窗 ----------------
@@ -6475,6 +6775,9 @@ async function init() {
     // 云同步（Gist）：iPhone / Mac / 浏览器共用同一本账
     startRemotePolling();                       // 未配置时内部直接跳过
     if (remoteSyncReady()) setTimeout(() => remoteSyncCycle('startup'), 1200);
+
+    // 周期记账补记：放在 iCloud 拉取之后，避免拿旧副本重复生成
+    setTimeout(() => { try { runRecurringRules(true); } catch (e) { console.error('recurring failed', e); } }, 2500);
 }
 
 document.addEventListener('DOMContentLoaded', init);
