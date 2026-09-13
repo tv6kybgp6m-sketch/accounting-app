@@ -5910,6 +5910,86 @@ let returnHistoryAccountId = null;
 function returnMonths() { return [...new Set(state.returns.map(r => r.month))].sort(); }
 function returnYears() { return [...new Set(returnMonths().map(m => m.slice(0, 4)))].sort(); }
 
+// ==================== 收益率（组合口径，Modified Dietz）====================
+// 数据结构为"以后按账户看收益率"预留：每条收益记录可带一个 flow（本月净入金），
+// 留空表示未录。账户级收益率只是把这里的组合算法按 accountId 再切一刀，不必改结构。
+
+// 哪些账户算"投资账户"：沿用四笔钱的归类（稳健理财 + 长期投资），
+// 现金/房产/车辆/公积金算收益率没意义，还会被存取款严重扭曲。
+function investmentAccountIds() {
+    const includeCash = !!(state.settings && state.settings.returnIncludeCash);
+    const wanted = includeCash ? ['steady', 'growth', 'cash'] : ['steady', 'growth'];
+    return state.accounts.filter(a => a.kind === 'asset' && wanted.includes(a.bucket)).map(a => a.id);
+}
+
+// 某月的组合三要素：期初市值、期末市值、本期收益、已录净入金
+function portfolioMonthStats(month, ids) {
+    const scope = ids || investmentAccountIds();
+    const member = state.balanceOwner;
+    const prev = previousMonthOf(month);
+    const valueAt = (m) => {
+        if (!m) return 0;
+        const map = balancesAtMonth(m, member);
+        return scope.reduce((sum, id) => sum + (Number(map[id]) || 0), 0);
+    };
+    const v1 = valueAt(month);
+    const v0 = valueAt(prev);
+
+    const retMap = returnsAtMonth(month, member);
+    let profit = 0;
+    scope.forEach(id => { profit += Number(retMap[id]) || 0; });
+
+    // flow 可以留空（未录）；只要有一条录了，就认为这个月的入金信息是已知的
+    let flow = 0, flowKnown = false;
+    state.returns.forEach(r => {
+        if (r.month !== month || !scope.includes(r.accountId)) return;
+        if (member !== 'all' && r.member !== member) return;
+        if (r.flow === undefined || r.flow === null || r.flow === '') return;
+        flow += Number(r.flow) || 0;
+        flowKnown = true;
+    });
+
+    // 分母：录了入金就用 Modified Dietz（期初 + 入金的一半，假设月中进出）；
+    // 没录就退化成"期初期末平均"，是个不完美但远好于直接除期末的近似。
+    const base = flowKnown ? (v0 + flow / 2) : ((v0 + v1) / 2);
+    const hasProfit = scope.some(id => (retMap[id] !== undefined && retMap[id] !== null));
+    const rate = (hasProfit && base > 0) ? profit / base : null;
+
+    // 自洽校验：收益理应等于 期末 − 期初 − 净入金。差得多说明余额或收益记错了。
+    let check = null;
+    if (flowKnown && v0 > 0) {
+        const implied = v1 - v0 - flow;
+        const gap = profit - implied;
+        const tol = Math.max(1, Math.abs(v1) * 0.005);   // 0.5% 以内当四舍五入
+        if (Math.abs(gap) > tol) check = { implied, gap };
+    }
+
+    return { v0, v1, profit, flow, flowKnown, base, rate, check };
+}
+
+// 时间加权累计收益率：逐月 (1+r) 连乘。剔掉"什么时候加钱/取钱"的影响，
+// 只留投资本身的表现，所以不同投入规模的账户可以横向比。
+function portfolioCumulative(months) {
+    const list = (months || returnMonths()).filter(m => m);
+    let acc = 1, n = 0, best = null;
+    const series = list.map(m => {
+        const st = portfolioMonthStats(m);
+        if (st.rate !== null && isFinite(st.rate)) { acc *= (1 + st.rate); n += 1; }
+        return { month: m, ...st };
+    });
+    const cumulative = n > 0 ? acc - 1 : null;
+    // 年化：按有收益率的月份数折算
+    const annualized = (cumulative !== null && n > 0)
+        ? Math.pow(1 + cumulative, 12 / n) - 1
+        : null;
+    return { series, months: n, cumulative, annualized };
+}
+
+function pctText(r, digits) {
+    if (r === null || r === undefined || !isFinite(r)) return '—';
+    return (r * 100).toFixed(digits === undefined ? 2 : digits) + '%';
+}
+
 // 某月各账户收益（按当前成员筛选；'all' = 全家相加）
 function returnsAtMonth(month, member = state.balanceOwner) {
     const map = {};
@@ -6105,7 +6185,68 @@ function renderReturns() {
     renderReturnBreakdown(info);
     renderReturnMonthly();
     renderReturnMemberBar();
+    renderReturnRates(info);
     updateReturnToggleStates();
+}
+
+// 收益率卡片：组合口径（稳健理财 + 长期投资），不是全部资产账户
+function renderReturnRates(info) {
+    const setText = (id, txt, cls) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = txt;
+        if (cls !== undefined) {
+            el.classList.toggle('income', cls === 'up');
+            el.classList.toggle('expense', cls === 'down');
+        }
+    };
+    const ids = investmentAccountIds();
+    const cum = portfolioCumulative();
+    const cur = portfolioMonthStats(info.month, ids);
+
+    const rateCls = r => (r === null ? undefined : (r > 0 ? 'up' : (r < 0 ? 'down' : undefined)));
+    setText('retRateMonth', pctText(cur.rate), rateCls(cur.rate));
+    setText('retRateCum', pctText(cum.cumulative), rateCls(cum.cumulative));
+    setText('retRateAnnual', pctText(cum.annualized), rateCls(cum.annualized));
+
+    const mh = document.getElementById('retRateMonthHint');
+    if (mh) {
+        if (cur.rate === null) mh.textContent = cur.v0 > 0 ? '本期没有收益记录' : '缺少上月余额，无法算期初';
+        else mh.textContent = cur.flowKnown
+            ? `本金 ${formatCurrency(cur.base)} · 含净入金 ${formatCurrency(cur.flow)}`
+            : `平均本金 ${formatCurrency(cur.base)} · 未录入金（近似）`;
+    }
+    const ch = document.getElementById('retRateCumHint');
+    if (ch) ch.textContent = cum.months ? `按 ${cum.months} 个有收益率的月份连乘` : '';
+    const ah = document.getElementById('retRateAnnualHint');
+    if (ah) ah.textContent = cum.months && cum.months < 12 ? '不足一年，按月折算' : '';
+
+    const scope = document.getElementById('retScopeNote');
+    if (scope) {
+        const names = ids.map(id => (accountById(id) || {}).name).filter(Boolean);
+        scope.innerHTML = `只统计<b>稳健理财 / 长期投资</b>类账户${state.settings.returnIncludeCash ? ' + 活钱' : ''}：`
+            + `${_esc(names.join('、') || '（还没有投资账户，去「四笔钱」归类）')}`
+            + `<button class="link-btn" id="retScopeToggle">${state.settings.returnIncludeCash ? '不含活钱' : '把活钱也算进来'}</button>`;
+        const t = document.getElementById('retScopeToggle');
+        if (t) t.addEventListener('click', () => {
+            state.settings.returnIncludeCash = !state.settings.returnIncludeCash;
+            saveState(); renderReturns();
+        });
+    }
+
+    const warn = document.getElementById('retCheckWarn');
+    if (warn) {
+        if (cur.check) {
+            warn.classList.remove('hidden');
+            warn.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> `
+                + `这个月对不上：你录的收益是 <b>${formatCurrency(cur.profit)}</b>，`
+                + `但按「期末 ${formatCurrency(cur.v1)} − 期初 ${formatCurrency(cur.v0)} − 净入金 ${formatCurrency(cur.flow)}」`
+                + `应该是 <b>${formatCurrency(cur.check.implied)}</b>，差 <b>${formatCurrency(cur.check.gap)}</b>。`
+                + `可能是余额或收益记错了。`;
+        } else {
+            warn.classList.add('hidden'); warn.innerHTML = '';
+        }
+    }
 }
 
 function updateReturnToggleStates() {
@@ -6304,14 +6445,19 @@ function renderReturnMonthly() {
     if (!body) return;
     const months = returnMonths().slice().reverse();   // 最新在前
     if (!months.length) {
-        body.innerHTML = '<tr><td colspan="4" class="breakdown-empty">还没有收益记录，点右上角「记收益」添加</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" class="breakdown-empty">还没有收益记录，点右上角「记收益」添加</td></tr>';
         return;
     }
     // 累计要按时间正序累加
     const asc = returnMonths();
     const running = {};
     let acc = 0;
-    asc.forEach(m => { acc += returnSummary([m]).total; running[m] = acc; });
+    const rateByMonth = {};
+    asc.forEach(m => {
+        acc += returnSummary([m]).total;
+        running[m] = acc;
+        rateByMonth[m] = portfolioMonthStats(m).rate;
+    });
 
     const money = (v, cls) => `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${formatCurrency(v)}</span>`;
     let html = months.map((m, i) => {
@@ -6324,6 +6470,7 @@ function renderReturnMonthly() {
             <td class="bs-label">${m.replace('-', '年')}月</td>
             <td>${money(cur, cur >= 0 ? 'income' : 'expense')}</td>
             <td>${money(running[m])}</td>
+            <td><span class="bs-num${(rateByMonth[m] || 0) > 0 ? ' income' : ((rateByMonth[m] || 0) < 0 ? ' expense' : '')}">${pctText(rateByMonth[m], 2)}</span></td>
             <td>${delta === null ? '<span class="bs-num">—</span>' : money(delta, delta >= 0 ? 'income' : 'expense')}</td>
         </tr>`;
     }).join('');
@@ -6333,6 +6480,7 @@ function renderReturnMonthly() {
             <td class="bs-label">合计</td>
             <td>${money(totalAll, totalAll >= 0 ? 'income' : 'expense')}</td>
             <td>${money(totalAll)}</td>
+            <td><span class="bs-num">${pctText(portfolioCumulative(asc).cumulative, 2)}</span></td>
             <td><span class="bs-num">—</span></td>
         </tr>`;
     body.innerHTML = html;
@@ -6476,16 +6624,32 @@ function renderReturnEntry() {
         return;
     }
     const existing = returnsAtMonth(month, member);
-    list.innerHTML = accounts.map(a => `
-        <div class="bal-entry-row">
+    const invIds = investmentAccountIds();
+    // 净入金按「成员+账户+月份」取已有值，供以后账户级收益率使用
+    const flowOf = (accId) => {
+        const hit = state.returns.find(r => r.accountId === accId && r.month === month
+            && (member === 'all' ? true : r.member === member)
+            && r.flow !== undefined && r.flow !== null && r.flow !== '');
+        return hit ? hit.flow : '';
+    };
+    list.innerHTML = accounts.map(a => {
+        const isInv = invIds.includes(a.id);
+        return `
+        <div class="bal-entry-row ${isInv ? 'has-flow' : ''}">
             <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
-            <div class="be-name">${a.name}<span class="be-kind asset">${a.group || '资产'}</span></div>
+            <div class="be-name">${_esc(a.name)}<span class="be-kind asset">${_esc(a.group || '资产')}</span></div>
             <div class="be-input">
                 <span class="currency-symbol">${state.settings.currency}</span>
                 <input type="number" step="0.01" class="text-input be-field" data-account="${a.id}"
-                       value="${existing[a.id] !== undefined ? existing[a.id] : ''}" placeholder="0">
+                       value="${existing[a.id] !== undefined ? existing[a.id] : ''}" placeholder="收益">
             </div>
-        </div>`).join('');
+            ${isInv ? `<div class="be-input be-flow-input" title="本月从外部转入(+)或转出(−)；账户之间互转不用填；留空表示未录">
+                <span class="be-flow-label">净入金</span>
+                <input type="number" step="0.01" class="text-input be-flow" data-account="${a.id}"
+                       value="${flowOf(a.id)}" placeholder="0">
+            </div>` : ''}
+        </div>`;
+    }).join('');
 }
 
 function clearReturnInputs() {
@@ -6506,13 +6670,21 @@ function saveReturns() {
         if (!isFinite(amount)) return;
         const accountId = inp.dataset.account;
         const id = _rebalanceId(member, accountId, month);
+        const flowEl = document.querySelector(`#returnEntryList .be-flow[data-account="${accountId}"]`);
+        const flowRaw = flowEl ? String(flowEl.value).trim() : '';
+        const flow = flowRaw === '' ? null : (parseFloat(flowRaw) || 0);
         const existing = state.returns.find(r => r.id === id);
         if (existing) {
-            if (existing.amount === amount) return;
+            const sameAmount = existing.amount === amount;
+            const sameFlow = (existing.flow === null || existing.flow === undefined) ? flow === null : Number(existing.flow) === flow;
+            if (sameAmount && sameFlow) return;
             existing.amount = amount;
+            if (flow !== null) existing.flow = flow; else delete existing.flow;
             existing.updatedAt = Date.now();
         } else {
-            state.returns.push({ id, member, accountId, month, amount, createdAt: Date.now(), updatedAt: Date.now() });
+            const rec = { id, member, accountId, month, amount, createdAt: Date.now(), updatedAt: Date.now() };
+            if (flow !== null) rec.flow = flow;
+            state.returns.push(rec);
         }
         saved += 1;
     });

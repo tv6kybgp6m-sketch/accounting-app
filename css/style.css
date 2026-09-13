@@ -3462,3 +3462,29 @@ table.bill-stats {
     padding: 3px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: var(--font);
 }
 .toast-undo-btn:hover { background: rgba(255,255,255,.34); }
+
+/* ---- 收益率（组合口径）---- */
+.ret-rate-row .report-value { font-size: 20px; }
+.ret-scope-note { font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
+.ret-scope-note b { color: var(--text-primary); }
+.link-btn {
+    display: block; margin-top: 6px; padding: 0; border: none; background: none;
+    color: var(--accent); font-size: 12px; cursor: pointer; font-family: var(--font); text-decoration: underline;
+}
+.ret-check {
+    margin: 0 0 12px; padding: 10px 14px; border-radius: 10px;
+    background: #fff4e5; border: 1px solid #ffd9a0; color: #8a5200; font-size: 13px; line-height: 1.6;
+}
+[data-theme="dark"] .ret-check { background: #3a2a12; border-color: #5c421c; color: #ffcc80; }
+.ret-check b { color: inherit; }
+/* 记收益弹窗：投资账户那行多一个净入金输入 */
+.bal-entry-row.has-flow { flex-wrap: wrap; }
+.bal-entry-row.has-flow .be-name { flex: 1 1 auto; min-width: 0; }
+.be-flow-input { display: flex; align-items: center; gap: 4px; }
+.be-flow-label { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
+.be-flow { width: 96px; min-width: 0; text-align: right; }
+@media (max-width: 640px) {
+    .bal-entry-row.has-flow .be-input { flex: 1 1 40%; }
+    .be-flow { width: 100%; }
+    .ret-rate-row .report-value { font-size: 17px; }
+}
