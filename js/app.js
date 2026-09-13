@@ -5919,7 +5919,10 @@ function returnYears() { return [...new Set(returnMonths().map(m => m.slice(0, 4
 function investmentAccountIds() {
     const includeCash = !!(state.settings && state.settings.returnIncludeCash);
     const wanted = includeCash ? ['steady', 'growth', 'cash'] : ['steady', 'growth'];
-    return state.accounts.filter(a => a.kind === 'asset' && wanted.includes(a.bucket)).map(a => a.id);
+    // 房产/车辆虽然归在"长期投资"，但市值几百万、收益基本不录，混进来只会把收益率摊平成 0
+    const includeFixed = !!(state.settings && state.settings.returnIncludeFixed);
+    return state.accounts.filter(a => a.kind === 'asset' && wanted.includes(a.bucket)
+        && (includeFixed || a.group !== '固定资产')).map(a => a.id);
 }
 
 // 某月的组合三要素：期初市值、期末市值、本期收益、已录净入金
@@ -6223,13 +6226,27 @@ function renderReturnRates(info) {
 
     const scope = document.getElementById('retScopeNote');
     if (scope) {
+        const incCash = !!(state.settings && state.settings.returnIncludeCash);
+        const incFixed = !!(state.settings && state.settings.returnIncludeFixed);
         const names = ids.map(id => (accountById(id) || {}).name).filter(Boolean);
-        scope.innerHTML = `只统计<b>稳健理财 / 长期投资</b>类账户${state.settings.returnIncludeCash ? ' + 活钱' : ''}：`
+        const outFixed = state.accounts.filter(a => a.kind === 'asset' && a.group === '固定资产'
+            && (incCash ? ['steady', 'growth', 'cash'] : ['steady', 'growth']).includes(a.bucket)
+            && !ids.includes(a.id)).map(a => a.name);
+        scope.innerHTML = `只统计<b>稳健理财 / 长期投资</b>类账户${incCash ? ' + 活钱' : ''}${incFixed ? ' + 固定资产' : ''}：`
             + `${_esc(names.join('、') || '（还没有投资账户，去「四笔钱」归类）')}`
-            + `<button class="link-btn" id="retScopeToggle">${state.settings.returnIncludeCash ? '不含活钱' : '把活钱也算进来'}</button>`;
-        const t = document.getElementById('retScopeToggle');
+            + (outFixed.length ? `<div class="ret-excluded">已排除固定资产：${_esc(outFixed.join('、'))}（市值大、一般不录收益）</div>` : '')
+            + `<div class="ret-scope-toggles">`
+            + `<button class="link-btn" id="retScopeCash">${incCash ? '不含活钱' : '把活钱也算进来'}</button>`
+            + (outFixed.length || incFixed ? `<button class="link-btn" id="retScopeFixed">${incFixed ? '不含房产车辆' : '房产车辆也算进来'}</button>` : '')
+            + `</div>`;
+        const t = document.getElementById('retScopeCash');
         if (t) t.addEventListener('click', () => {
             state.settings.returnIncludeCash = !state.settings.returnIncludeCash;
+            saveState(); renderReturns();
+        });
+        const tf = document.getElementById('retScopeFixed');
+        if (tf) tf.addEventListener('click', () => {
+            state.settings.returnIncludeFixed = !state.settings.returnIncludeFixed;
             saveState(); renderReturns();
         });
     }
