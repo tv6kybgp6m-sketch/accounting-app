@@ -2,6 +2,9 @@
    记账本 Bookkeeping - App Logic
    ============================================ */
 
+// 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
+const APP_VERSION = '1.28.0';
+
 // ---- On-demand library loading ----
 // Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in
 // <head>, so the phone had to parse and execute ~1MB of JS before painting the
@@ -1323,6 +1326,43 @@ async function disableEncryptionClick() {
         showToast('已关闭加密', 'success');
     } catch (e) { showToast('关闭失败：' + (e && e.message || e), 'error'); }
     renderEncryptionSection();
+}
+
+// ---------------- 检查更新 ----------------
+// 导航走 cache-first + 后台刷新，所以过去要"开两次"才换新，看起来像更新失败。
+// 这里给一个手动入口：强制 worker 重新检查，并把状态说清楚。
+async function checkForUpdate() {
+    const hint = document.getElementById('updateHint');
+    const say = (t) => { if (hint) hint.textContent = t; };
+    if (!('serviceWorker' in navigator)) {
+        say('这个环境没有离线缓存，刷新页面即可');
+        showToast('没有离线缓存，刷新页面即可', 'info');
+        return;
+    }
+    say('正在检查…');
+    let reg = null;
+    try { reg = await navigator.serviceWorker.getRegistration(); } catch (e) { reg = null; }
+    if (!reg) {
+        say('尚未启用离线缓存');
+        showToast('尚未启用离线缓存，刷新页面即可', 'info');
+        return;
+    }
+    try { await reg.update(); } catch (e) { /* 网络不通下面按状态说明 */ }
+    await new Promise(r => setTimeout(r, 1500));
+    const running = ((reg.active && reg.active.scriptURL) || '').replace(/^.*[?&]v=/, '');
+    if (reg.installing) {
+        say(`正在下载新版本 v${APP_VERSION}…`);
+        showToast('发现新版本，正在下载', 'info');
+    } else if (reg.waiting) {
+        say('新版本已就绪，即将自动重新加载');
+        showToast('新版本已就绪', 'success');
+    } else if (running && running !== APP_VERSION) {
+        say(`当前离线包 v${running}，未能更新，请彻底退出后重开`);
+        showToast('更新没走通，请彻底退出后再打开', 'error');
+    } else {
+        say(`已是最新 v${APP_VERSION} · ${relTimeText(Date.now())}`);
+        showToast('已经是最新版本', 'success');
+    }
 }
 
 // ---- 备份历史（桌面版由 App 自动留版本；浏览器里没有本地归档）----
@@ -4180,6 +4220,9 @@ function renderSettings() {
     renderBackupHistory();
     renderRecurringSection();
     renderEncryptionSection();
+    // 版本号以代码里的常量为准，避免和 index.html 里的静态文字对不上
+    const av = document.querySelector('.about-version');
+    if (av) av.textContent = '版本 ' + APP_VERSION;
 }
 
 function applyTheme(theme) {

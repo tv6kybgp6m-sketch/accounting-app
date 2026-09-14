@@ -700,9 +700,17 @@
                                 <div class="about-icon"><i class="fa-solid fa-book"></i></div>
                                 <div>
                                     <div class="about-name">记账本 Bookkeeping</div>
-                                    <div class="about-version">版本 1.27.0</div>
+                                    <div class="about-version">版本 1.28.0</div>
                                     <div class="about-desc">一款简洁优雅的 macOS 风格记账应用</div>
                                 </div>
+                            </div>
+                            <div class="settings-row">
+                                <div class="settings-label">检查更新
+                                    <div class="settings-sublabel" id="updateHint">离线缓存会在后台自动升级；卡住时可以点这里</div>
+                                </div>
+                                <button class="secondary-btn" onclick="checkForUpdate()">
+                                    <i class="fa-solid fa-rotate"></i> 检查更新
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1113,8 +1121,16 @@
         // The version query bypasses any stale cached copy of sw.js, which would
         // otherwise let an old cache-first worker pin the app to an outdated build.
         if ('serviceWorker' in navigator) {
+            // 新 worker 接管 = 拿到了新版本，自动刷一次，省掉"要开两次才更新"的困惑。
+            // 冷启动时本来没有 controller，那种接管不算更新，别刷。
+            const hadController = !!navigator.serviceWorker.controller;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (!hadController || window.__swReloading) return;
+                window.__swReloading = true;
+                location.reload();
+            });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.27.0').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.28.0').catch(() => {});
             });
         }
     </script>
