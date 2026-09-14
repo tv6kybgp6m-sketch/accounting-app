@@ -792,7 +792,7 @@ async function initICloudSync() {
         });
 
         // On startup, pull from iCloud and merge
-        const remoteData = await window.electronAPI.icloud.readData();
+        const remoteData = await resolveCloudPayload(await window.electronAPI.icloud.readData());
         if (remoteData && remoteData.data) {
             mergeRemoteData(remoteData);
         }
@@ -837,7 +837,10 @@ async function syncToICloud() {
     if (!iCloudSyncEnabled || !isElectron()) return;
 
     try {
-        await window.electronAPI.icloud.writeData(buildSyncPayload());
+        const payload = buildSyncPayload();
+        const envelope = await buildCloudEnvelope(payload);
+        if (LedgerCrypto.isEnabled() && !envelope) return;      // 拿不到密钥就这次不写云，绝不退回明文
+        await window.electronAPI.icloud.writeData(payload, envelope);
         iCloudLastSyncTime = Date.now();
         updateICloudSyncUI();
     } catch (e) {
@@ -845,13 +848,41 @@ async function syncToICloud() {
     }
 }
 
-function handleICloudFileChange(remoteData) {
-    if (!remoteData || !remoteData.data) return;
-    // 只忽略「我自己刚写回去的那份」，别的设备（包括另一台 Mac）都要合并
-    if (remoteData.deviceId && remoteData.deviceId === DEVICE_ID) return;
-    if (!remoteData.deviceId && remoteData.deviceName === 'Mac' && isElectron()) return;
+// 云端那份：先压缩再加密；lastModified 放在封套顶层，Mac 端靠它挑最新文件
+async function buildCloudEnvelope(payload) {
+    if (!LedgerCrypto.isEnabled()) return null;
+    try {
+        await ensureUnlocked(LedgerCrypto.keyring(), '云同步需要解锁');
+    } catch (e) {
+        __remoteLastError = '加密已开启但本机未解锁：' + ((e && e.message) || e);
+        return null;
+    }
+    const env = await LedgerCrypto.encryptString(await encodeSyncPayload(payload || buildSyncPayload()));
+    env.lastModified = Date.now();
+    return env;
+}
 
-    const changed = mergeRemoteData(remoteData);
+// 云端读回来的东西可能是密文，统一还原成同步载荷；没开加密时原样返回
+async function resolveCloudPayload(raw) {
+    if (!raw) return null;
+    if (!LedgerCrypto.looksEncrypted(raw)) return raw;
+    try {
+        await ensureUnlocked(raw.keyring, '读取云端数据');
+        return await decodeSyncPayload(await LedgerCrypto.decryptEnvelope(raw));
+    } catch (e) {
+        __remoteLastError = '云端数据需要口令：' + ((e && e.message) || e);
+        return null;
+    }
+}
+
+async function handleICloudFileChange(remoteData) {
+    const data = await resolveCloudPayload(remoteData);
+    if (!data || !data.data) return;
+    // 只忽略「我自己刚写回去的那份」，别的设备（包括另一台 Mac）都要合并
+    if (data.deviceId && data.deviceId === DEVICE_ID) return;
+    if (!data.deviceId && data.deviceName === 'Mac' && isElectron()) return;
+
+    const changed = mergeRemoteData(data);
     if (!changed) return;                 // 对端只是回写了一份和这里相同的内容
     renderView(state.currentView);
     showToast('已从 iCloud 同步最新数据', 'success');
@@ -1013,18 +1044,31 @@ function mergeRemoteData(remoteData) {
 // filename 决定落盘名字：iCloud 通道必须用 Mac 端读取的那个固定名字。
 const ICLOUD_SYNC_FILENAME = 'bookkeeping-sync.json';
 
-function exportSyncJSON(filename, toastText) {
+async function exportSyncJSON(filename, toastText) {
     const syncData = buildSyncPayload();
     syncData.deviceName = isElectron() ? 'Mac-backup' : 'browser-backup';
-    const blob = new Blob([JSON.stringify(syncData, null, 2)], { type: 'application/json' });
     const stamp = new Date().toISOString().slice(0, 10);
     const name = filename || `记账本-备份-${stamp}.json`;
+    let text = JSON.stringify(syncData, null, 2);
+    let encrypted = false;
+    if (LedgerCrypto.isEnabled()) {
+        try {
+            await ensureUnlocked(LedgerCrypto.keyring(), '导出需要解锁');
+            const env = await LedgerCrypto.encryptString(text);
+            text = JSON.stringify(env, null, 2);
+            encrypted = true;
+        } catch (e) {
+            if (e && e.message !== '已取消') showToast('加密失败：' + e.message, 'error');
+            return false;
+        }
+    }
+    const blob = new Blob([text], { type: 'application/json' });
     return saveGeneratedFile(blob, name).then(cancelled => {
         if (cancelled) return false;
         iCloudLastSyncTime = Date.now();
         updateICloudSyncUI();
         markExported();
-        showToast(toastText || '已导出 JSON 备份', 'success');
+        showToast(toastText || (encrypted ? '已导出加密备份' : '已导出 JSON 备份'), 'success');
         return true;
     });
 }
@@ -1032,6 +1076,253 @@ function exportSyncJSON(filename, toastText) {
 // 存到 iCloud Drive 的「记账本」文件夹时请用这个名字，Mac 端按它读取
 function exportToICloud() {
     return exportSyncJSON(ICLOUD_SYNC_FILENAME, '已导出，请存入 iCloud 的「记账本」文件夹');
+}
+
+// ---------------- 加密解锁：口令 / 恢复码输入 ----------------
+let __secretResolve = null;
+
+function askSecret(opts) {
+    const o = opts || {};
+    return new Promise(resolve => {
+        __secretResolve = resolve;
+        document.getElementById('secretTitle').textContent = o.title || '输入加密口令';
+        document.getElementById('secretHint').textContent = o.hint || '';
+        const inp = document.getElementById('secretInput');
+        inp.value = '';
+        inp.type = 'password';
+        const peek = document.getElementById('secretPeek');
+        if (peek) peek.checked = false;
+        if (!inp.dataset.bound) {
+            inp.dataset.bound = '1';
+            inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitSecretModal(); });
+        }
+        if (peek && !peek.dataset.bound) {
+            peek.dataset.bound = '1';
+            peek.addEventListener('change', () => {
+                document.getElementById('secretInput').type = peek.checked ? 'text' : 'password';
+            });
+        }
+        showSecretError(o.error || '');
+        document.getElementById('secretModal').classList.remove('hidden');
+        raiseOverlay('secretModal');
+        setTimeout(() => { try { inp.focus(); } catch (e) { /* 拿不到焦点就算了 */ } }, 80);
+    });
+}
+function showSecretError(msg) {
+    const el = document.getElementById('secretError');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('hidden', !msg);
+}
+function closeSecretModal(value) {
+    document.getElementById('secretModal').classList.add('hidden');
+    const r = __secretResolve; __secretResolve = null;
+    if (r) r(value);
+}
+function submitSecretModal() {
+    const v = document.getElementById('secretInput').value;
+    if (!v) { showSecretError('请输入内容'); return; }
+    closeSecretModal(v);
+}
+
+// 有本机密钥就静默通过；没有就问到口令或恢复码（最多三次）
+async function ensureUnlocked(kring, why) {
+    if (await LedgerCrypto.hasLocalKey()) return true;
+    const kr = kring || LedgerCrypto.keyring();
+    const hint = kr && kr.hint ? `口令以 ${kr.hint} 开头。忘记口令可用恢复码。` : '输入口令或恢复码。';
+    let lastError = '';
+    for (let i = 0; i < 3; i++) {
+        const secret = await askSecret({
+            title: (why || '解锁账本') + '：输入加密口令',
+            hint: hint + (i ? `（第 ${i + 1} / 3 次）` : ''),
+            error: lastError,
+        });
+        if (secret === null) throw new Error('已取消');
+        try {
+            await LedgerCrypto.unlock(secret, kr);
+            return true;
+        } catch (e) {
+            lastError = (e && e.message) || '口令或恢复码不正确';
+        }
+    }
+    throw new Error(lastError || '口令或恢复码不正确');
+}
+
+// ---------------- 加密设置区 ----------------
+let __encMode = 'setup';          // setup | change | showcode
+let __pendingRecoveryCode = '';
+
+function renderEncryptionSection() {
+    const box = document.getElementById('encryptionSection');
+    if (!box) return;
+    if (!LedgerCrypto.isSupported()) {
+        box.innerHTML = `<div class="settings-row"><div class="settings-label">本浏览器不支持加密
+            <div class="settings-sublabel">需要 HTTPS 或本机环境下的 WebCrypto</div></div></div>`;
+        return;
+    }
+    if (!LedgerCrypto.isEnabled()) {
+        box.innerHTML = `
+            <div class="settings-row">
+                <div class="settings-label">未开启
+                    <div class="settings-sublabel">开启后备份文件和云同步内容变成密文，只有口令或恢复码能打开。
+                        日常无感：口令只在这台设备首次解锁时输一次。</div>
+                </div>
+                <button class="secondary-btn" onclick="openEncSetup()"><i class="fa-solid fa-lock"></i> 开启加密</button>
+            </div>`;
+        return;
+    }
+    const kr = LedgerCrypto.keyring() || {};
+    box.innerHTML = `
+        <div class="settings-row">
+            <div class="settings-label">已开启
+                <div class="settings-sublabel">口令提示 <b>${_esc(kr.hint || '')}</b> ·
+                    ${LedgerCrypto.isUnlocked() ? '本机已解锁，打开不用再输' : '本机未缓存密钥，导出/同步时会询问'}<br>
+                    忘记口令没有找回通道，只能用恢复码。换设备时用同一个口令即可解开。</div>
+            </div>
+        </div>
+        <div class="settings-row">
+            <div class="settings-label">修改口令<div class="settings-sublabel">只换钥匙的包装，数据不用重新加密</div></div>
+            <div class="rs-inline"><button class="secondary-btn" onclick="openEncChange()">修改口令</button></div>
+        </div>
+        <div class="settings-row">
+            <div class="settings-label">恢复码<div class="settings-sublabel">不显示已保存的那一个，只能重发新的（旧的随即失效）</div></div>
+            <div class="rs-inline"><button class="secondary-btn" onclick="rotateRecoveryCodeClick()"><i class="fa-solid fa-rotate"></i> 重发恢复码</button></div>
+        </div>
+        <div class="settings-row">
+            <div class="settings-label">关闭加密<div class="settings-sublabel">之后的备份与同步退回明文</div></div>
+            <div class="rs-inline"><button class="danger-btn" onclick="disableEncryptionClick()">关闭</button></div>
+        </div>`;
+}
+
+function encSetupShowError(msg) {
+    const el = document.getElementById('encSetupError');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('hidden', !msg);
+}
+function encSetupShowStep(step) {
+    document.getElementById('encStep1').classList.toggle('hidden', step !== 1);
+    document.getElementById('encStep2').classList.toggle('hidden', step !== 2);
+    const btn = document.getElementById('encSetupNext');
+    if (btn) btn.textContent = step === 1 ? '下一步' : '完成';
+    encSetupShowError('');
+}
+function openEncMode(mode, title, sub) {
+    __encMode = mode;
+    __pendingRecoveryCode = '';
+    document.getElementById('encSetupTitle').textContent = title;
+    document.getElementById('encSetupSub').textContent = sub || '';
+    const p1 = document.getElementById('encPass1'), p2 = document.getElementById('encPass2');
+    if (p1) p1.value = '';
+    if (p2) p2.value = '';
+    const ack = document.getElementById('encAck'); if (ack) ack.checked = false;
+    const cancel = document.querySelector('#encSetupModal .modal-footer .secondary-btn');
+    if (cancel) cancel.style.display = mode === 'showcode' ? 'none' : '';
+    encSetupShowStep(1);
+    document.getElementById('encSetupModal').classList.remove('hidden');
+    raiseOverlay('encSetupModal');
+    if (mode !== 'showcode') setTimeout(() => { try { p1.focus(); } catch (e) { /* 拿不到焦点就算了 */ } }, 80);
+}
+function openEncSetup() {
+    if (!LedgerCrypto.isSupported()) { showToast('这个浏览器不支持加密', 'error'); return; }
+    openEncMode('setup', '开启加密', '给备份和云同步加一道口令');
+}
+function openEncChange() {
+    openEncMode('change', '修改加密口令', '数据不用重新加密，只是换一把钥匙的包装');
+}
+function closeEncSetup() {
+    document.getElementById('encSetupModal').classList.add('hidden');
+    __pendingRecoveryCode = '';
+    renderEncryptionSection();
+}
+function revealRecoveryCode(code) {
+    __encMode = 'showcode';
+    __pendingRecoveryCode = code;
+    const box = document.getElementById('recoveryCodeBox');
+    if (box) box.textContent = LedgerCrypto.formatRecoveryCode(code);
+    const ack = document.getElementById('encAck'); if (ack) ack.checked = false;
+    encSetupShowStep(2);
+}
+async function encSetupAdvance() {
+    if (__encMode === 'showcode') {
+        const ack = document.getElementById('encAck');
+        if (ack && !ack.checked) return encSetupShowError('请先确认已保存恢复码');
+        closeEncSetup();
+        return;
+    }
+    const p1 = (document.getElementById('encPass1') || {}).value || '';
+    const p2 = (document.getElementById('encPass2') || {}).value || '';
+    if (p1.length < 8) return encSetupShowError('口令至少 8 位');
+    if (p1 !== p2) return encSetupShowError('两次输入不一样');
+    try {
+        if (__encMode === 'setup') {
+            const r = await LedgerCrypto.setup(p1);
+            await scheduleRemoteSync();                 // 让云端那份也尽快变成密文
+            revealRecoveryCode(r.recoveryCode);
+            showToast('加密已开启', 'success');
+        } else {
+            await LedgerCrypto.changePassphrase(null, p1);
+            await scheduleRemoteSync();
+            showToast('口令已修改', 'success');
+            closeEncSetup();
+        }
+    } catch (e) {
+        if (e && e.message === 'NEED_SECRET') {
+            // 本机没缓存密钥：先补一次解锁再试
+            try {
+                await ensureUnlocked(null, '修改口令需要先解锁');
+                await LedgerCrypto.changePassphrase(null, p1);
+                await scheduleRemoteSync();
+                showToast('口令已修改', 'success');
+                closeEncSetup();
+            } catch (e2) {
+                encSetupShowError(e2 && e2.message === '已取消' ? '已取消' : String((e2 && e2.message) || e2));
+            }
+        } else {
+            encSetupShowError((e && e.message) || '操作失败');
+        }
+    }
+}
+async function rotateRecoveryCodeClick() {
+    try {
+        await ensureUnlocked(null, '重发恢复码');
+        const code = await LedgerCrypto.rotateRecoveryCode(null);
+        openEncMode('showcode', '新的恢复码', '旧恢复码已立即失效');
+        revealRecoveryCode(code);
+        showToast('已生成新的恢复码', 'success');
+    } catch (e) {
+        if (e && e.message === '已取消') return;
+        showToast((e && e.message) || '操作失败', 'error');
+    }
+}
+function copyRecoveryCode() {
+    const text = __pendingRecoveryCode || '';
+    if (!text) return;
+    const done = () => showToast('恢复码已复制', 'success');
+    const fallback = () => {
+        const box = document.getElementById('recoveryCodeBox');
+        try {
+            const range = document.createRange();
+            range.selectNodeContents(box);
+            const sel = window.getSelection();
+            sel.removeAllRanges(); sel.addRange(range);
+            const ok = document.execCommand('copy');
+            sel.removeAllRanges();
+            if (ok) done(); else showToast('复制失败，请长按选中上面的字符手动复制', 'error');
+        } catch (e) { showToast('复制失败，请长按选中手动复制', 'error'); }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(fallback);
+    } else fallback();
+}
+async function disableEncryptionClick() {
+    if (!confirm('关闭加密？之后的备份与同步退回明文。已经导出的加密文件仍需口令或恢复码才能打开。')) return;
+    try {
+        await LedgerCrypto.disable();
+        await scheduleRemoteSync();          // 用明文覆盖云端那份密文，免得下次没口令打不开
+        showToast('已关闭加密', 'success');
+    } catch (e) { showToast('关闭失败：' + (e && e.message || e), 'error'); }
+    renderEncryptionSection();
 }
 
 // ---- 备份历史（桌面版由 App 自动留版本；浏览器里没有本地归档）----
@@ -1084,9 +1375,20 @@ function openBackupFolderClick() {
 }
 
 // 把一份 JSON 备份合并进当前账本
-function applyImportedJSON(text) {
+async function applyImportedJSON(text) {
     let parsed = null;
     try { parsed = JSON.parse(text); } catch (e) { showToast('导入失败：不是有效的 JSON', 'error'); return false; }
+    if (LedgerCrypto.looksEncrypted(parsed)) {
+        let plain = null;
+        try {
+            await ensureUnlocked(parsed.keyring, '这份备份是加密的');
+            plain = await LedgerCrypto.decryptEnvelope(parsed);
+        } catch (e) {
+            showToast(e && e.message === '已取消' ? '已取消导入' : '导入失败：' + (e && e.message || e), 'error');
+            return false;
+        }
+        return applyImportedJSON(plain);
+    }
     if (!parsed || !parsed.data) { showToast('导入失败：文件里没有账本数据', 'error'); return false; }
     mergeRemoteData(parsed);
     applyTheme(state.settings.theme);
@@ -1176,11 +1478,14 @@ function updateICloudSyncUI() {
 async function syncFromICloudNow() {
     if (!isElectron() || !iCloudSyncEnabled) return;
     try {
-        const remoteData = await window.electronAPI.icloud.readData();
+        const raw = await window.electronAPI.icloud.readData();
+        const remoteData = await resolveCloudPayload(raw);
         if (remoteData && remoteData.data) {
             mergeRemoteData(remoteData);
             renderView(state.currentView);
             showToast('已从 iCloud 同步最新数据', 'success');
+        } else if (LedgerCrypto.looksEncrypted(raw)) {
+            showToast('云端那份是加密的，需要口令或恢复码', 'error');
         } else {
             showToast('iCloud 中暂无同步数据', 'info');
         }
@@ -1353,9 +1658,21 @@ async function remotePullAndMerge() {
     const file = gistLedgerFile(r.body);
     if (!file || !file.content) return false;            // 空库，稍后把本地推上去
     let remoteData = null;
-    try { remoteData = await decodeSyncPayload(file.content); }
+    try {
+        let raw = null;
+        const trimmed = String(file.content).trim();
+        if (trimmed.charAt(0) === '{' && trimmed.indexOf(ENC_MAGIC) >= 0) {
+            try { raw = JSON.parse(trimmed); } catch (e) { raw = null; }
+        }
+        remoteData = raw !== null && LedgerCrypto.looksEncrypted(raw)
+            ? await resolveCloudPayload(raw)
+            : await decodeSyncPayload(file.content);
+    }
     catch (e) { __remoteLastError = '云端内容无法解析：' + ((e && e.message) || '格式错误'); return false; }
-    if (!remoteData || !remoteData.data) return false;
+    if (!remoteData || !remoteData.data) {
+        if (LedgerCrypto.isEnabled() && !__remoteLastError) __remoteLastError = '云端那份是加密的，本机解不开';
+        return false;
+    }
     const changed = mergeRemoteData(remoteData);
     if (changed) {
         renderView(state.currentView);
@@ -1367,10 +1684,17 @@ async function remotePullAndMerge() {
 
 async function remotePush() {
     const payload = buildSyncPayload();
-    const text = await encodeSyncPayload(payload);
+    let text;
+    if (LedgerCrypto.isEnabled()) {
+        const env = await buildCloudEnvelope(payload);
+        if (!env) return false;                       // 未解锁：宁可不同步，也不推明文
+        text = JSON.stringify(env);
+    } else {
+        text = await encodeSyncPayload(payload);
+    }
     // 上限判断用"编码后"长度：压缩让 1MB 账本降到约 130KB，不至于被误判放不下
     if (text.length > GIST_SIZE_LIMIT) {
-        __remoteLastError = '账本太大（压缩后仍 ' + Math.round(text.length / 1024) + 'KB），Gist 放不下，请先清理或导出备份';
+        __remoteLastError = '账本太大（编码后仍 ' + Math.round(text.length / 1024) + 'KB），Gist 放不下，请先清理或导出备份';
         return false;
     }
     const r = await gistApi('/gists/' + encodeURIComponent(remoteSyncCfg.gistId), 'PATCH', {
@@ -3855,6 +4179,7 @@ function renderSettings() {
     renderBackupBanner();
     renderBackupHistory();
     renderRecurringSection();
+    renderEncryptionSection();
 }
 
 function applyTheme(theme) {

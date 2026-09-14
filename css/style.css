@@ -3504,3 +3504,35 @@ table.bill-stats {
     .be-flow { width: 100%; }
     .ret-rate-row .report-value { font-size: 17px; }
 }
+
+
+/* ---- 加密：口令输入 / 开启向导 ---- */
+.secret-modal .modal-body { padding-bottom: 4px; }
+.secret-input { width: 100%; font-size: 16px; }
+.secret-error {
+    margin-top: 10px; padding: 8px 10px; border-radius: 8px; font-size: 13px;
+    background: var(--expense-light); color: var(--expense);
+}
+.secret-peek {
+    display: flex; align-items: center; gap: 6px; margin-top: 10px;
+    font-size: 13px; color: var(--text-secondary); cursor: pointer;
+}
+.enc-field { margin-bottom: 12px; }
+.enc-field label { display: block; margin-bottom: 5px; font-size: 13px; color: var(--text-secondary); }
+.enc-field input { width: 100%; font-size: 16px; }
+.enc-warn {
+    margin: 14px 0 4px; padding: 10px 12px; border-radius: 10px;
+    font-size: 12.5px; line-height: 1.65;
+    background: #fff4e5; border: 1px solid #ffd9a0; color: #8a5200;
+}
+.enc-warn b { color: inherit; }
+.enc-warn.ok { background: var(--income-light); border-color: transparent; color: var(--income); }
+[data-theme="dark"] .enc-warn { background: #3a2a12; border-color: #5c421c; color: #ffcc80; }
+.recovery-code {
+    margin: 12px 0; padding: 14px 12px; border-radius: 12px; text-align: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 18px; letter-spacing: 2px; word-break: break-all;
+    background: var(--bg-content); color: var(--text-primary);
+    border: 1px dashed var(--border-strong); user-select: all; -webkit-user-select: all;
+}
+.enc-ack { font-size: 13.5px; color: var(--text-primary); margin-top: 12px; }
