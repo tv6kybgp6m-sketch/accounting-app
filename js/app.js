@@ -3799,8 +3799,8 @@ function initCategoryInteractions() {
 }
 
 // ---- Settings ----
-// 备份提醒：超过 30 天没导出过就在设置页顶部提示；数据为空时不打扰
-const BACKUP_REMIND_DAYS = 30;
+// 备份提醒：超过 7 天没备份就在设置页顶部提示；数据为空时不打扰
+const BACKUP_REMIND_DAYS = 7;
 
 function markExported() {
     state.lastExportAt = Date.now();
@@ -3808,18 +3808,35 @@ function markExported() {
     renderBackupBanner();
 }
 
-function renderBackupBanner() {
+async function renderBackupBanner() {
     const banner = document.getElementById('backupBanner');
     if (!banner) return;
+    const hide = () => { banner.classList.add('hidden'); banner.innerHTML = ''; };
     const hasData = state.transactions.length > 0 || state.balances.length > 0 || state.returns.length > 0;
-    if (!hasData) { banner.classList.add('hidden'); banner.innerHTML = ''; return; }
+    if (!hasData) return hide();
+
+    // Mac 版：每次改动都会留一份本机快照，开了 iCloud 就等于已经在异地备份了，不用提醒
+    let cloud = false, hasSnapshot = false;
+    if (isElectron() && window.electronAPI && typeof window.electronAPI.listBackups === 'function') {
+        try {
+            const info = await window.electronAPI.listBackups();
+            hasSnapshot = !!((info && info.snapshots || []).length);
+            cloud = !!(info && info.cloudAvailable);
+        } catch (e) { /* 读不到就按网页版处理 */ }
+    }
+    if (hasSnapshot && cloud) return hide();
+
     const days = state.lastExportAt ? Math.floor((Date.now() - state.lastExportAt) / 86400000) : null;
-    if (days !== null && days < BACKUP_REMIND_DAYS) { banner.classList.add('hidden'); banner.innerHTML = ''; return; }
+    if (days !== null && days < BACKUP_REMIND_DAYS) return hide();
+
+    const where = hasSnapshot
+        ? 'Mac 版没开 iCloud 同步，快照只存在这台电脑上，硬盘坏了就一起没了。'
+        : '数据只存在这台设备的浏览器里，清缓存或换设备会丢失，';
     banner.classList.remove('hidden');
     banner.innerHTML = `
         <div class="bb-text">
             <i class="fa-solid fa-triangle-exclamation"></i>
-            <span>${days === null ? '你还没有导出过备份' : `已经 ${days} 天没有备份了`}。数据只存在这台设备的浏览器里，清缓存或换设备会丢失，建议定期导出一份。</span>
+            <span>${days === null ? '你还没有导出过备份' : `已经 ${days} 天没有备份了`}。${where}建议每 ${BACKUP_REMIND_DAYS} 天导出一份存到别处。</span>
         </div>
         <button class="secondary-btn" onclick="document.getElementById('dataMgmtSection').scrollIntoView({behavior:'smooth'})"><i class="fa-solid fa-download"></i> 去备份</button>`;
 }
@@ -5929,9 +5946,9 @@ function investmentAccountIds() {
 // 铁律：只有"本金已知"的账户才进收益率。本金已知 = 上月记过余额，或本月录了净入金。
 // 否则分子带着收益、分母却是 0，收益率会虚高到离谱：账户里本来有 10 万、只记了本月余额，
 // 赚 5000 会被算成 9.5%。这类账户从分子和分母同时剔除（收益金额照记，只是不参与算率）。
-function portfolioMonthStats(month, ids) {
+function portfolioMonthStats(month, ids, draft, memberOverride) {
     const scope = ids || investmentAccountIds();
-    const member = state.balanceOwner;
+    const member = memberOverride || state.balanceOwner;
     const prev = previousMonthOf(month);
     const prevMap = prev ? balancesAtMonth(prev, member) : {};
     const curMap = balancesAtMonth(month, member);
@@ -5945,6 +5962,22 @@ function portfolioMonthStats(month, ids) {
         if (r.flow === undefined || r.flow === null || r.flow === '') return;
         flowOf[r.accountId] = (flowOf[r.accountId] || 0) + (Number(r.flow) || 0);
         flowKnownOf[r.accountId] = true;
+    });
+
+    // 弹窗实时预览：用未保存的草稿覆盖某个账户的收益 / 净入金
+    if (draft) Object.keys(draft).forEach(id => {
+        const d = draft[id] || {};
+        if ('profit' in d) {
+            if (d.profit === '' || d.profit === null || d.profit === undefined) delete retMap[id];
+            else retMap[id] = Number(d.profit) || 0;
+        }
+        if ('flow' in d) {
+            if (d.flow === '' || d.flow === null || d.flow === undefined) {
+                delete flowOf[id]; delete flowKnownOf[id];
+            } else {
+                flowOf[id] = Number(d.flow) || 0; flowKnownOf[id] = true;
+            }
+        }
     });
 
     const eligible = [], unknown = [];
@@ -6007,6 +6040,27 @@ function portfolioCumulative(months) {
 function pctText(r, digits) {
     if (r === null || r === undefined || !isFinite(r)) return '—';
     return (r * 100).toFixed(digits === undefined ? 2 : digits) + '%';
+}
+
+// 单账户收益率：把组合算法按 accountId 切一刀，再逐月连乘（时间加权）。
+// 本金未知的月份（没记上月余额、也没录净入金）跳过并计数，绝不当成 0% 拖低结果。
+function accountReturnRate(accountId, months) {
+    const list = (months || []).filter(Boolean).slice().sort();
+    const res = { rate: null, months: 0, skipped: 0, series: [], latest: null };
+    if (!accountId || !list.length) return res;
+    let acc = 1;
+    list.forEach(m => {
+        const st = portfolioMonthStats(m, [accountId]);
+        if (st.rate !== null && isFinite(st.rate)) {
+            acc *= (1 + st.rate); res.months += 1;
+            res.series.push({ month: m, rate: st.rate });
+        } else if (st.reason === 'no-capital' || st.reason === 'zero-opening' || st.reason === 'zero-base') {
+            res.skipped += 1;
+        }
+    });
+    res.rate = res.months ? acc - 1 : null;
+    res.latest = res.series.length ? res.series[res.series.length - 1].rate : null;
+    return res;
 }
 
 // 某月各账户收益（按当前成员筛选；'all' = 全家相加）
@@ -6481,13 +6535,17 @@ function renderReturnBreakdown(info) {
     }
     container.innerHTML = rows.map(r => {
         const pct = total ? Math.abs(r.amount / total) * 100 : 0;
+        const rr = accountReturnRate(r.id, info.months);
+        const rateTxt = rr.rate !== null ? pctText(rr.rate)
+            : (rr.skipped ? '<span class="breakdown-rate-unknown">本金未知</span>' : '');
+        const rateCls = rr.rate === null ? '' : (rr.rate > 0 ? ' income' : (rr.rate < 0 ? ' expense' : ''));
         return `
         <div class="breakdown-item" onclick="openReturnHistoryForAccount('${r.id}')">
             <div class="breakdown-icon" style="background:${r.color}22;color:${r.color}"><i class="fa-solid ${r.icon}"></i></div>
             <div class="breakdown-main">
                 <div class="breakdown-head">
                     <span class="breakdown-name">${r.name}</span>
-                    <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}</span>
+                    <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}${rateTxt ? ` <span class="breakdown-rate${rateCls}">${rateTxt}</span>` : ''}</span>
                 </div>
                 <div class="breakdown-bar"><div class="breakdown-bar-fill" style="width:${Math.min(pct, 100).toFixed(1)}%;background:${r.amount < 0 ? '#ff3b30' : r.color}"></div></div>
             </div>
@@ -6564,19 +6622,26 @@ function openReturnDetailForPeriod(months, label) {
     const del = document.getElementById('acctHistDelete');
     if (del) del.style.display = 'none';
     const sum = document.getElementById('acctHistSummary');
+    const portCum = portfolioCumulative(months);
     if (sum) sum.innerHTML = `<span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">净收益 <b>${formatCurrency(total)}</b></span>
+        <span class="cat-txn-summary-item">组合收益率 <b>${pctText(portCum.cumulative)}</b></span>
         <span class="cat-txn-summary-item">涉及 <b>${rows.length}</b> 个账户</span>`;
     const list = document.getElementById('acctHistList');
-    if (list) list.innerHTML = rows.length ? rows.map(r => `
+    if (list) list.innerHTML = rows.length ? rows.map(r => {
+        const rr = accountReturnRate(r.id, months);
+        const rateTxt = rr.rate !== null ? pctText(rr.rate) : (rr.skipped ? '本金未知' : '');
+        const rateCls = rr.rate === null ? 'breakdown-rate-unknown' : (rr.rate > 0 ? 'income' : (rr.rate < 0 ? 'expense' : ''));
+        return `
         <div class="breakdown-item" onclick="closeAccountHistoryModal();openReturnHistoryForAccount('${r.id}')">
             <div class="breakdown-icon" style="background:${r.color}22;color:${r.color}"><i class="fa-solid ${r.icon}"></i></div>
             <div class="breakdown-main">
                 <div class="breakdown-head">
                     <span class="breakdown-name">${r.name}</span>
-                    <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}</span>
+                    <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}${rateTxt ? ` <span class="breakdown-rate ${rateCls}">${rateTxt}</span>` : ''}</span>
                 </div>
             </div>
-        </div>`).join('') : '<div class="breakdown-empty">该期没有收益记录</div>';
+        </div>`;
+    }).join('') : '<div class="breakdown-empty">该期没有收益记录</div>';
     const modal = document.getElementById('accountHistoryModal');
     if (modal) { modal.classList.remove('hidden'); raiseOverlay('accountHistoryModal'); }
 }
@@ -6616,18 +6681,26 @@ function renderReturnAccountHistory() {
         .sort((x, y) => y.month.localeCompare(x.month) || String(x.member).localeCompare(String(y.member)));
     const all = state.returns.filter(r => r.accountId === returnHistoryAccountId);
     const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+    const rr = accountReturnRate(returnHistoryAccountId, [...new Set(rows.map(r => r.month))]);
+    const rateTxt = rr.rate !== null ? pctText(rr.rate) : (rr.skipped ? '本金未知' : '');
     const sum = document.getElementById('acctHistSummary');
     if (sum) sum.innerHTML = `
         <span class="cat-txn-summary-item">共 <b>${[...new Set(rows.map(r => r.month))].length}</b> 期</span>
         <span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">累计 <b>${formatCurrency(total)}</b></span>
+        <span class="cat-txn-summary-item">收益率 <b>${rateTxt || '—'}</b></span>
         <span class="cat-txn-summary-item">最新 <b>${rows.length ? formatCurrency(rows[0].amount) : '—'}</b></span>`;
     const list = document.getElementById('acctHistList');
-    if (list) list.innerHTML = rows.length ? rows.map(r => `
+    if (list) list.innerHTML = rows.length ? rows.map(r => {
+        const m = accountReturnRate(returnHistoryAccountId, [r.month]);
+        const mTxt = m.rate !== null ? pctText(m.rate) : (m.skipped ? '本金未知' : '—');
+        const mCls = m.rate === null ? 'breakdown-rate-unknown' : (m.rate > 0 ? 'income' : (m.rate < 0 ? 'expense' : ''));
+        return `
         <div class="bal-history-row">
             <span class="bh-month">${r.month.replace('-', '年')}月${state.balanceOwner === 'all' ? `<span class="bh-member">${_esc(r.member || '')}</span>` : ''}</span>
-            <span class="bh-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}</span>
+            <span class="bh-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)} <span class="breakdown-rate ${mCls}">${mTxt}</span></span>
             <button class="bh-delete" onclick="deleteReturnSnapshot('${r.id}')" title="删除这一期"><i class="fa-solid fa-xmark"></i></button>
-        </div>`).join('') : '<div class="breakdown-empty">该账户还没有记录过收益</div>';
+        </div>`;
+    }).join('') : '<div class="breakdown-empty">该账户还没有记录过收益</div>';
 }
 
 function deleteReturnSnapshot(id) {
@@ -6680,7 +6753,7 @@ function renderReturnEntry() {
     }
     const existing = returnsAtMonth(month, member);
     const invIds = investmentAccountIds();
-    // 净入金按「成员+账户+月份」取已有值，供以后账户级收益率使用
+    // 净入金按「成员+账户+月份」取已有值，供账户级收益率使用
     const flowOf = (accId) => {
         const hit = state.returns.find(r => r.accountId === accId && r.month === month
             && (member === 'all' ? true : r.member === member)
@@ -6688,23 +6761,52 @@ function renderReturnEntry() {
         return hit ? hit.flow : '';
     };
     list.innerHTML = accounts.map(a => {
-        const isInv = invIds.includes(a.id);
+        const needFlow = invIds.includes(a.id) || existing[a.id] !== undefined;
+        const st = needFlow ? portfolioMonthStats(month, [a.id], null, member) : null;
+        const badge = st ? `<span class="be-rate${st.rate === null ? ' unknown' : (st.rate > 0 ? ' up' : (st.rate < 0 ? ' down' : ''))}" data-account="${a.id}">${st.rate === null ? '本金未知' : pctText(st.rate)}</span>` : '';
         return `
-        <div class="bal-entry-row ${isInv ? 'has-flow' : ''}">
+        <div class="bal-entry-row ${needFlow ? 'has-flow' : ''}">
             <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
-            <div class="be-name">${_esc(a.name)}<span class="be-kind asset">${_esc(a.group || '资产')}</span></div>
+            <div class="be-name">${_esc(a.name)}${badge}<span class="be-kind asset">${_esc(a.group || '资产')}</span></div>
             <div class="be-input">
                 <span class="currency-symbol">${state.settings.currency}</span>
                 <input type="number" step="0.01" class="text-input be-field" data-account="${a.id}"
                        value="${existing[a.id] !== undefined ? existing[a.id] : ''}" placeholder="收益">
             </div>
-            ${isInv ? `<div class="be-input be-flow-input" title="本月从外部转入(+)或转出(−)；账户之间互转不用填；留空表示未录">
+            ${needFlow ? `<div class="be-input be-flow-input" title="本月从外部转入(+)或转出(−)；账户之间互转不用填；留空表示未录">
                 <span class="be-flow-label">净入金</span>
                 <input type="number" step="0.01" class="text-input be-flow" data-account="${a.id}"
                        value="${flowOf(a.id)}" placeholder="0">
             </div>` : ''}
         </div>`;
     }).join('');
+    bindReturnRatePreview();
+}
+
+// 边填边算：把弹窗里的未保存数值当草稿喂给收益率算法，实时更新那枚角标
+function bindReturnRatePreview() {
+    const list = document.getElementById('returnEntryList');
+    if (!list || list.dataset.previewBound === '1') return;
+    list.dataset.previewBound = '1';
+    list.addEventListener('input', () => {
+        const monthInput = document.getElementById('returnMonthInput');
+        const ms = document.getElementById('returnMemberSelect');
+        const month = monthInput ? monthInput.value : '';
+        const member = ms ? ms.value : (state.balanceMembers[0] || '本人');
+        if (!month) return;
+        list.querySelectorAll('.be-rate').forEach(badge => {
+            const accId = badge.dataset.account;
+            const profitEl = list.querySelector(`.be-field[data-account="${CSS.escape(accId)}"]`);
+            const flowEl = list.querySelector(`.be-flow[data-account="${CSS.escape(accId)}"]`);
+            const st = portfolioMonthStats(month, [accId], {
+                [accId]: { profit: profitEl ? profitEl.value : '', flow: flowEl ? flowEl.value : '' },
+            }, member);
+            badge.textContent = st.rate === null ? '本金未知' : pctText(st.rate);
+            badge.classList.toggle('unknown', st.rate === null);
+            badge.classList.toggle('up', st.rate !== null && st.rate > 0);
+            badge.classList.toggle('down', st.rate !== null && st.rate < 0);
+        });
+    });
 }
 
 function clearReturnInputs() {

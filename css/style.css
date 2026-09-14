@@ -3483,9 +3483,22 @@ table.bill-stats {
 /* 记收益弹窗：投资账户那行多一个净入金输入 */
 .bal-entry-row.has-flow { flex-wrap: wrap; }
 .bal-entry-row.has-flow .be-name { flex: 1 1 auto; min-width: 0; }
-.be-flow-input { display: flex; align-items: center; gap: 4px; }
+.be-flow-input { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .be-flow-label { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
 .be-flow { width: 96px; min-width: 0; text-align: right; }
+/* 单账户收益率 */
+.be-rate {
+    display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 20px;
+    font-size: 11px; font-weight: 600; vertical-align: middle;
+    background: var(--income-light); color: var(--income);
+}
+.be-rate.down { background: var(--expense-light); color: var(--expense); }
+.be-rate.up { background: var(--income-light); color: var(--income); }
+.be-rate.unknown { background: var(--bg-content); color: var(--text-tertiary); font-weight: 400; }
+.breakdown-rate { font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-left: 6px; }
+.breakdown-rate.income { color: var(--income); }
+.breakdown-rate.expense { color: var(--expense); }
+.breakdown-rate-unknown, .breakdown-rate.breakdown-rate-unknown { color: var(--text-tertiary); font-weight: 400; font-size: 11px; }
 @media (max-width: 640px) {
     .bal-entry-row.has-flow .be-input { flex: 1 1 40%; }
     .be-flow { width: 100%; }
