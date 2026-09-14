@@ -5925,38 +5925,54 @@ function investmentAccountIds() {
         && (includeFixed || a.group !== '固定资产')).map(a => a.id);
 }
 
-// 某月的组合三要素：期初市值、期末市值、本期收益、已录净入金
+// 某月的组合三要素：期初市值、期末市值、本期收益、已录净入金。
+// 铁律：只有"本金已知"的账户才进收益率。本金已知 = 上月记过余额，或本月录了净入金。
+// 否则分子带着收益、分母却是 0，收益率会虚高到离谱：账户里本来有 10 万、只记了本月余额，
+// 赚 5000 会被算成 9.5%。这类账户从分子和分母同时剔除（收益金额照记，只是不参与算率）。
 function portfolioMonthStats(month, ids) {
     const scope = ids || investmentAccountIds();
     const member = state.balanceOwner;
     const prev = previousMonthOf(month);
-    const valueAt = (m) => {
-        if (!m) return 0;
-        const map = balancesAtMonth(m, member);
-        return scope.reduce((sum, id) => sum + (Number(map[id]) || 0), 0);
-    };
-    const v1 = valueAt(month);
-    const v0 = valueAt(prev);
-
+    const prevMap = prev ? balancesAtMonth(prev, member) : {};
+    const curMap = balancesAtMonth(month, member);
     const retMap = returnsAtMonth(month, member);
-    let profit = 0;
-    scope.forEach(id => { profit += Number(retMap[id]) || 0; });
 
-    // flow 可以留空（未录）；只要有一条录了，就认为这个月的入金信息是已知的
-    let flow = 0, flowKnown = false;
+    // 每个账户的净入金（留空 = 未录）
+    const flowOf = {}, flowKnownOf = {};
     state.returns.forEach(r => {
         if (r.month !== month || !scope.includes(r.accountId)) return;
         if (member !== 'all' && r.member !== member) return;
         if (r.flow === undefined || r.flow === null || r.flow === '') return;
-        flow += Number(r.flow) || 0;
-        flowKnown = true;
+        flowOf[r.accountId] = (flowOf[r.accountId] || 0) + (Number(r.flow) || 0);
+        flowKnownOf[r.accountId] = true;
     });
 
-    // 分母：录了入金就用 Modified Dietz（期初 + 入金的一半，假设月中进出）；
-    // 没录就退化成"期初期末平均"，是个不完美但远好于直接除期末的近似。
-    const base = flowKnown ? (v0 + flow / 2) : ((v0 + v1) / 2);
-    const hasProfit = scope.some(id => (retMap[id] !== undefined && retMap[id] !== null));
-    const rate = (hasProfit && base > 0) ? profit / base : null;
+    const eligible = [], unknown = [];
+    scope.forEach(id => {
+        (prevMap[id] !== undefined || flowKnownOf[id]) ? eligible.push(id) : unknown.push(id);
+    });
+    const sum = (map) => eligible.reduce((s, id) => s + (Number(map[id]) || 0), 0);
+
+    const v1 = sum(curMap);
+    const v0 = sum(prevMap);
+    const profit = sum(retMap);
+    const hasProfit = eligible.some(id => retMap[id] !== undefined && retMap[id] !== null);
+    const flowKnown = eligible.some(id => flowKnownOf[id]);
+    const flow = sum(flowOf);
+
+    // 分母：录了入金用 Modified Dietz（期初 + 入金的一半，当作月中进出）；
+    // 没录就退化成"期初期末平均"。期初为 0 又没录入金时钱是本月才进来的，
+    // 平均本金会凭空少一半，所以宁可不给数字，也绝不给一个假的高收益率。
+    let rate = null, base = 0, reason = '';
+    if (!scope.length) reason = 'no-account';
+    else if (!eligible.length) reason = 'no-capital';
+    else if (!hasProfit) reason = 'no-profit';
+    else if (v0 <= 0 && !flowKnown) reason = 'zero-opening';
+    else {
+        base = flowKnown ? (v0 + flow / 2) : ((v0 + v1) / 2);
+        rate = base > 0 ? profit / base : null;
+        if (rate === null) reason = 'zero-base';
+    }
 
     // 自洽校验：收益理应等于 期末 − 期初 − 净入金。差得多说明余额或收益记错了。
     let check = null;
@@ -5967,7 +5983,7 @@ function portfolioMonthStats(month, ids) {
         if (Math.abs(gap) > tol) check = { implied, gap };
     }
 
-    return { v0, v1, profit, flow, flowKnown, base, rate, check };
+    return { v0, v1, profit, flow, flowKnown, base, rate, check, eligible, unknown, reason };
 }
 
 // 时间加权累计收益率：逐月 (1+r) 连乘。剔掉"什么时候加钱/取钱"的影响，
@@ -6214,10 +6230,23 @@ function renderReturnRates(info) {
 
     const mh = document.getElementById('retRateMonthHint');
     if (mh) {
-        if (cur.rate === null) mh.textContent = cur.v0 > 0 ? '本期没有收益记录' : '缺少上月余额，无法算期初';
-        else mh.textContent = cur.flowKnown
-            ? `本金 ${formatCurrency(cur.base)} · 含净入金 ${formatCurrency(cur.flow)}`
-            : `平均本金 ${formatCurrency(cur.base)} · 未录入金（近似）`;
+        const REASON = {
+            'no-account': '还没有归类为稳健理财 / 长期投资的账户',
+            'no-capital': '本金未知：这些账户都没记上月余额，先去「资产负债」补上',
+            'no-profit': '这个月没有收益记录',
+            'zero-opening': '上月余额记的是 0，本月进来的钱算新入金：填一下「净入金」才能算准',
+            'zero-base': '本金为 0，算不出比率',
+        };
+        if (cur.rate === null) {
+            mh.textContent = REASON[cur.reason] || '暂时算不出收益率';
+        } else if (cur.unknown.length) {
+            const names = cur.unknown.map(id => (accountById(id) || {}).name).filter(Boolean);
+            mh.textContent = `本金 ${formatCurrency(cur.base)} · 未计入 ${names.join('、')}（缺上月余额）`;
+        } else {
+            mh.textContent = cur.flowKnown
+                ? `本金 ${formatCurrency(cur.base)} · 含净入金 ${formatCurrency(cur.flow)}`
+                : `平均本金 ${formatCurrency(cur.base)} · 未录入金（近似）`;
+        }
     }
     const ch = document.getElementById('retRateCumHint');
     if (ch) ch.textContent = cum.months ? `按 ${cum.months} 个有收益率的月份连乘` : '';
@@ -6229,16 +6258,25 @@ function renderReturnRates(info) {
         const incCash = !!(state.settings && state.settings.returnIncludeCash);
         const incFixed = !!(state.settings && state.settings.returnIncludeFixed);
         const names = ids.map(id => (accountById(id) || {}).name).filter(Boolean);
+        const prevM = previousMonthOf(info.month);
+        const missing = (cur.unknown || []).map(id => (accountById(id) || {}).name).filter(Boolean);
         const outFixed = state.accounts.filter(a => a.kind === 'asset' && a.group === '固定资产'
             && (incCash ? ['steady', 'growth', 'cash'] : ['steady', 'growth']).includes(a.bucket)
             && !ids.includes(a.id)).map(a => a.name);
         scope.innerHTML = `只统计<b>稳健理财 / 长期投资</b>类账户${incCash ? ' + 活钱' : ''}${incFixed ? ' + 固定资产' : ''}：`
             + `${_esc(names.join('、') || '（还没有投资账户，去「四笔钱」归类）')}`
             + (outFixed.length ? `<div class="ret-excluded">已排除固定资产：${_esc(outFixed.join('、'))}（市值大、一般不录收益）</div>` : '')
+            + (missing.length ? `<div class="ret-excluded">本金未知，暂时不算进收益率：${_esc(missing.join('、'))}`
+                + `<button class="link-btn" id="retGoBalance">去记 ${_esc(prevM ? prevM.replace('-', '年') + '月' : '')} 余额</button></div>` : '')
             + `<div class="ret-scope-toggles">`
             + `<button class="link-btn" id="retScopeCash">${incCash ? '不含活钱' : '把活钱也算进来'}</button>`
             + (outFixed.length || incFixed ? `<button class="link-btn" id="retScopeFixed">${incFixed ? '不含房产车辆' : '房产车辆也算进来'}</button>` : '')
             + `</div>`;
+        const goBal = document.getElementById('retGoBalance');
+        if (goBal) goBal.addEventListener('click', () => {
+            switchView('balance');
+            openBalanceModal(prevM);
+        });
         const t = document.getElementById('retScopeCash');
         if (t) t.addEventListener('click', () => {
             state.settings.returnIncludeCash = !state.settings.returnIncludeCash;
