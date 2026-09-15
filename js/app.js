@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.28.0';
+const APP_VERSION = '1.29.0';
 
 // ---- On-demand library loading ----
 // Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in
@@ -1444,16 +1444,6 @@ async function importJsonFile() {
     applyImportedJSON(base64ToText(picked.base64));
 }
 
-// PWA: Import from iCloud (file input)
-// 旧入口：隐藏 input 的 onchange 仍可用
-function importFromICloud(event) {
-    const file = event.target.files && event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => { applyImportedJSON(String(e.target.result)); event.target.value = ''; };
-    reader.onerror = () => { showToast('读取文件失败', 'error'); event.target.value = ''; };
-    reader.readAsText(file);
-}
 
 function updateICloudSyncUI() {
     const container = document.getElementById('icloudSyncSection');
@@ -2115,141 +2105,6 @@ function updateSidebarSummary() {
     document.getElementById('sidebarMonth').textContent = getMonthLabel(monthKey);
 }
 
-function renderTrendChart() {
-    const ctx = document.getElementById('trendChart');
-    if (!ctx) return;
-
-    const labels = [];
-    const incomeData = [];
-    const expenseData = [];
-    const now = new Date();
-
-    for (let i = 5; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        labels.push(`${d.getMonth() + 1}月`);
-        const txns = state.transactions.filter(t => getMonthKey(t.date) === mk);
-        incomeData.push(txns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0));
-        expenseData.push(txns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0));
-    }
-
-    if (charts.trend) charts.trend.destroy();
-
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const textColor = isDark ? '#98989d' : '#6e6e73';
-    const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
-
-    charts.trend = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels,
-            datasets: [
-                {
-                    label: '收入',
-                    data: incomeData,
-                    backgroundColor: '#34c759',
-                    borderRadius: 6,
-                    barPercentage: 0.6,
-                    categoryPercentage: 0.7,
-                },
-                {
-                    label: '支出',
-                    data: expenseData,
-                    backgroundColor: '#ff3b30',
-                    borderRadius: 6,
-                    barPercentage: 0.6,
-                    categoryPercentage: 0.7,
-                },
-            ],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: { color: textColor, font: { size: 12, family: '-apple-system' }, usePointStyle: true, pointStyle: 'circle', padding: 12 },
-                },
-                tooltip: {
-                    callbacks: {
-                        label: (ctx) => `${ctx.dataset.label}: ${formatCurrency(ctx.raw)}`,
-                    },
-                },
-            },
-            scales: {
-                x: { grid: { display: false }, ticks: { color: textColor, font: { size: 11 } } },
-                y: {
-                    grid: { color: gridColor },
-                    ticks: { color: textColor, font: { size: 11 }, callback: (v) => state.settings.currency + v },
-                },
-            },
-        },
-    });
-}
-
-function renderCategoryChart() {
-    const ctx = document.getElementById('categoryChart');
-    if (!ctx) return;
-
-    const monthKey = getCurrentMonthKey();
-    const monthExpenses = state.transactions.filter(t => t.type === 'expense' && getMonthKey(t.date) === monthKey);
-
-    const catTotals = {};
-    monthExpenses.forEach(t => {
-        catTotals[t.categoryId] = (catTotals[t.categoryId] || 0) + t.amount;
-    });
-
-    const entries = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
-    const labels = entries.map(([id]) => getCategoryById(id)?.name || '未知');
-    const data = entries.map(([, v]) => v);
-    const colors = entries.map(([id]) => getCategoryById(id)?.color || '#636e72');
-
-    if (charts.category) charts.category.destroy();
-
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const textColor = isDark ? '#98989d' : '#6e6e73';
-
-    if (data.length === 0) {
-        charts.category = new Chart(ctx, {
-            type: 'doughnut',
-            data: { labels: ['暂无数据'], datasets: [{ data: [1], backgroundColor: ['#e0e0e0'], borderWidth: 0 }] },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false }, tooltip: { enabled: false } },
-            },
-        });
-        return;
-    }
-
-    charts.category = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels,
-            datasets: [{ data, backgroundColor: colors, borderWidth: 0, hoverOffset: 6 }],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            cutout: '62%',
-            plugins: {
-                legend: {
-                    position: 'right',
-                    labels: { color: textColor, font: { size: 11, family: '-apple-system' }, usePointStyle: true, pointStyle: 'circle', padding: 8, boxWidth: 8 },
-                },
-                tooltip: {
-                    callbacks: {
-                        label: (ctx) => {
-                            const total = data.reduce((s, v) => s + v, 0);
-                            const pct = ((ctx.raw / total) * 100).toFixed(1);
-                            return `${ctx.label}: ${formatCurrency(ctx.raw)} (${pct}%)`;
-                        },
-                    },
-                },
-            },
-        },
-    });
-}
 
 // ---- Transactions ----
 function transactionItemHTML(t) {
@@ -5826,9 +5681,6 @@ function insCoveredCount() {
 function insTotalAmount() {
     return INSURANCE_TYPES.reduce((s, t) => s + insTypeAmount(t), 0);
 }
-function insTotalPremium() {
-    return state.insurancePolicies.filter(p => p.covered).reduce((s, p) => s + (Number(p.premium) || 0), 0);
-}
 
 function renderFourFunds() {
     if (!document.getElementById('view-funds')) return;
@@ -7458,9 +7310,19 @@ async function init() {
         loadSampleData();
     }
 
-    // Auto-open transaction modal on launch if enabled
-    if (state.settings.autoOpenAdd) {
-        setTimeout(() => openTransactionModal(), 300);
+    // 启动自动弹「记一笔」：设置开关打开，或 URL 带 ?action=add（快捷指令 / 书签直达）
+    // ?action=add 只在本次打开生效，不写入设置
+    let __urlActionAdd = false;
+    try { __urlActionAdd = new URLSearchParams(location.search).get('action') === 'add'; } catch (e) { /* ignore */ }
+    if (state.settings.autoOpenAdd || __urlActionAdd) {
+        setTimeout(() => {
+            try { openTransactionModal(); } catch (e) { console.error('auto open add failed', e); }
+            // 清掉 URL 里的参数，避免刷新时反复弹窗
+            if (__urlActionAdd && history.replaceState) {
+                const clean = location.pathname + location.hash;
+                history.replaceState(null, '', clean);
+            }
+        }, 300);
     }
 
     // Warm up Chart.js in the background once the first screen is on screen
