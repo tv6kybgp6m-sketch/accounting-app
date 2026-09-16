@@ -1193,7 +1193,10 @@ function dataHealthCheck() {
     if (future.length) add('info', `${future.length} 笔交易日期在未来`, shorten(uniq(future.map(t => t.date))));
     const zero = state.transactions.filter(t => !(Number(t.amount) > 0));
     if (zero.length) add('info', `${zero.length} 笔交易金额是 0 或负数`, shorten(zero.slice(0, 6).map(t => `${t.date} ${t.amount}`)));
-    const dups = [].concat(dupIds(state.transactions), dupIds(state.balances), dupIds(state.returns));
+    const dups = [].concat(
+        dupIds(state.transactions), dupIds(state.balances), dupIds(state.returns),
+        dupIds(state.categories), dupIds(state.accounts), dupIds(state.insurancePolicies)
+    );
     if (dups.length) add('warn', `${dups.length} 个重复的记录 id（多设备合并可能撞车）`, shorten(dups.slice(0, 8)));
 
     // 账户平时在记、中间却断了几个月：这是最常见的漏记
@@ -1485,18 +1488,39 @@ const UPDATE_CHECK_URLS = [
 let __updateCheck = null;         // { version, newer, at } —— 桌面版启动时静默查一次的结果
 
 async function fetchPublishedVersion() {
-    for (const url of UPDATE_CHECK_URLS) {
+    // 优先读固定的 version.json（version 字段是单一可信来源，不再正则扒 HTML）。
+    // 老部署没这个文件时，退回从 index.html 扒"版本 X.Y.Z"做兜底，保证更新提示不失效。
+    const versionJsonUrls = UPDATE_CHECK_URLS.map(u => u.replace(/index\.html(\?.*)?$/, 'version.json'));
+    const fetchJson = async (u) => {
         try {
             const ctrl = new AbortController();
             const timer = setTimeout(() => ctrl.abort(), 5000);
-            const res = await fetch(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'cb=' + Date.now(),
+            const res = await fetch(u + (u.indexOf('?') >= 0 ? '&' : '?') + 'cb=' + Date.now(),
                 { cache: 'no-store', signal: ctrl.signal });
             clearTimeout(timer);
-            if (!res.ok) continue;
+            if (!res.ok) return null;
+            const data = await res.json().catch(() => null);
+            if (data && /^\d+\.\d+\.\d+$/.test(String(data.version))) return String(data.version);
+            return null;
+        } catch (e) { return null; }
+    };
+    const fetchHtml = async (u) => {
+        try {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 5000);
+            const res = await fetch(u + (u.indexOf('?') >= 0 ? '&' : '?') + 'cb=' + Date.now(),
+                { cache: 'no-store', signal: ctrl.signal });
+            clearTimeout(timer);
+            if (!res.ok) return null;
             const html = await res.text();
-            const v = (html.match(/版本\s+(\d+\.\d+\.\d+)/) || [])[1];
-            if (v) return v;
-        } catch (e) { /* 换下一个地址 */ }
+            return (html.match(/版本\s+(\d+\.\d+\.\d+)/) || [])[1] || null;
+        } catch (e) { return null; }
+    };
+    for (let i = 0; i < UPDATE_CHECK_URLS.length; i++) {
+        const v = await fetchJson(versionJsonUrls[i]);
+        if (v) return v;
+        const v2 = await fetchHtml(UPDATE_CHECK_URLS[i]);
+        if (v2) return v2;
     }
     return null;
 }
@@ -1638,7 +1662,15 @@ async function applyImportedJSON(text) {
             showToast(e && e.message === '已取消' ? '已取消导入' : '导入失败：' + (e && e.message || e), 'error');
             return false;
         }
-        return applyImportedJSON(plain);
+        // iCloud / 同步文件是「先压缩再加密」，解密后是 BKZ1:… 压缩串，必须先解压再解析；
+        // 手动导出的加密备份是「加密原始 JSON」，解压函数对明文同样安全（直接 JSON.parse）。
+        try {
+            plain = await decodeSyncPayload(plain);
+        } catch (e) {
+            showToast('导入失败：' + (e && e.message || e), 'error');
+            return false;
+        }
+        return applyImportedJSON(typeof plain === 'string' ? plain : JSON.stringify(plain));
     }
     if (!parsed || !parsed.data) { showToast('导入失败：文件里没有账本数据', 'error'); return false; }
     mergeRemoteData(parsed);
@@ -5282,9 +5314,9 @@ function netWorthBridge(month) {
     const delta = closeT.net - openT.net;
     const saved = income - expense;
     const unexplained = delta - saved - profit - fixedMove;
-    // 容忍度看"这个月动了多少"，不看净资产：净资产 170 万时按净资产百分比算，
-    // 会把近一万元的差额判成正常。下限 1 元只吸收四舍五入。
-    const tol = Math.max(1, Math.abs(delta) * 0.01);
+    // 容忍度：基础 50 元吸收四舍五入/小额手续费；动得大的月份再放宽到 delta 的 0.1%，
+    // 但封顶 100 元——避免净资产大涨的月份把几千元漏记也算成"对得上"。
+    const tol = Math.min(100, Math.max(50, Math.abs(delta) * 0.001));
     return {
         month, prev, open: openT.net, close: closeT.net, income, expense, saved, profit,
         fixedMove, fixedTouched, delta, unexplained, txnCount: txns.length,
