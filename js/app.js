@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.36.0';
+const APP_VERSION = '1.37.0';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -6715,9 +6715,7 @@ function openAccountEdit(accountId) {
     editingAccountId = accountId;
     acctEditDraft = { icon: a.icon || 'fa-wallet', color: a.color || '#007aff', earnsReturn: accountEarnsReturn(a) };
     document.getElementById('acctEditName').value = a.name;
-    document.getElementById('acctEditSub').textContent = `${a.group || (a.kind === 'liability' ? '负债' : '资产')} · ${(state.balances.filter(b => b.accountId === a.id).length)} 期余额 · ${(state.returns.filter(r => r.accountId === a.id).length)} 期收益`;
-    const kindSel = document.getElementById('acctEditKind');
-    kindSel.value = a.kind;
+    document.getElementById('acctEditSub').textContent = `${a.group || '账户'} · ${(state.balances.filter(b => b.accountId === a.id).length)} 期余额 · ${(state.returns.filter(r => r.accountId === a.id).length)} 期收益`;
     paintAcctEditGroups(a.kind, a.group);
     const er = document.getElementById('acctEditEarns');
     if (er) { er.checked = acctEditDraft.earnsReturn; }
@@ -6769,7 +6767,9 @@ function saveAccountEdit() {
     }
     const walletEl = document.getElementById('acctEditWallet');
     const wallet = walletEl ? String(walletEl.value || '').trim() : '';
-    const kind = document.getElementById('acctEditKind').value === 'liability' ? 'liability' : 'asset';
+    // 类型（资产/负债）不再让用户改：一个账户里两类都可能同时存在，
+    // 负债只是记账时填的那一列。kind 保留原值，仅供老数据迁移时判断。
+    const kind = a.kind === 'liability' ? 'liability' : 'asset';
     let group = document.getElementById('acctEditGroup').value;
     if (!groupsForKind(kind).includes(group)) group = groupsForKind(kind)[0];
     Object.assign(a, { name, kind, group, wallet, icon: acctEditDraft.icon, color: acctEditDraft.color,
@@ -7033,6 +7033,7 @@ const ASSET_CLASS_DEFS = [
     { key: 'cash',  name: '现金',     re: /现金|储蓄卡|借记卡|活期|零钱|银行卡|钱包|工资卡/ },
     { key: 'mmf',   name: '货币基金', re: /货币基金|余额宝|零钱通|活钱|现金管理|日日盈|天天利|朝朝宝|薪金宝/ },
     { key: 'fixed', name: '定期存款', re: /定期|定存|存单|大额存款|结构性|三年|五年|一年期/ },
+    { key: 'gold',  name: '黄金',     re: /黄金|金条|贵金属|纸黄金|积存金|实物金/ },
     { key: 'stock', name: '股票基金', re: /股票|基金|指数|证券|ETF|QDII|纳斯达克|标普|权益|券商/ },
 ];
 const ASSET_CLASS_OTHER = { key: 'other', name: '其他资产' };
@@ -7054,9 +7055,9 @@ function assetClassName(key) {
 // 一条余额 =「某个账户在某一类资产/负债上有多少钱」，不再是一个账户一个月只有一个数。
 // 负债只是类别之一（BAL_CAT_LIAB），跟现金、货币基金并列，不再当作账户的一种"类型"
 // —— 因为一个账户本来就既可能有资产也可能有负债。
-const BAL_CATS = ['cash', 'mmf', 'fixed', 'stock', 'other'];
+const BAL_CATS = ['cash', 'mmf', 'fixed', 'stock', 'gold', 'other'];
 const BAL_CAT_LIAB = 'liab';
-const BAL_CAT_NAMES = { cash: '现金', mmf: '货币基金', fixed: '定期存款', stock: '股票基金', other: '其他', liab: '负债' };
+const BAL_CAT_NAMES = { cash: '现金', mmf: '货币基金', fixed: '定期存款', stock: '股票基金', gold: '黄金', other: '其他', liab: '负债' };
 function balanceCatName(k) { return BAL_CAT_NAMES[k] || assetClassName(k); }
 
 // 老数据（还没有类别这一说的时候）一条账户一个月只有一个数，没有 cat 字段：
@@ -7275,7 +7276,7 @@ function renderMonthlyEntry() {
     list.innerHTML = `<div class="mw-scroll"><div class="mw-grid" style="--mw-cols:${cols}">
         <div class="mw-h mw-corner">账户 / 渠道</div>
         ${cats.map(k => `<div class="mw-h mw-col">${_esc(balanceCatName(k))}</div>`).join('')}
-        <div class="mw-h mw-col mw-col-liab">负债</div><div class="mw-h mw-col">收益</div>
+        <div class="mw-h mw-col mw-col-liab" title="信用卡欠款、花呗、房贷、车贷…都填这一列">负债</div><div class="mw-h mw-col">收益</div>
         <div class="mw-h mw-col">净入金</div><div class="mw-h mw-col mw-col-sum">小计 / 对账</div>
         ${summaryRows}
         ${rows}
@@ -7287,9 +7288,10 @@ function renderMonthlyEntry() {
             <span class="mw-chips">${quick.map(q =>
                 `<button class="mw-chip" data-quick-add="${_esc(q)}">+ ${_esc(q)}</button>`).join('')}</span>
         </div>`
-        + `<div class="re-hidden-note"><span>竖着一行 = 一个「放钱的地方」（支付宝、微信、工商银行、摩根…）；
-            横着一列 = 一类资产（现金、货币基金、定期存款、股票基金、负债…）。同一个账户既可以有资产也可以有负债，
-            所以「负债」只是一列，不是账户的属性。行名点一下就能改。这里加的账户会同步进「账户」页。</span></div>`;
+        + `<div class="re-hidden-note"><span>一行 = 一个「放钱的地方」（中国银行 / 支付宝 / 微信 / 摩根…），一列 = 一类资产。
+            一个账户里同时有活期、定期、货币基金、股票基金、黄金和信用卡欠款，都在同一行里填：
+            资产填对应的类别列，欠款（信用卡、花呗、房贷）填「负债」列 —— 账户本身不再分资产还是负债。
+            像「信用卡」「花呗」这种单独的行，可以直接把数填进所属银行那一行的负债列，再用行尾的 × 删掉它。</span></div>`;
     bindMonthlyEntry();
 }
 
@@ -7671,8 +7673,9 @@ function bindReturnRatePreview() { return updateMonthlyDerived(); }
 
 // ---------------- 账户管理弹窗 ----------------
 function openAccountsModal() {
+    // 不再有「资产 / 负债」下拉，新增账户一律按资产分类给选项（分组只是展示用，不影响计算）
     const sel = document.getElementById('newAccountGroup');
-    sel.innerHTML = (kind => (kind === 'asset' ? ASSET_GROUPS : LIABILITY_GROUPS).map(g => `<option>${g}</option>`).join(''))(document.getElementById('newAccountKind').value);
+    if (sel) sel.innerHTML = ASSET_GROUPS.map(g => `<option>${g}</option>`).join('');
     renderAccountManageList();
     document.getElementById('accountsModal').classList.remove('hidden');
     raiseOverlay('accountsModal');
@@ -7686,23 +7689,21 @@ function renderAccountManageList() {
     if (!box) return;
     const memberChips = state.balanceMembers.map(m =>
         `<span class="fam-chip">${_esc(m)}<i class="fa-solid fa-pen" data-act="rename" data-member="${_esc(m)}"></i><i class="fa-solid fa-xmark" data-act="del" data-member="${_esc(m)}"></i></span>`).join('');
-    const sections = [['asset', '资产账户'], ['liability', '负债账户']];
+    // 账户不再按「资产 / 负债」分成两堆 —— 一个账户（中国银行、支付宝）本来就同时装着
+    // 活期、定期、货基、股基、黄金和信用卡欠款，负债只是记账时填的「负债」那一列，
+    // 不是账户自己的属性。所以这里就是一条扁平的渠道清单。
+    const rows = state.accounts.slice().sort((a, b) =>
+        (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
     box.innerHTML = `
         <div class="account-section-title">家庭成员</div>
         <div class="fam-chips">${memberChips}<button class="fam-add" data-add="1"><i class="fa-solid fa-plus"></i> 添加</button></div>
-        <div class="account-hint">账户类型全家共用；记录余额时再选择是本人的还是家人的。</div>
-    ` + sections.map(([kind, label]) => {
-        const rows = accountsSortedByKind(kind);
-        return `
-            <div class="account-section-title">${label}（${rows.length}）<span class="acct-order-hint">↑↓ 可调顺序</span></div>
-            ${rows.map((a, i) => { const recN = accountRecordCounts(a.id); const n = recN.bal + recN.ret; return `
+        <div class="account-hint">账户 = 放钱的地方（中国银行 / 支付宝 / 微信 / 摩根…）。一个账户里可以同时有资产和负债，
+            记账时在「负债」那一列填就行，不用再给账户打资产还是负债的标签。</div>
+        <div class="account-section-title">账户（${rows.length}）<span class="acct-order-hint">↑↓ 可调顺序</span></div>
+        ${rows.map((a, i) => { const recN = accountRecordCounts(a.id); const n = recN.bal + recN.ret; return `
                 <div class="account-row">
                     <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
-                    <div class="ar-name" onclick="renameAccount('${a.id}')">${_esc(a.name)}<span class="be-kind ${a.kind}">${_esc(a.group || '')}</span></div>
-                    <select class="acct-kind-select" data-kind-account="${a.id}" title="账户类型">
-                        <option value="asset" ${a.kind === 'asset' ? 'selected' : ''}>资产</option>
-                        <option value="liability" ${a.kind === 'liability' ? 'selected' : ''}>负债</option>
-                    </select>
+                    <div class="ar-name" onclick="renameAccount('${a.id}')">${_esc(a.name)}<span class="be-kind">${_esc(a.group || '')}</span></div>
                     <select class="acct-group-select" data-group-account="${a.id}" title="账户分类">
                         ${groupsForKind(a.kind).map(g => `<option value="${g}" ${a.group === g ? 'selected' : ''}>${g}</option>`).join('')}
                     </select>
@@ -7713,7 +7714,6 @@ function renderAccountManageList() {
                     <button class="bh-edit" onclick="openAccountEdit('${a.id}')" title="编辑账户"><i class="fa-solid fa-pen"></i></button>
                     <button class="bh-delete${n ? ' bh-blocked' : ''}" onclick="deleteAccountFromList('${a.id}')" title="${n ? '还有 ' + n + ' 条记录，得先清掉才能删' : '删除'}"><i class="fa-solid ${n ? 'fa-lock' : 'fa-trash'}"></i></button>
                 </div>`; }).join('') || '<div class="breakdown-empty">暂无账户</div>'}`;
-    }).join('');
 
     if (!box.$acctWired) {
         box.$acctWired = true;
@@ -7746,14 +7746,16 @@ function renderAccountManageList() {
 
 function addAccount() {
     const name = document.getElementById('newAccountName').value.trim();
-    const kind = document.getElementById('newAccountKind').value;
-    const group = document.getElementById('newAccountGroup').value;
+    const groupEl = document.getElementById('newAccountGroup');
+    const group = groupEl ? groupEl.value : '';
     if (!name) { showToast('请输入账户名称', 'error'); return; }
     if (state.accounts.some(a => a.name === name)) { showToast('已有同名账户', 'error'); return; }
+    // 不再让用户选「资产 / 负债」：一个账户里两类都可能同时存在，
+    // 负债只是记账时填的那一列。kind 只在迁移老数据时还有用。
     const palette = ['#007aff', '#34c759', '#ff9500', '#af52de', '#5ac8fa', '#ff3b30', '#a2845e', '#30b0c7'];
     state.accounts.push({
         id: 'acc_' + uid(),
-        name, kind, group,
+        name, kind: 'asset', group,
         icon: kind === 'asset' ? 'fa-wallet' : 'fa-credit-card',
         color: palette[state.accounts.length % palette.length],
         order: state.accounts.reduce((m, a) => Math.max(m, a.order || 0), 0) + 1,
@@ -7826,11 +7828,9 @@ function initBalanceListeners() {
     bindModalMonth('monthly', renderMonthlyEntry);
     const monthlyMemberSel = document.getElementById('monthlyMemberSelect');
     if (monthlyMemberSel) monthlyMemberSel.addEventListener('change', renderMonthlyEntry);
-    document.getElementById('newAccountKind').addEventListener('change', () => {
-        const kind = document.getElementById('newAccountKind').value;
-        document.getElementById('newAccountGroup').innerHTML =
-            (kind === 'asset' ? ASSET_GROUPS : LIABILITY_GROUPS).map(g => `<option>${g}</option>`).join('');
-    });
+    // 账户不再有「资产 / 负债」下拉，分组选项固定给资产那套（分组只是展示用）
+    const newGroupSel = document.getElementById('newAccountGroup');
+    if (newGroupSel) newGroupSel.innerHTML = ASSET_GROUPS.map(g => `<option>${g}</option>`).join('');
 }
 
 // 账户排序：order 决定「账户管理」里的显示顺序（新增的排最后）

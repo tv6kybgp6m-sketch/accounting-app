@@ -1017,17 +1017,13 @@
                 <div class="modal-header">
                     <div class="drill-title-wrap">
                         <h2>账户管理</h2>
-                        <div class="cat-txn-sub">改名称点账户名 · 类型 / 分类 / 顺序都在每行上</div>
+                        <div class="cat-txn-sub">账户 = 放钱的地方（中国银行 / 支付宝 / 摩根…）；一个账户里可以同时有资产和负债</div>
                     </div>
                     <button class="modal-close" onclick="closeAccountsModal()"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="modal-body">
                     <div class="account-new">
-                        <input type="text" class="text-input" id="newAccountName" placeholder="新账户名称">
-                        <select class="text-input" id="newAccountKind">
-                            <option value="asset">资产</option>
-                            <option value="liability">负债</option>
-                        </select>
+                        <input type="text" class="text-input" id="newAccountName" placeholder="放钱的地方，如 中国银行 / 支付宝">
                         <select class="text-input" id="newAccountGroup"></select>
                         <button class="primary-btn" onclick="addAccount()"><i class="fa-solid fa-plus"></i> 添加</button>
                     </div>
@@ -1113,21 +1109,17 @@
                     <input type="text" class="text-input" id="acctEditName" placeholder="账户名称">
                     <div class="acct-edit-pair">
                         <div>
-                            <label class="settings-label">类型</label>
-                            <select class="text-input" id="acctEditKind">
-                                <option value="asset">资产</option>
-                                <option value="liability">负债</option>
-                            </select>
-                        </div>
-                        <div>
                             <label class="settings-label">分类</label>
                             <select class="text-input" id="acctEditGroup"></select>
                         </div>
+                        <div>
+                            <label class="settings-label">所属钱包</label>
+                            <input type="text" class="text-input" id="acctEditWallet" list="walletChoices" placeholder="留空 = 单独一组">
+                        </div>
                     </div>
-                    <label class="settings-label">所属钱包</label>
-                    <input type="text" class="text-input" id="acctEditWallet" list="walletChoices" placeholder="如：支付宝 / 微信 / 招商银行；留空 = 单独一组">
                     <datalist id="walletChoices"></datalist>
-                    <div class="settings-sublabel">记余额和记收益时按钱包归到同一节里一起填；只是分组，不影响任何计算。分类决定它算不算进收益率（稳健理财 / 长期投资才算），负债改资产会一并影响净资产口径。</div>
+                    <div class="settings-sublabel">账户不再分资产还是负债 —— 一个账户里可以同时有活期、定期、货基、股基、黄金和信用卡欠款，
+                        记账时资产填对应的类别列、欠款填「负债」列就行。</div>
                     <label class="switch-row">
                         <input type="checkbox" id="acctEditEarns">
                         <span>这个账户会有收益<span class="sr-hint">关掉后不会出现在记账单的收益那一列里；本月已录过的仍然能改</span></span>
@@ -1294,7 +1286,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.36.0').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.37.0').catch(() => {});
             });
         }
     </script>
