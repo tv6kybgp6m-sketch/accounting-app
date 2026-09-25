@@ -412,6 +412,43 @@ body {
     color: var(--text-tertiary);
 }
 
+.chart-header-btn {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background .15s;
+}
+.chart-header-btn:hover { background: var(--accent-light); }
+.chart-header-btn i { font-size: 12px; }
+
+.class-tag-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 0;
+    border-bottom: 0.5px solid var(--divider);
+}
+.class-tag-row:last-child { border-bottom: none; }
+.class-tag-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    flex-shrink: 0;
+}
+.class-tag-select {
+    max-width: 160px;
+    margin: 0;
+}
+
 .chart-container {
     position: relative;
     height: 200px;

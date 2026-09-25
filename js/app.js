@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.37.0';
+const APP_VERSION = '1.38.0';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -2728,6 +2728,9 @@ function loadState() {
             ensureAccountOrder();
             state.balances = Array.isArray(data.balances) ? data.balances : [];
             state.returns = Array.isArray(data.returns) ? data.returns : [];
+            // 资产归类：现金/货币基金/定期存款/股票基金/黄金/其他 各自归到
+            // 固定资产 / 流动资产 / 长期投资 / 其他投资，由用户自己定；负债单独算
+            state.balClassTags = Object.assign({}, BAL_CLASS_TAG_DEFAULT, data.balClassTags || {});
             state.recurring = Array.isArray(data.recurring) ? data.recurring : [];
             state.pendingRecurring = Array.isArray(data.pendingRecurring) ? data.pendingRecurring : [];
             state.recurringSkipped = (data.recurringSkipped && typeof data.recurringSkipped === 'object')
@@ -5143,7 +5146,7 @@ function exportData() {
             ['成员', '账户', '类型', '月份', '金额'], [{wch:10},{wch:18},{wch:8},{wch:10},{wch:14}]);
 
         addSheet('资产负债汇总', balanceMonths().map(m => {
-            const t = totalsFromMap(balancesAtMonth(m, 'all'));
+            const t = totalsFromCat(balancesByCat(m, 'all'));
             return { '月份': m, '总资产': round2(t.asset), '总负债': round2(t.liability), '净资产': round2(t.net), '负债率': (t.ratio * 100).toFixed(1) + '%' };
         }), ['月份', '总资产', '总负债', '净资产', '负债率'], [{wch:10},{wch:14},{wch:14},{wch:14},{wch:10}]);
 
@@ -5671,6 +5674,35 @@ function balanceCellsAtMonth(month, member = state.balanceOwner) {
     return cells;
 }
 
+// 用户自己决定每个资产类别归到哪一类（固定资产 / 流动资产 / 长期投资 / 其他投资）
+const BAL_CLASS_TAGS = ['流动资产', '长期投资', '固定资产', '其他投资'];
+const BAL_CLASS_TAG_DEFAULT = {
+    cash: '流动资产', mmf: '其他投资', fixed: '流动资产',
+    stock: '长期投资', gold: '长期投资', other: '其他投资',
+};
+
+// 按类别汇总某月的余额：每个类别一个数（负债也是正数），跨账户直接相加。
+// 这样才能把「中国银行信用卡」这一格正确算进负债，而不是跟现金净额冲掉。
+function balancesByCat(month, member = state.balanceOwner) {
+    const cat = {};
+    if (!month) return cat;
+    state.balances
+        .filter(b => b.month === month && (member === 'all' || b.member === member))
+        .forEach(b => {
+            const c = balanceCatOf(b);
+            cat[c] = (cat[c] || 0) + Math.abs(Number(b.amount) || 0);
+        });
+    return cat;
+}
+
+// 三桶：资产 = 所有资产类别之和；负债 = 负债列之和；净资产 = 资产 − 负债
+function totalsFromCat(cat) {
+    let asset = 0, liability = 0;
+    BAL_CATS.forEach(k => { asset += (cat[k] || 0); });
+    liability = cat[BAL_CAT_LIAB] || 0;
+    return { asset, liability, net: asset - liability, ratio: asset > 0 ? liability / asset : 0 };
+}
+
 function monthHasRecords(month) {
     return !!month && state.balances.some(b => b.month === month);
 }
@@ -5815,7 +5847,7 @@ function renderBalanceStats() {
         return `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${sign}${str}</span>`;
     };
     body.innerHTML = months.slice().reverse().map(m => {
-        const t = totalsFromMap(balancesAtMonth(m));
+        const t = totalsFromCat(balancesByCat(m));
         const [y, mm] = m.split('-');
         const dateLabel = state.balancePeriod === 'year' ? `${Number(mm)}月` : `${y}.${Number(mm)}`;
         return `
@@ -5859,8 +5891,8 @@ function renderBalance() {
 
     const info = balancePeriodInfo();
     const recorded = monthHasRecords(info.month);
-    const map = recorded ? balancesAtMonth(info.month) : {};
-    const t = totalsFromMap(map);
+    const cat = recorded ? balancesByCat(info.month) : {};
+    const t = totalsFromCat(cat);
 
     document.getElementById('balTotalAsset').textContent = formatCurrency(t.asset);
     document.getElementById('balTotalLiability').textContent = formatCurrency(t.liability);
@@ -5886,21 +5918,23 @@ function renderBalance() {
 function netWorthBridge(month) {
     const member = state.balanceOwner;
     const prev = previousMonthOf(month);
-    const prevMap = prev ? balancesAtMonth(prev, member) : {};
-    const curMap = balancesAtMonth(month, member);
-    const openT = totalsFromMap(prevMap);
-    const closeT = totalsFromMap(curMap);
+    const prevCat = prev ? balancesByCat(prev, member) : {};
+    const curCat = balancesByCat(month, member);
+    const openT = totalsFromCat(prevCat);
+    const closeT = totalsFromCat(curCat);
     const txns = state.transactions.filter(t => getMonthKey(t.date) === month);
     const income = txns.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const expense = txns.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const retMap = returnsAtMonth(month, member);
     const profit = Object.keys(retMap).reduce((s, k) => s + (Number(retMap[k]) || 0), 0);
-    // 房产/车辆升值没人录收益，但它确实改变净资产；不单独拆出来就会全砸进"待核对"
+    // 固定资产（按用户归类：房产 / 车辆 / 长期持有物）升值没人录收益，但确实改变净资产，
+    // 单独拆出来才不会全砸进「待核对」
     let fixedMove = 0, fixedTouched = false;
-    balAccounts().filter(a => a.group === '固定资产').forEach(a => {
-        if (prevMap[a.id] === undefined || curMap[a.id] === undefined) return;
+    BAL_CATS.forEach(k => {
+        if ((state.balClassTags[k] || '') !== '固定资产') return;
+        if (prevCat[k] === undefined || curCat[k] === undefined) return;
         fixedTouched = true;
-        fixedMove += (Number(curMap[a.id]) || 0) - (Number(prevMap[a.id]) || 0);
+        fixedMove += (Number(curCat[k]) || 0) - (Number(prevCat[k]) || 0);
     });
     const delta = closeT.net - openT.net;
     const saved = income - expense;
@@ -5910,8 +5944,8 @@ function netWorthBridge(month) {
     return {
         month, prev, open: openT.net, close: closeT.net, income, expense, saved, profit,
         fixedMove, fixedTouched, delta, unexplained, txnCount: txns.length,
-        openKnown: Object.keys(prevMap).length > 0,
-        closeKnown: Object.keys(curMap).length > 0,
+        openKnown: Object.keys(prevCat).length > 0,
+        closeKnown: Object.keys(curCat).length > 0,
         balanced: Math.abs(unexplained) <= tol,
     };
 }
@@ -6234,15 +6268,15 @@ function renderBalanceChart() {
     });
 }
 
-function balanceSeriesValue(map, metric) {
-    const t = totalsFromMap(map);
+function balanceSeriesValue(cat, metric) {
+    const t = totalsFromCat(cat);
     return metric === 'asset' ? t.asset : (metric === 'liability' ? t.liability : t.net);
 }
 
 // 某个月的净资产/总资产/总负债；该月没记录就返回 null（图表上留空，不走平线）
 function balanceValueAt(month, metric) {
     if (!monthHasRecords(month)) return null;
-    const v = balanceSeriesValue(balancesAtMonth(month), metric);
+    const v = balanceSeriesValue(balancesByCat(month), metric);
     return Math.round(v * 100) / 100;
 }
 
@@ -6306,18 +6340,34 @@ function renderBalanceTrend(ctx, chartType, meta, metric) {
     });
 }
 
-// 构成：资产/负债按账户，净资产按各账户净贡献
+// 构成：资产按「类别」拆（现金/货基/定期/股基/黄金/其他），
+// 负债按「账户」拆（信用卡/花呗/房贷/车贷各算一笔），净资产按各账户净贡献。
+// 不再靠账户的「资产/负债」标签去分 —— 中国银行信用卡这类要正确归到负债里。
 function balancePieEntries(info, metric) {
-    const map = balancesAtMonth(info.month);
     const rows = [];
-    balAccounts().forEach(a => {
-        const v = map[a.id];
-        if (v === undefined || v === null || v === 0) return;
-        if (metric === 'asset' && a.kind !== 'asset') return;
-        if (metric === 'liability' && a.kind !== 'liability') return;
-        const amount = metric === 'net' ? (a.kind === 'asset' ? v : -v) : v;
-        rows.push({ id: a.id, amount, signed: Math.abs(amount) });
-    });
+    if (metric === 'asset') {
+        const cat = balancesByCat(info.month);
+        BAL_CATS.forEach(k => {
+            const v = cat[k] || 0;
+            if (v > 0) rows.push({ id: k, label: BAL_CAT_NAMES[k], amount: v, signed: v });
+        });
+    } else if (metric === 'liability') {
+        const liabByAcct = {};
+        state.balances
+            .filter(b => b.month === info.month && balanceCatOf(b) === BAL_CAT_LIAB)
+            .forEach(b => { liabByAcct[b.accountId] = (liabByAcct[b.accountId] || 0) + Math.abs(Number(b.amount) || 0); });
+        Object.keys(liabByAcct).forEach(id => {
+            const a = accountById(id);
+            rows.push({ id, label: a ? a.name : id, amount: liabByAcct[id], signed: liabByAcct[id] });
+        });
+    } else { // net：每个账户净贡献
+        const map = balancesAtMonth(info.month);
+        balAccounts().forEach(a => {
+            const v = map[a.id];
+            if (v === undefined || v === null || v === 0) return;
+            rows.push({ id: a.id, label: a.name, amount: v, signed: Math.abs(v) });
+        });
+    }
     rows.sort((x, y) => y.signed - x.signed);
     return rows;
 }
@@ -6376,56 +6426,86 @@ function renderBalanceBreakdown() {
     if (!container) return;
     const info = balancePeriodInfo();
     const metric = state.balanceMetric;
-    const meta = BAL_METRICS[metric];
-    document.getElementById('balBreakdownTitle').textContent = `${meta.name}账户明细`;
+    document.getElementById('balBreakdownTitle').textContent = '资产归类明细';
 
-    // 列出该维度下的全部账户；当月没记过的显示「—」，不补数也不累加
-    const accounts = balAccounts().filter(a =>
-        metric === 'net' ? true : a.kind === (metric === 'asset' ? 'asset' : 'liability'));
-    if (!accounts.length) {
-        container.innerHTML = '<div class="breakdown-empty">还没有账户，点右上角「账户」添加</div>';
-        return;
-    }
-    const map = monthHasRecords(info.month) ? balancesAtMonth(info.month) : {};
-    const rows = accounts.map(a => {
-        const raw = map[a.id];
-        const amount = raw === undefined ? null
-            : (metric === 'net' && a.kind === 'liability' ? -raw : raw);
-        const shown = amount === null ? 0
-            : (metric === 'net' && a.kind === 'liability' ? -Math.abs(amount) : Math.abs(amount));
-        return { a, amount, shown, signed: amount === null ? -1 : Math.abs(amount) };
+    const cat = monthHasRecords(info.month) ? balancesByCat(info.month) : {};
+    // 分组：固定资产 / 流动资产 / 长期投资 / 其他投资 + 负债
+    const groups = [];
+    BAL_CLASS_TAGS.forEach(tag => groups.push({ name: tag, isLiab: false, cats: [] }));
+    groups.push({ name: '负债', isLiab: true, cats: [] });
+    const catList = BAL_CATS.concat([BAL_CAT_LIAB]);
+    catList.forEach(k => {
+        const tag = k === BAL_CAT_LIAB ? '负债' : (state.balClassTags[k] || '其他投资');
+        const g = groups.find(x => x.name === tag);
+        if (g) g.cats.push(k);
     });
-    rows.sort((x, y) => y.signed - x.signed);
-    const total = rows.reduce((sum, r) => sum + (r.signed > 0 ? r.signed : 0), 0);
-    const top = rows.length && rows[0].signed > 0 ? rows[0].signed : 1;
-    rows.forEach((r, i) => { r.rank = i + 1; });
+    const shownGroups = groups.filter(g => g.isLiab || g.cats.some(k => (cat[k] || 0) > 0));
 
-    // 按钱包折叠：一个支付宝下有活期/基金/定期/花呗，平铺着看很散，收成卡片先看总数
-    const groups = [], byName = {};
-    rows.forEach(r => {
-        const w = accountWallet(r.a) || '未分组';
-        if (!byName[w]) { byName[w] = { name: w, rows: [] }; groups.push(byName[w]); }
-        byName[w].rows.push(r);
-    });
-    const sumOf = g => Math.abs(g.rows.reduce((t, r) => t + r.shown, 0));
-    if (groups.length > 1) groups.sort((x, y) => sumOf(y) - sumOf(x));
-    const flat = rows.length <= 1 || groups.length <= 1;
-    container.innerHTML = (flat ? [{ name: '', rows }] : groups).map(g => {
-        const open = flat || g.rows.length === 1 || balOpenWallets.has(g.name);
-        const card = g.rows.map(r => breakdownRowHTML(r, total, top, metric)).join('');
-        if (flat) return card;
-        const net = g.rows.reduce((t, r) => t + r.shown, 0);
-        return `<div class="bal-wallet${open ? ' open' : ''}">
-            <div class="bw-head" data-bal-wallet="${_esc(g.name)}">
-                <span class="bw-name">${_esc(g.name)}<em>${g.rows.length} 项</em></span>
-                <span class="bw-net">${formatCurrency(net)}</span>
-                <i class="fa-solid ${open ? 'fa-chevron-up' : 'fa-chevron-down'}"></i>
+    const grandAsset = BAL_CATS.reduce((s, k) => s + (cat[k] || 0), 0);
+    const grandLiab = cat[BAL_CAT_LIAB] || 0;
+    const grand = metric === 'liability' ? grandLiab : (metric === 'asset' ? grandAsset : grandAsset + grandLiab);
+    const top = Math.max(grand, 1);
+
+    container.innerHTML = shownGroups.map(g => {
+        const rows = g.cats.filter(k => (cat[k] || 0) > 0).map(k => {
+            const v = cat[k] || 0;
+            const pct = grand ? (v / grand) * 100 : 0;
+            return `
+            <div class="breakdown-item" title="${_esc(balanceCatName(k))}">
+                <div class="breakdown-icon" style="background:rgba(10,132,255,.12);color:var(--accent)">
+                    <i class="fa-solid ${g.isLiab ? 'fa-credit-card' : 'fa-chart-pie'}"></i>
+                </div>
+                <div class="breakdown-main">
+                    <div class="breakdown-head">
+                        <span class="breakdown-name">${_esc(balanceCatName(k))}</span>
+                        <span class="breakdown-amount">${formatCurrency(v)}<em>${pct.toFixed(1)}%</em></span>
+                    </div>
+                    <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (v / top) * 100)}%;${g.isLiab ? 'background:var(--expense)' : ''}"></div></div>
+                </div>
+            </div>`;
+        }).join('');
+        const sum = g.cats.reduce((s, k) => s + (cat[k] || 0), 0);
+        if (!rows) return '';
+        return `
+        <div class="bal-wallet open">
+            <div class="bw-head">
+                <span class="bw-name">${_esc(g.name)}<em>${g.cats.filter(k => (cat[k] || 0) > 0).length} 类</em></span>
+                <span class="bw-net${g.isLiab ? ' liab' : ''}">${formatCurrency(sum)}</span>
             </div>
-            ${open ? `<div class="bw-body">${card}</div>` : ''}
+            <div class="bw-body">${rows}</div>
+        </div>`;
+    }).join('') || '<div class="breakdown-empty">该期还没有余额记录</div>';
+}
+
+// ==================== 资产归类（用户自定每类归到 固定资产/流动资产/长期投资/其他投资）====================
+// 负债永远是负债，不参与这 4 类归类；这里只让用户决定 6 个资产类别各自挂哪一类。
+function openClassTagModal() {
+    const rows = document.getElementById('classTagRows');
+    if (!rows) return;
+    rows.innerHTML = BAL_CATS.map(k => {
+        const cur = state.balClassTags[k] || BAL_CLASS_TAG_DEFAULT[k] || '其他投资';
+        const opts = BAL_CLASS_TAGS.map(t => `<option value="${_esc(t)}"${t === cur ? ' selected' : ''}>${_esc(t)}</option>`).join('');
+        return `
+        <div class="class-tag-row">
+            <span class="class-tag-name">${_esc(BAL_CAT_NAMES[k])}</span>
+            <select class="text-input class-tag-select" data-cat="${_esc(k)}">${opts}</select>
         </div>`;
     }).join('');
-    container.querySelectorAll('[data-bal-wallet]').forEach(el =>
-        el.addEventListener('click', () => toggleBalWallet(el.dataset.balWallet)));
+    document.getElementById('classTagModal').classList.remove('hidden');
+    raiseOverlay('classTagModal');
+}
+function closeClassTagModal() {
+    document.getElementById('classTagModal').classList.add('hidden');
+}
+function saveClassTagModal() {
+    document.querySelectorAll('#classTagRows .class-tag-select').forEach(sel => {
+        const k = sel.getAttribute('data-cat');
+        if (k) state.balClassTags[k] = sel.value;
+    });
+    saveState();
+    closeClassTagModal();
+    renderBalance(); // 归类明细 + 净资产桥都依赖 balClassTags，整体重渲染
+    showToast('已保存资产归类', 'success');
 }
 
 // 展开状态只活在本次会话里：折叠是为了"看一眼总数"，不值得存到账本里
@@ -6491,8 +6571,8 @@ function openAccountHistoryForAccount(accountId, fallbackName) {
 function openAccountHistoryForPeriod(month, label) {
     if (!month) return;
     historyAccountId = null;
-    const map = balancesAtMonth(month);
-    const t = totalsFromMap(map);
+    const map = balancesAtMonth(month); // 仅用于"这个月记了哪些账户"的列表
+    const t = totalsFromCat(balancesByCat(month)); // 资产/负债按类别汇总，负债不再被账户净额吞掉
     const iconEl = document.getElementById('acctHistIcon');
     iconEl.style.background = 'var(--accent-light)';
     iconEl.style.color = 'var(--accent)';
@@ -7960,8 +8040,8 @@ function fundTotalAssets() {
 
 function fundLiabilities() {
     const month = fundLatestMonth();
-    const map = month ? balancesAtMonth(month) : {};
-    return state.accounts.filter(a => a.kind === 'liability').reduce((s, a) => s + (map[a.id] || 0), 0);
+    const cat = month ? balancesByCat(month) : {};
+    return cat[BAL_CAT_LIAB] || 0;
 }
 
 // 某类型（可含成员）是否已配置
@@ -8611,17 +8691,9 @@ function renderFamilySummary() {
     const sub = document.getElementById('familySummarySubtitle');
     if (sub) sub.textContent = month ? `截至 ${month.replace('-', '年')}月` : '';
     // 每个成员各记自己的余额，账户类型全家共用：按成员汇总其名下余额
-    const kindById = {};
-    state.accounts.forEach(acc => { kindById[acc.id] = acc.kind; });
     const rows = state.balanceMembers.map(mem => {
-        let a = 0, l = 0;
-        const mmap = balancesAtMonth(month, mem);
-        Object.keys(mmap).forEach(accId => {
-            const v = mmap[accId];
-            if (v === undefined) return;
-            if (kindById[accId] === 'liability') l += v; else a += v;
-        });
-        return { mem, a, l, net: a - l };
+        const mt = totalsFromCat(balancesByCat(month, mem));
+        return { mem, a: mt.asset, l: mt.liability, net: mt.net };
     });
 
     const tA = rows.reduce((s, r) => s + r.a, 0), tL = rows.reduce((s, r) => s + r.l, 0);
@@ -8971,9 +9043,9 @@ function totalAssetChange() {
     const member = state.balanceOwner;
     const assetAt = (m) => {
         if (!m) return null;
-        const map = balancesAtMonth(m, member);
-        if (!Object.keys(map).length) return null;
-        return totalsFromMap(map).asset;
+        const cat = balancesByCat(m, member);
+        if (!Object.keys(cat).length) return null;
+        return totalsFromCat(cat).asset;
     };
     const first = months[0] || null;
     const last = months[months.length - 1] || null;
@@ -9064,8 +9136,8 @@ function renderTacChart(t) {
         const keys = (t.openMonth && t.months.indexOf(t.openMonth) < 0)
             ? [t.openMonth].concat(t.months) : t.months.slice();
         const series = keys.map(m => {
-            const map = balancesAtMonth(m, member);
-            return Object.keys(map).length ? Math.round(totalsFromMap(map).asset * 100) / 100 : null;
+            const cat = balancesByCat(m, member);
+            return Object.keys(cat).length ? Math.round(totalsFromCat(cat).asset * 100) / 100 : null;
         });
         const empty = document.getElementById('tacChartEmpty');
         if (series.filter(v => v !== null).length < 2) {

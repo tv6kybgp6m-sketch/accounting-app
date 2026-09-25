@@ -395,6 +395,7 @@
                                 <h3 id="balBreakdownTitle">账户明细</h3>
                                 <span class="chart-subtitle" id="balBreakdownHint">点击账户查看历史余额</span>
                             </div>
+                            <button class="chart-header-btn" onclick="openClassTagModal()" title="设置现金/货基/定期/股基/黄金/其他分别归到哪一类"><i class="fa-solid fa-tags"></i> 设置归类</button>
                         </div>
                         <div class="breakdown-list" id="balBreakdownList"></div>
                     </div>
@@ -1286,9 +1287,25 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.37.0').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.38.0').catch(() => {});
             });
         }
     </script>
+    <div class="modal-overlay hidden" id="classTagModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>资产归类设置</h2>
+                <button class="modal-close" onclick="closeClassTagModal()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-tip">每个资产类别归到哪一类由你自己定：固定资产 / 流动资产 / 长期投资 / 其他投资。改完立刻影响「资产归类明细」和导出。<b>负债永远是负债</b>，不参与归类。</p>
+                <div id="classTagRows"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary-btn" onclick="closeClassTagModal()">取消</button>
+                <button class="primary-btn" onclick="saveClassTagModal()">保存</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
