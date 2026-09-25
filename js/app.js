@@ -3,7 +3,16 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.29.1';
+const APP_VERSION = '1.35.2';
+
+// 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
+// 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
+// 下限也不能是 1 元，否则余额四舍五入到百元就会月月误报。
+const RECON_TOL_CAP = 500;
+const RECON_TOL_FLOOR = 50;
+function reconTolerance(movement) {
+    return Math.min(RECON_TOL_CAP, Math.max(RECON_TOL_FLOOR, Math.abs(movement || 0) * 0.01));
+}
 
 // ---- On-demand library loading ----
 // Chart.js (~200KB) and the Excel lib (~881KB) used to load synchronously in
@@ -152,11 +161,20 @@ let state = {
     balances: [],
     returns: [],               // 投资收益：{id, member, accountId, month, amount}
     recurring: [],               // 周期记账规则：{id, type, amount, categoryId, paymentMethod, note, member, dayOfMonth, startDate, untilDate, lastRunPeriod, active}
+    pendingRecurring: [],        // 到点生成、但还没入账的周期账（本机待办队列，不参与同步）
+    recurringSkipped: {},        // 'ruleId|日期' -> true：手动跳过的期次，不再重复生成
     returnPeriod: 'month',
     returnYear: null,
     returnMonth: null,
     returnChartType: 'bar',
+    returnCalMetric: 'amount',   // 月度格子：收益额 / 收益率
+    tacTab: 'stats',           // 总资产变动模块：区间统计 / 变动趋势
+    returnMetric: 'amount',      // 主图：收益额 / 收益率
+    returnCalMode: 'month',      // 月度格子：月收益（12 格）/ 年收益（按年一格）
+    returnCalYear: null,         // 月收益视图看哪一年；null = 跟随页面年份
     returnGran: null,
+    returnScopeOpen: false,      // 口径那行小字：详情是否展开
+    closeMonth: null,            // 月度结账清单盯哪个月；null = 最近一个已过完的月
     balancePeriod: 'month',
     balanceYear: null,
     balanceMonth: null,
@@ -171,7 +189,7 @@ let state = {
     reportPeriod: 'month',
     reportYear: null,
     reportMonth: null,
-    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [] },  // soft-delete markers
+    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [], recurring: [] },  // soft-delete markers  // soft-delete markers
     pmAddedAt: {},          // payment method name -> when it was added (names are the identity)
     lastExportAt: 0,        // 最近一次导出的时间戳，用于备份提醒
     fundTargets: { cash: 0, steady: 0, growth: 0 },
@@ -279,6 +297,19 @@ function saveStateNow() {
         pmAddedAt: state.pmAddedAt,
         lastExportAt: state.lastExportAt,
         recurring: state.recurring,
+        // 待确认队列和"这期我跳过了"的标记必须落盘：
+        // 不存的话刷新一次，被跳过的那期又会冒出来，等于跳过没生效。
+        pendingRecurring: state.pendingRecurring || [],
+        recurringSkipped: state.recurringSkipped || {},
+        // 成员筛选和三个页面的时间档：以前每次打开都回到"全部 + 月报"，
+        // 天天看同一本账的人等于每天重新点一遍。
+        uiPrefs: {
+            balanceOwner: state.balanceOwner,
+            balancePeriod: state.balancePeriod,
+            reportPeriod: state.reportPeriod,
+            returnPeriod: state.returnPeriod,
+            closeMonth: state.closeMonth,
+        },
     };
     const text = JSON.stringify(data);
     __lastSavedBytes = text.length;
@@ -289,7 +320,7 @@ function saveStateNow() {
         // 写不进去绝不能装作成功：内存里还在，但关掉就没了
         const quota = e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22);
         __storageError = quota
-            ? '浏览器存储空间已满，新改动无法保存！请立刻用「备份为 JSON」导出，然后删除历史记录。'
+            ? '浏览器存储空间已满，新改动无法保存！请立刻用「导出备份」存一份，然后删除历史记录。'
             : ('保存失败：' + ((e && e.message) || '未知错误'));
         renderStorageWarning();
         showToast(__storageError, 'error');
@@ -320,7 +351,7 @@ function renderStorageWarning() {
             <button class="secondary-btn" onclick="exportSyncJSON()"><i class="fa-solid fa-download"></i> 立即备份</button>`;
     } else {
         bar.innerHTML = `<i class="fa-solid fa-circle-info"></i>
-            <span>账本已约 ${mb} MB，接近浏览器 5 MB 存储上限，建议先「备份为 JSON」。</span>
+            <span>账本已约 ${mb} MB，接近浏览器 5 MB 存储上限，建议先点「导出备份」。</span>
             <button class="secondary-btn" onclick="exportSyncJSON()">备份</button>`;
     }
 }
@@ -332,6 +363,7 @@ const UNDO_BUCKET = {
     transactions: 'transactions', balances: 'balances', returns: 'returns',
     accounts: 'accounts', categories: 'categories', budgets: 'budgets',
     insurancePolicies: 'insurance', paymentMethods: 'paymentMethods',
+    recurring: 'recurring',
 };
 let __undoStack = [];
 
@@ -357,7 +389,69 @@ function undoLastDelete() {
     Object.keys(op.rows).forEach(coll => {
         const items = op.rows[coll] || [];
         const bucket = UNDO_BUCKET[coll];
-        if (coll === 'paymentMethods') {
+        if (coll === 'claimAdd' || coll === 'claimDel') {
+            items.forEach(one => {
+                const p = state.insurancePolicies.find(x => x.id === one.policyId);
+                if (!p) return;
+                if (!Array.isArray(p.claims)) p.claims = [];
+                if (coll === 'claimAdd') p.claims = p.claims.filter(c => c.id !== one.claimId);
+                else if (one.claim && !p.claims.some(c => c.id === one.claim.id)) p.claims.push(Object.assign({}, one.claim));
+                p.updatedAt = Date.now();
+            });
+        } else if (coll === 'recurConfirm') {
+            // 把生成的交易收回去（写墓碑，别让另一台设备再把它带回来）、待确认项复原
+            items.forEach(one => {
+                (one.txns || []).forEach(id => {
+                    if (state.transactions.some(t => t.id === id)) {
+                        state.transactions = state.transactions.filter(t => t.id !== id);
+                        addTombstone('transactions', id);
+                    }
+                });
+                (one.pending || []).forEach(p => {
+                    if (!Array.isArray(state.pendingRecurring)) state.pendingRecurring = [];
+                    if (!state.pendingRecurring.some(x => x.id === p.id)) state.pendingRecurring.push(Object.assign({}, p));
+                });
+                (one.skips || []).forEach(k => { delete state.recurringSkipped[k]; });
+            });
+        } else if (coll === 'arraySnapshot') {
+            // 整段数组换回清理前的样子（顺序、被删掉的重复条目都原样回来）
+            items.forEach(snap => {
+                if (snap && Array.isArray(snap.rows) && Array.isArray(state[snap.snapColl])) {
+                    state[snap.snapColl] = snap.rows.slice();
+                }
+            });
+        } else if (coll === 'memberMove') {
+            // 先按"并入后"的 id 删掉，再把原来的行塞回去（撞车被吃掉的那条也能复活）
+            items.forEach(mv => {
+                if (!Array.isArray(state[mv.coll])) return;
+                const gone = new Set(mv.ids || []);
+                state[mv.coll] = state[mv.coll].filter(r => !gone.has(r.id));
+                (mv.rows || []).forEach(r => {
+                    if (!state[mv.coll].some(x => x.id === r.id)) state[mv.coll].push(Object.assign({}, r));
+                });
+            });
+        } else if (coll === 'insuranceMembers') {
+            items.forEach(name => {
+                if (!state.insuranceMembers.includes(name)) {
+                    state.insuranceMembers.push(name);
+                    state.insuranceMemberAddedAt[name] = Date.now();
+                }
+                if (Array.isArray(state.deleted.insuranceMembers)) {
+                    state.deleted.insuranceMembers = state.deleted.insuranceMembers.filter(t => t.id !== name);
+                }
+            });
+        } else if (coll === 'members') {
+            // 成员名单是字符串数组，且要连"添加时间"一起复活，否则会被自己的墓碑吃掉
+            items.forEach(name => {
+                if (!state.balanceMembers.includes(name)) {
+                    state.balanceMembers.push(name);
+                    state.memberAddedAt[name] = Date.now();
+                }
+                if (Array.isArray(state.deleted.members)) {
+                    state.deleted.members = state.deleted.members.filter(t => t.id !== name);
+                }
+            });
+        } else if (coll === 'paymentMethods') {
             items.forEach(name => {
                 if (!state.paymentMethods.includes(name)) {
                     state.paymentMethods.push(name);
@@ -380,10 +474,26 @@ function undoLastDelete() {
         }
     });
     saveState();
-    renderView(state.currentView);
-    refreshAccountLists();
+    refreshOpenSurfaces();
+    if (op.rows.members) renderAccountManageList();
+    if (op.rows.insuranceMembers || op.rows.insurancePolicies) renderFourFunds();
     showToast('已撤销：' + op.label, 'success');
     return true;
+}
+
+// 撤销 / 删除之后，凡是"开着的面板"都要重画。
+// 以前只重画当前视图，结果账户管理弹窗里刚撤销回来的账户要关掉重开才看得见。
+function refreshOpenSurfaces() {
+    renderView(state.currentView);
+    refreshAccountLists();
+    // 账户列表整块重画很便宜，不做"开着才画"的判断：
+    // 以前就是这句偷懒，导致改了类型/分类之后弹窗里的下拉选项还留着旧数据。
+    renderAccountManageList();
+    const hist = document.getElementById('accountHistoryModal');
+    if (hist && !hist.classList.contains('hidden')) {
+        if (returnHistoryAccountId) renderReturnAccountHistory();
+        else if (historyAccountId) renderAccountHistory();
+    }
 }
 
 // 带「撤销」按钮的提示条
@@ -460,11 +570,15 @@ function recurringOccurrences(rule, today) {
     return out;
 }
 
-// 补记所有到期的规则；返回新建的交易
+// 到期的规则先进「待确认」队列，不直接变成交易：
+// 人不在的时候让机器替自己记一笔，事后要么没发现、要么发现也删不干净。
+// 返回新生成的待确认条目。
 function runRecurringRules(silent) {
     if (!Array.isArray(state.recurring)) state.recurring = [];
+    if (!Array.isArray(state.pendingRecurring)) state.pendingRecurring = [];
+    if (!state.recurringSkipped || typeof state.recurringSkipped !== 'object') state.recurringSkipped = {};
     const today = new Date(); today.setHours(23, 59, 59, 999);
-    const existing = new Set(state.transactions.map(t => t.id));
+    const existing = new Set(state.transactions.map(t => t.id).concat(state.pendingRecurring.map(p => p.id)));
     const created = [];
     state.recurring.forEach(rule => {
         if (!rule || !rule.active) return;
@@ -473,8 +587,9 @@ function runRecurringRules(silent) {
             const dateStr = ymdStr(dt);
             const id = `rec_${rule.id}_${dateStr}`;
             if (existing.has(id)) return;
-            const txn = {
-                id,
+            if (state.recurringSkipped[`${rule.id}|${dateStr}`]) return;      // 这期被手动跳过过
+            const item = {
+                id, ruleId: rule.id,
                 type: rule.type === 'income' ? 'income' : 'expense',
                 amount: Number(rule.amount) || 0,
                 categoryId: rule.categoryId,
@@ -482,21 +597,157 @@ function runRecurringRules(silent) {
                 time: rule.time || '',
                 note: rule.note || '',
                 paymentMethod: rule.paymentMethod || '现金',
-                recurringRuleId: rule.id,
                 createdAt: Date.now(), updatedAt: Date.now(),
             };
-            state.transactions.push(txn);
+            state.pendingRecurring.push(item);
             existing.add(id);
-            created.push(txn);
+            created.push(item);
         });
     });
     if (created.length) {
         flushState();
         renderView(state.currentView);
+        renderPendingRecurring();
         updateSidebarSummary();
-        if (!silent) showToast(`周期记账已补记 ${created.length} 笔`, 'success');
+        if (!silent) showToast(`周期记账有 ${created.length} 笔待确认`, 'info');
     }
     return created;
+}
+
+// ---- 待确认队列：入账 / 跳过 / 全部入账 ----
+function pendingRecurringSorted() {
+    return (state.pendingRecurring || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+function confirmPendingRecurring(id, amount) {
+    if (!Array.isArray(state.pendingRecurring)) return false;
+    const idx = state.pendingRecurring.findIndex(p => p.id === id);
+    if (idx < 0) return false;
+    const p = state.pendingRecurring[idx];
+    const amt = (amount === undefined || amount === null || amount === '')
+        ? (Number(p.amount) || 0) : (Number(amount) || 0);
+    state.pendingRecurring.splice(idx, 1);
+    let created = null;
+    if (!state.transactions.some(t => t.id === p.id)) {
+        created = {
+            id: p.id, type: p.type, amount: amt, categoryId: p.categoryId, date: p.date,
+            time: p.time || '', note: p.note || '', paymentMethod: p.paymentMethod || '现金',
+            recurringRuleId: p.ruleId, createdAt: Date.now(), updatedAt: Date.now(),
+        };
+        state.transactions.push(created);
+    }
+    const label = created ? `${p.date} 的周期账` : '该期（账本里已有同一条，只移出待办）';
+    const canUndo = pushUndo(label, { recurConfirm: [{ txns: created ? [created.id] : [], pending: [p], skips: [] }] });
+    saveState();
+    refreshOpenSurfaces();
+    renderPendingRecurring();
+    if (canUndo) showUndoToast(label);
+    else showToast('已入账', 'success');
+    return true;
+}
+
+function skipPendingRecurring(id) {
+    if (!Array.isArray(state.pendingRecurring)) return false;
+    const idx = state.pendingRecurring.findIndex(p => p.id === id);
+    if (idx < 0) return false;
+    const p = state.pendingRecurring[idx];
+    state.pendingRecurring.splice(idx, 1);
+    const key = `${p.ruleId}|${p.date}`;
+    state.recurringSkipped[key] = true;
+    const label = `跳过 ${p.date} 的周期账`;
+    const canUndo = pushUndo(label, { recurConfirm: [{ txns: [], pending: [p], skips: [key] }] });
+    saveState();
+    renderPendingRecurring();
+    refreshOpenSurfaces();
+    if (canUndo) showUndoToast(label);
+    return true;
+}
+
+function confirmAllPendingRecurring() {
+    const ids = pendingRecurringSorted().map(p => p.id);
+    if (!ids.length) { showToast('没有待确认的周期账', 'info'); return; }
+    ids.forEach(id => confirmPendingRecurring(id));
+}
+
+function renderPendingRecurring() {
+    const banner = document.getElementById('recurQueueBanner');
+    const list = pendingRecurringSorted();
+    if (banner) {
+        banner.classList.toggle('hidden', list.length === 0);
+        if (list.length) {
+            document.getElementById('recurQueueCount').textContent = `${list.length} 笔周期账待确认`;
+            document.getElementById('recurQueueHint').textContent =
+                `最早 ${list[0].date} · 确认后才会进交易记录`;
+        }
+    }
+    const dot = document.getElementById('navDotTransactions');
+    if (dot) {
+        dot.classList.toggle('hidden', list.length === 0);
+        dot.title = list.length ? `${list.length} 笔周期账待确认` : '';
+    }
+    const body = document.getElementById('recurQueueList');
+    if (body && !document.getElementById('recurQueueModal').classList.contains('hidden')) {
+        const sub = document.getElementById('recurQueueModalSub');
+        if (sub) sub.textContent = list.length
+            ? `${list.length} 笔待确认 · 金额可以直接改，确认后才会进交易记录；跳过表示这期不记`
+            : '都处理完了';
+        const allBtn = document.getElementById('recurQueueAllBtn');
+        if (allBtn) { allBtn.disabled = !list.length; allBtn.textContent = list.length ? `全部入账（${list.length}）` : '全部入账'; }
+        const cats = state.categories || [];
+        body.innerHTML = list.length ? list.map(p => {
+            const cat = cats.find(c => c.id === p.categoryId);
+            return `<div class="rq-row" data-rq="${p.id}">
+                <div class="rq-main">
+                    <div class="rq-name">${p.type === 'income' ? '收入' : '支出'} · ${_esc(cat ? cat.name : '分类已删除')}</div>
+                    <div class="rq-meta">${_esc(p.date)}${p.note ? ' · ' + _esc(p.note) : ''} · ${_esc(p.paymentMethod || '现金')}</div>
+                </div>
+                <div class="be-input rq-amt"><span class="currency-symbol">${state.settings.currency}</span>
+                    <input type="number" step="0.01" class="text-input be-field" data-rq-amount="${p.id}" value="${Number(p.amount) || 0}"></div>
+                <button class="link-btn" data-rq-ok="${p.id}">入账</button>
+                <button class="link-btn rq-skip" data-rq-skip="${p.id}">跳过</button>
+            </div>`;
+        }).join('') : '<div class="breakdown-empty">没有待确认的周期账，都处理完了</div>';
+    }
+}
+
+function openRecurQueue() {
+    const modal = document.getElementById('recurQueueModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');       // 先显形再画：renderPendingRecurring 只在弹窗可见时填列表
+    raiseOverlay(modal);
+    renderPendingRecurring();
+}
+
+function closeRecurQueue() {
+    const modal = document.getElementById('recurQueueModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function initInsClaimModal() {
+    const modal = document.getElementById('insClaimModal');
+    if (!modal || modal.$wired) return;
+    modal.$wired = true;
+    const add = document.getElementById('claimAddBtn');
+    if (add) add.addEventListener('click', addInsClaim);
+    modal.addEventListener('click', e => {
+        const t = e.target.closest ? e.target.closest('[data-claim-del]') : null;
+        if (t) removeInsClaim(t.dataset.claimDel);
+    });
+}
+
+function initRecurQueueModal() {
+    const modal = document.getElementById('recurQueueModal');
+    if (!modal || modal.$wired) return;
+    modal.$wired = true;
+    modal.addEventListener('click', e => {
+        const t = e.target.closest ? e.target.closest('[data-rq-ok],[data-rq-skip],[data-rq-all]') : null;
+        if (!t) return;
+        if (t.dataset.rqAll !== undefined) { confirmAllPendingRecurring(); return; }
+        const id = t.dataset.rqOk || t.dataset.rqSkip;
+        const amtEl = modal.querySelector(`[data-rq-amount="${id}"]`);
+        if (t.dataset.rqOk) confirmPendingRecurring(id, amtEl ? amtEl.value : undefined);
+        else skipPendingRecurring(id);
+    });
 }
 
 function nextDueText(rule) {
@@ -532,7 +783,7 @@ function renderRecurringSection() {
             <button class="icon-btn" data-recur-toggle="${rule.id}" title="${rule.active ? '暂停' : '启用'}">
                 <i class="fa-solid ${rule.active ? 'fa-pause' : 'fa-play'}"></i>
             </button>
-            <button class="icon-btn" data-recur-run="${rule.id}" title="立即补记一期"><i class="fa-solid fa-forward"></i></button>
+            <button class="icon-btn" data-recur-run="${rule.id}" title="立即生成一期（进待确认）"><i class="fa-solid fa-forward"></i></button>
             <button class="bh-delete" data-recur-del="${rule.id}" title="删除规则"><i class="fa-solid fa-trash"></i></button>
         </div>`;
     }).join('');
@@ -582,7 +833,7 @@ function renderRecurringSection() {
         saveState();
         renderRecurringSection();
         const made = runRecurringRules(true);
-        showToast(made.length ? `规则已添加，并补记了 ${made.length} 笔` : '规则已添加', 'success');
+        showToast(made.length ? `规则已添加，${made.length} 笔进了待确认` : '规则已添加', 'success');
     });
 
     box.onclick = e => {
@@ -594,13 +845,18 @@ function renderRecurringSection() {
         if (t.dataset.recurToggle) { rule.active = !rule.active; rule.updatedAt = Date.now(); saveState(); renderRecurringSection(); }
         else if (t.dataset.recurDel) {
             if (!confirm(`删除规则「${rule.note || rule.categoryId}」？已生成的交易不会被删除。`)) return;
+            const gone = state.recurring.find(x => x.id === id);
             state.recurring = state.recurring.filter(x => x.id !== id);
+            addTombstone('recurring', id);        // 不写墓碑的话，另一台设备会把它带回来
+            const canUndo = pushUndo(`规则「${rule.note || rule.categoryId}」`, { recurring: gone ? [gone] : [] });
             saveState(); renderRecurringSection();
-            showToast('规则已删除', 'success');
+            if (canUndo) showUndoToast(`规则「${rule.note || rule.categoryId}」`);
+            else showToast('规则已删除', 'success');
         } else if (t.dataset.recurRun) {
             const made = runRecurringRules(false);
-            if (!made.length) showToast('这一期已经记过了', 'info');
+            if (!made.length) showToast('这一期已经记过或已跳过', 'info');
             renderRecurringSection();
+            renderPendingRecurring();
         }
     };
 }
@@ -661,6 +917,7 @@ function normalizeTombstones(raw) {
         members: clean(src.members),
         insuranceMembers: clean(src.insuranceMembers),
         insurance: clean(src.insurance),
+        recurring: clean(src.recurring),
     };
 }
 
@@ -709,6 +966,7 @@ function applyTombstones() {
     state.accounts = drop(state.accounts, state.deleted.accounts);
     state.balances = drop(state.balances, state.deleted.balances);
     state.returns = drop(state.returns, state.deleted.returns);
+    state.recurring = drop(state.recurring || [], state.deleted.recurring);
     state.insurancePolicies = drop(state.insurancePolicies, state.deleted.insurance);
 
     // 成员名单也是「名字即身份」的纯字符串，所以「什么时候加的」记在 memberAddedAt，
@@ -794,15 +1052,13 @@ async function initICloudSync() {
         iCloudSyncEnabled = true;
 
         // Listen for file changes from other devices
-        window.electronAPI.icloud.onFileChange((data) => {
-            handleICloudFileChange(data);
+        window.electronAPI.icloud.onFileChange(() => {
+            // 监听只告诉我们"文件夹变了"，具体要合并的是全部文件
+            handleICloudFileChange(null);
         });
 
         // On startup, pull from iCloud and merge
-        const remoteData = await resolveCloudPayload(await window.electronAPI.icloud.readData());
-        if (remoteData && remoteData.data) {
-            mergeRemoteData(remoteData);
-        }
+        await mergeAllCloud('startup');
 
         // Push current data to iCloud
         await syncToICloud();
@@ -836,6 +1092,9 @@ function buildSyncPayload() {
             settings: state.settings,
             deleted: state.deleted,
             pmAddedAt: state.pmAddedAt,
+            // 周期规则也要走同步：不然 Mac 上建的房租规则，手机上根本不存在，
+            // 待确认队列就永远只在 Mac 上冒出来。队列本身仍是本机的（确认是"人+设备"的动作）。
+            recurring: state.recurring,
         },
     };
 }
@@ -858,6 +1117,7 @@ async function syncToICloud() {
 // 云端那份：先压缩再加密；lastModified 放在封套顶层，Mac 端靠它挑最新文件
 async function buildCloudEnvelope(payload) {
     if (!LedgerCrypto.isEnabled()) return null;
+    beginAskCycle(1);
     try {
         await ensureUnlocked(LedgerCrypto.keyring(), '云同步需要解锁');
     } catch (e) {
@@ -873,25 +1133,68 @@ async function buildCloudEnvelope(payload) {
 async function resolveCloudPayload(raw) {
     if (!raw) return null;
     if (!LedgerCrypto.looksEncrypted(raw)) return raw;
-    try {
-        await ensureUnlocked(raw.keyring, '读取云端数据');
-        return await decodeSyncPayload(await LedgerCrypto.decryptEnvelope(raw));
-    } catch (e) {
-        __remoteLastError = '云端数据需要口令：' + ((e && e.message) || e);
-        return null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            // 第一次用本机密钥静默解；报 WRONG_KEY 说明密钥不是这一份数据的，
+            // 第二次强制弹口令，解出来的正确主密钥会覆盖本机缓存，以后就安静了
+            await ensureUnlocked(raw.keyring, '读取云端数据', attempt > 0);
+            const out = await decodeSyncPayload(await LedgerCrypto.decryptEnvelope(raw));
+            if (attempt > 0) showToast('已解锁云端加密数据，之后不用再输', 'success');
+            return out;
+        } catch (e) {
+            const msg = (e && e.message) || String(e);
+            if (msg === 'WRONG_KEY' && attempt === 0) continue;
+            if (msg === '已取消') { __remoteLastError = '已取消：云端那份是加密的，本机打不开'; return null; }
+            __remoteLastError = '云端数据解不开：' + msg;
+            return null;
+        }
     }
+    return null;
 }
 
-async function handleICloudFileChange(remoteData) {
-    const data = await resolveCloudPayload(remoteData);
-    if (!data || !data.data) return;
-    // 只忽略「我自己刚写回去的那份」，别的设备（包括另一台 Mac）都要合并
-    if (data.deviceId && data.deviceId === DEVICE_ID) return;
-    if (!data.deviceId && data.deviceName === 'Mac' && isElectron()) return;
+// 拉取并合并同步文件夹里的**全部**账本。
+// 以前只挑 lastModified 最大的那一份，而 Mac 每次保存都会刷新自己那份的时间戳，
+// 手机导出的那份（以及 iOS 生成的"副本"）几乎永远竞争不过 → 看起来"识别不了"。
+// 从旧到新逐个合并：并集 + 墓碑后写优先，多合几份是幂等的，最后的删除也能生效。
+async function mergeAllCloud(reason) {
+    beginAskCycle(1);          // 整批文件合起来最多问一次口令
+    let list = null;
+    try {
+        if (window.electronAPI && window.electronAPI.icloud
+            && typeof window.electronAPI.icloud.readAll === 'function') {
+            list = await window.electronAPI.icloud.readAll();
+        }
+    } catch (e) {
+        console.error('readAll failed:', e);
+    }
+    if (!Array.isArray(list)) {
+        // 老版 App 没有 readAll：退回单份读取，至少不比以前差
+        const one = await resolveCloudPayload(await window.electronAPI.icloud.readData());
+        list = one ? [one] : [];
+    }
+    let changed = false, merged = 0, locked = 0;
+    for (const raw of list) {
+        if (!raw) continue;
+        let data = raw;
+        if (LedgerCrypto.looksEncrypted(raw)) {
+            data = await resolveCloudPayload(raw);
+            if (!data) { locked++; continue; }        // 解不开的那些已经累计在 __remoteLastError 里
+        }
+        if (!data || !data.data) continue;
+        if (data.deviceId && data.deviceId === DEVICE_ID && list.length > 1) continue;  // 自己写的那份不必再合
+        if (mergeRemoteData(data)) changed = true;
+        merged++;
+    }
+    if (merged) iCloudLastSyncTime = Date.now();
+    if (locked) __remoteLastError = `有 ${locked} 份加密文件解不开（口令不对或不是同一把钥匙）`;
+    return { changed, merged, locked };
+}
 
-    const changed = mergeRemoteData(data);
-    if (!changed) return;                 // 对端只是回写了一份和这里相同的内容
+async function handleICloudFileChange() {
+    const r = await mergeAllCloud('change');
+    if (!r.changed) return;               // 对端只是回写了一份和这里相同的内容
     renderView(state.currentView);
+    updateSidebarSummary();
     showToast('已从 iCloud 同步最新数据', 'success');
 }
 
@@ -912,7 +1215,9 @@ function fingerprintOfPayload(p) {
         (d.balanceMembers || []).slice().sort().join(','),
         (d.insuranceMembers || []).slice().sort().join(','),
         JSON.stringify(d.fundTargets || {}),
+        sig(d.recurring),
         sig(del.transactions), sig(del.balances), sig(del.returns), sig(del.accounts), sig(del.insurance),
+        sig(del.recurring),
     ].join('|');
 }
 
@@ -997,6 +1302,7 @@ function mergeRemoteData(remoteData) {
         members: mergeTombstoneList(state.deleted.members, remoteDeleted.members),
         insuranceMembers: mergeTombstoneList(state.deleted.insuranceMembers, remoteDeleted.insuranceMembers),
         insurance: mergeTombstoneList(state.deleted.insurance, remoteDeleted.insurance),
+        recurring: mergeTombstoneList(state.deleted.recurring, remoteDeleted.recurring),
     };
 
     // 保险清单：按 id 取并集，较新的赢；成员取并集；目标金额取较新的一份
@@ -1012,6 +1318,15 @@ function mergeRemoteData(remoteData) {
     Object.keys(remoteInsAdded).forEach(k => {
         if (!state.insuranceMemberAddedAt[k] || remoteInsAdded[k] > state.insuranceMemberAddedAt[k]) state.insuranceMemberAddedAt[k] = remoteInsAdded[k];
     });
+    // 周期规则：按 id 并集、较新的一份赢；删除靠上面的墓碑生效
+    const ruleMap = new Map();
+    (state.recurring || []).forEach(r => ruleMap.set(r.id, r));
+    (remote.recurring || []).forEach(r => {
+        const cur = ruleMap.get(r.id);
+        if (!cur || (r.updatedAt || 0) > (cur.updatedAt || 0)) ruleMap.set(r.id, r);
+    });
+    state.recurring = Array.from(ruleMap.values());
+
     // 家庭成员名单：并集（余额/收益记录的 id 编码了成员名，名单丢了记录就悬空）
     state.balanceMembers = [...new Set([...(state.balanceMembers || []), ...(remote.balanceMembers || [])])];
     const remoteMemAdded = normalizeAddedAtMap(remote.memberAddedAt);
@@ -1138,11 +1453,20 @@ function submitSecretModal() {
     closeSecretModal(v);
 }
 
+// 口令框的"配额"：一次用户操作里最多弹一轮。
+// 同步文件夹里可能躺着多份用不同主密钥加密的旧副本，批量合并时如果每份都弹一次，
+// 用户会被连环弹窗淹掉，而且点"取消"也停不下来（下一个文件继续弹）。
+let __askBudget = 1;
+function beginAskCycle(n) { __askBudget = n === undefined ? 1 : n; }
+
 // 有本机密钥就静默通过；没有就问到口令或恢复码（最多三次）
-async function ensureUnlocked(kring, why) {
-    if (await LedgerCrypto.hasLocalKey()) return true;
+async function ensureUnlocked(kring, why, force) {
+    if (!force && await LedgerCrypto.hasLocalKey()) return true;
+    if (__askBudget <= 0) throw new Error('已取消');   // 这轮已经问过了，不再骚扰
+    __askBudget -= 1;
     const kr = kring || LedgerCrypto.keyring();
-    const hint = kr && kr.hint ? `口令以 ${kr.hint} 开头。忘记口令可用恢复码。` : '输入口令或恢复码。';
+    const hint = (force ? '这台设备存的密钥开不了这份数据（可能两台设备各自开启过加密）。' : '')
+        + (kr && kr.hint ? `口令以 ${kr.hint} 开头。忘记口令可用恢复码。` : '输入口令或恢复码。');
     let lastError = '';
     for (let i = 0; i < 3; i++) {
         const secret = await askSecret({
@@ -1179,14 +1503,14 @@ function dataHealthCheck() {
         : `${names.slice(0, 6).join('、')} 等 ${names.length} 项`;
 
     const findings = [];
-    const add = (level, text, detail) => findings.push({ level, text, detail: detail || '' });
+    const add = (level, text, detail, fix) => findings.push({ level, text, detail: detail || '', fix: fix || null });
 
     const orphanBal = state.balances.filter(b => !acctIds.has(b.accountId));
-    if (orphanBal.length) add('warn', `${orphanBal.length} 条余额指向已删除的账户`,
-        shorten(uniq(orphanBal.map(b => b.accountId))));
     const orphanRet = state.returns.filter(r => !acctIds.has(r.accountId));
+    if (orphanBal.length) add('warn', `${orphanBal.length} 条余额指向已删除的账户`,
+        shorten(uniq(orphanBal.map(b => b.accountId))), { label: '清理', kind: 'orphans' });
     if (orphanRet.length) add('warn', `${orphanRet.length} 条收益指向已删除的账户`,
-        shorten(uniq(orphanRet.map(r => r.accountId))));
+        shorten(uniq(orphanRet.map(r => r.accountId))), { label: '清理', kind: 'orphans' });
     const badCat = state.transactions.filter(t => t.categoryId && !catIds.has(t.categoryId));
     if (badCat.length) add('warn', `${badCat.length} 笔交易的分类已不存在`, shorten(uniq(badCat.map(t => t.categoryId))));
     const future = state.transactions.filter(t => t.date && t.date > todayKey);
@@ -1195,11 +1519,18 @@ function dataHealthCheck() {
     if (zero.length) add('info', `${zero.length} 笔交易金额是 0 或负数`, shorten(zero.slice(0, 6).map(t => `${t.date} ${t.amount}`)));
     const dups = [].concat(
         dupIds(state.transactions), dupIds(state.balances), dupIds(state.returns),
-        dupIds(state.categories), dupIds(state.accounts), dupIds(state.insurancePolicies)
-    );
-    if (dups.length) add('warn', `${dups.length} 个重复的记录 id（多设备合并可能撞车）`, shorten(dups.slice(0, 8)));
+        dupIds(state.categories), dupIds(state.accounts), dupIds(state.insurancePolicies));
+    // 预算是按 categoryId 存的，同一个分类出现两条就是脏数据
+    const dupBud = dupIds((state.budgets || []).map(b => ({ id: b.categoryId })));
+    if (dupBud.length) add('warn', `${dupBud.length} 个分类有重复的预算条目`, shorten(dupBud), { label: '去重', kind: 'dups' });
+    if (dups.length) add('warn', `${dups.length} 个重复的记录 id（多设备合并可能撞车）`, shorten(dups.slice(0, 8)), { label: '去重', kind: 'dups' });
 
     // 账户平时在记、中间却断了几个月：这是最常见的漏记
+    // 保险到期提醒只扫填了日期的保单 —— 没填的人永远收不到提醒，也没人告诉他为什么
+    const noRenew = state.insurancePolicies.filter(p => p.covered && !p.renewAt);
+    if (noRenew.length) add('info', `${noRenew.length} 张已配置的保单没填缴费/到期日，到期提醒不会算它`,
+        shorten(noRenew.map(p => `${p.member}·${p.type}`)));
+
     const gaps = [];
     const byAcct = {};
     state.balances.forEach(b => {
@@ -1268,6 +1599,7 @@ function renderDataHealth() {
     const s = h.stats;
     const warn = h.findings.filter(f => f.level === 'warn').length;
     const info = h.findings.filter(f => f.level === 'info').length;
+    const fixable = h.findings.filter(f => f.fix);
     const pct = s.limit > 0 ? Math.min(100, (s.bytes / s.limit) * 100) : 0;
     const exportTxt = s.lastExportAt ? relTimeText(s.lastExportAt) : '从未导出';
 
@@ -1290,15 +1622,88 @@ function renderDataHealth() {
         + `<div class="dh-grid">${grid.map(g => `
             <div class="dh-cell"><span class="dh-k">${_esc(g.k)}</span>
                 <span class="dh-v">${_esc(g.v)}</span>${g.n ? `<span class="dh-n">${_esc(g.n)}</span>` : ''}</div>`).join('')}</div>`
+        + (fixable.length ? `<div class="dh-fixbar">
+            <span>${fixable.length} 项可以一键处理，处理后会弹 8 秒撤销。</span>
+            <button class="secondary-btn" type="button" data-dhfix="all">一键全部处理</button></div>` : '')
         + (h.findings.length ? `<div class="dh-list">${h.findings.map(f => `
                 <div class="dh-item ${f.level}"><i class="fa-solid ${f.level === 'warn' ? 'fa-triangle-exclamation' : 'fa-circle-info'}"></i>
-                    <span class="dh-text">${_esc(f.text)}${f.detail ? `<em>${_esc(f.detail)}</em>` : ''}</span></div>`).join('')}</div>` : '')
+                    <span class="dh-text">${_esc(f.text)}${f.detail ? `<em>${_esc(f.detail)}</em>` : ''}</span>
+                    ${f.fix ? `<button class="link-btn dh-fix" type="button" data-dhfix="${f.fix.kind}">${_esc(f.fix.label)}</button>` : ''}</div>`).join('')}</div>` : '')
         + `<div class="dh-where">
             <div><span>数据所在地址</span><code>${_esc(s.origin)}</code></div>
             <div><span>本机设备号</span><code>${_esc(s.deviceId)}</code></div>
             <div class="dh-tip">浏览器按地址隔离数据：换一个地址（哪怕同一份程序）就是一本全新的账，
-                换设备请用「备份为 JSON / 导入 JSON」搬数据。${s.gist ? '云同步已开启。' : ''}</div>
+                换设备请用「导出备份」存一份、到新设备「导入 / 合并」。${s.gist ? '云同步已开启。' : ''}</div>
         </div>`;
+    box.querySelectorAll('[data-dhfix]').forEach(btn =>
+        btn.addEventListener('click', () => applyDataFix(btn.dataset.dhfix)));
+}
+
+// ---- 体检里"能修的那几项"真的去修 ----
+// 快照式撤销：去重是把同一 id 的多余几条删掉，通用撤销按 id 回填会把它们挡在门外
+// （因为"保留的那条"还占着这个 id），所以这里整段数组换进换出。
+function dhDedupe(coll) {
+    const seen = new Set(), keep = [];
+    let dropped = 0;
+    (state[coll] || []).slice()
+        // 倒序：让 updatedAt 最新的那条先被看到、被留下，丢掉的是旧的那条
+        .sort((a, b) => (Number(b && b.updatedAt) || 0) - (Number(a && a.updatedAt) || 0))
+        .forEach(row => {
+            const k = row && row.id;
+            if (k && seen.has(k)) { dropped++; return; }
+            if (k) seen.add(k);
+            keep.push(row);
+        });
+    return { keep, dropped };
+}
+
+function applyDataFix(kind) {
+    const acctIds = new Set(state.accounts.map(a => a.id));
+    const catIds = new Set(state.categories.map(c => c.id));
+    const snaps = [];
+    let removed = 0;
+    const take = (coll, next) => {
+        if (next === state[coll]) return;
+        // 同一个数组只留第一份快照 = 清理前的原样；
+        // 否则"先删孤儿、再去重"会存下两份，撤销时后一份把干净的那份盖掉。
+        if (!snaps.some(x => x.snapColl === coll)) snaps.push({ snapColl: coll, rows: state[coll].slice() });
+        state[coll] = next;
+    };
+    const doOrphans = () => {
+        const nb = state.balances.filter(b => acctIds.has(b.accountId));
+        const nr = state.returns.filter(r => acctIds.has(r.accountId));
+        removed += (state.balances.length - nb.length) + (state.returns.length - nr.length);
+        take('balances', nb);
+        take('returns', nr);
+    };
+    const doDups = () => {
+        ['transactions', 'balances', 'returns', 'categories', 'accounts', 'insurancePolicies'].forEach(coll => {
+            const r = dhDedupe(coll);
+            removed += r.dropped;
+            take(coll, r.keep);
+        });
+        const seenB = new Set();
+        const buds = (state.budgets || []).filter(b => {
+            if (b && b.categoryId && seenB.has(b.categoryId)) { removed++; return false; }
+            if (b && b.categoryId) seenB.add(b.categoryId);
+            return true;
+        });
+        take('budgets', buds);
+    };
+    if (kind === 'orphans') doOrphans();
+    else if (kind === 'dups') doDups();
+    else { doOrphans(); doDups(); }
+
+    if (!snaps.length) { showToast('没有需要处理的项目', 'info'); return; }
+    const touchedOrphan = kind !== 'dups';
+    const label = touchedOrphan && removed ? `孤儿记录和 ${removed} 条重复条目`
+        : (removed ? `${removed} 条重复记录` : '指向已删除账户的记录');
+    const canUndo = pushUndo(label, { arraySnapshot: snaps });
+    saveState();
+    refreshOpenSurfaces();
+    renderSettings();
+    if (canUndo) showUndoToast(label);
+    else showToast(`已清理${removed ? ` ${removed} 条` : ''}`, 'success');
 }
 
 // ---------------- 加密设置区 ----------------
@@ -1437,6 +1842,7 @@ async function encSetupAdvance() {
     }
 }
 async function rotateRecoveryCodeClick() {
+    beginAskCycle(1);
     try {
         await ensureUnlocked(null, '重发恢复码');
         const code = await LedgerCrypto.rotateRecoveryCode(null);
@@ -1481,46 +1887,41 @@ async function disableEncryptionClick() {
 // ---------------- 检查更新 ----------------
 // 导航走 cache-first + 后台刷新，所以过去要"开两次"才换新，看起来像更新失败。
 // 这里给一个手动入口：强制 worker 重新检查，并把状态说清楚。
-const UPDATE_CHECK_URLS = [
-    'https://tv6kybgp6m-sketch.github.io/Flow/index.html',
-    'https://hghx5zcg.qwenwork.host/index.html',
+// 只写站点根地址；版本号从根下的 version.json 读，
+// 不再正则扒首页 HTML —— 改版式把「版本 x.y.z」挪走会让桌面版检查静默失效
+const UPDATE_CHECK_BASES = [
+    'https://tv6kybgp6m-sketch.github.io/Flow/',
+    'https://hghx5zcg.qwenwork.host/',
 ];
 let __updateCheck = null;         // { version, newer, at } —— 桌面版启动时静默查一次的结果
 
+async function fetchWithTimeout(url, ms) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms || 5000);
+    try {
+        const res = await fetch(url + (url.indexOf('?') >= 0 ? '&' : '?') + 'cb=' + Date.now(),
+            { cache: 'no-store', signal: ctrl.signal });
+        return res.ok ? res : null;
+    } finally { clearTimeout(timer); }
+}
+
 async function fetchPublishedVersion() {
-    // 优先读固定的 version.json（version 字段是单一可信来源，不再正则扒 HTML）。
-    // 老部署没这个文件时，退回从 index.html 扒"版本 X.Y.Z"做兜底，保证更新提示不失效。
-    const versionJsonUrls = UPDATE_CHECK_URLS.map(u => u.replace(/index\.html(\?.*)?$/, 'version.json'));
-    const fetchJson = async (u) => {
+    for (const base of UPDATE_CHECK_BASES) {
+        // 首选 version.json
         try {
-            const ctrl = new AbortController();
-            const timer = setTimeout(() => ctrl.abort(), 5000);
-            const res = await fetch(u + (u.indexOf('?') >= 0 ? '&' : '?') + 'cb=' + Date.now(),
-                { cache: 'no-store', signal: ctrl.signal });
-            clearTimeout(timer);
-            if (!res.ok) return null;
-            const data = await res.json().catch(() => null);
-            if (data && /^\d+\.\d+\.\d+$/.test(String(data.version))) return String(data.version);
-            return null;
-        } catch (e) { return null; }
-    };
-    const fetchHtml = async (u) => {
+            const res = await fetchWithTimeout(base + 'version.json');
+            if (res) {
+                const j = await res.json();
+                if (j && /^\d+\.\d+\.\d+$/.test(String(j.version))) return String(j.version);
+            }
+        } catch (e) { /* 落到 HTML 兜底 */ }
+        // 兜底：老站点没有 version.json，仍从首页文字里取
         try {
-            const ctrl = new AbortController();
-            const timer = setTimeout(() => ctrl.abort(), 5000);
-            const res = await fetch(u + (u.indexOf('?') >= 0 ? '&' : '?') + 'cb=' + Date.now(),
-                { cache: 'no-store', signal: ctrl.signal });
-            clearTimeout(timer);
-            if (!res.ok) return null;
-            const html = await res.text();
-            return (html.match(/版本\s+(\d+\.\d+\.\d+)/) || [])[1] || null;
-        } catch (e) { return null; }
-    };
-    for (let i = 0; i < UPDATE_CHECK_URLS.length; i++) {
-        const v = await fetchJson(versionJsonUrls[i]);
-        if (v) return v;
-        const v2 = await fetchHtml(UPDATE_CHECK_URLS[i]);
-        if (v2) return v2;
+            const res = await fetchWithTimeout(base + 'index.html');
+            if (!res) continue;
+            const v = ((await res.text()).match(/版本\s+(\d+\.\d+\.\d+)/) || [])[1];
+            if (v) return v;
+        } catch (e) { /* 换下一个地址 */ }
     }
     return null;
 }
@@ -1616,7 +2017,7 @@ async function renderBackupHistory() {
     const btn = document.getElementById('backupFolderBtn');
     if (!sub) return;
     if (!(isElectron() && window.electronAPI && typeof window.electronAPI.listBackups === 'function')) {
-        sub.textContent = '网页版没有本地归档，请定期「备份为 JSON」并存到别处';
+        sub.textContent = '网页版没有本地归档，请定期点「导出备份」并存到别处';
         if (btn) btn.classList.add('hidden');
         return;
     }
@@ -1631,7 +2032,7 @@ async function renderBackupHistory() {
         const newest = list[0];
         const when = Date.parse(newest.date);
         sub.textContent = `本机已保留 ${list.length} 份快照，最新一份 ${isNaN(when) ? '' : relTimeText(when)}`
-            + `（约 ${Math.max(1, Math.round((newest.bytes || 0) / 1024))} KB）· 恢复：选中文件后「导入 JSON」`;
+            + `（约 ${Math.max(1, Math.round((newest.bytes || 0) / 1024))} KB）· 恢复：选中文件后点「导入 / 合并」`;
         if (btn) btn.classList.remove('hidden');
     } catch (e) {
         sub.textContent = '读取备份列表失败';
@@ -1650,41 +2051,192 @@ function openBackupFolderClick() {
 }
 
 // 把一份 JSON 备份合并进当前账本
-async function applyImportedJSON(text) {
+// 读出一段备份文本背后的账本对象：解不开/格式不对会自己弹提示并返回 null
+async function decodeBackupText(text) {
+    beginAskCycle(1);
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch (e) { showToast('导入失败：不是有效的 JSON', 'error'); return null; }
+    if (LedgerCrypto.looksEncrypted(parsed)) {
+        let plain = null, lastMsg = '';
+        for (let attempt = 0; attempt < 2 && !plain; attempt++) {
+            try {
+                await ensureUnlocked(parsed.keyring, '这份备份是加密的', attempt > 0);
+                plain = await LedgerCrypto.decryptEnvelope(parsed);
+            } catch (e) {
+                lastMsg = (e && e.message) || String(e);
+                if (lastMsg === 'WRONG_KEY' && attempt === 0) continue;
+                if (lastMsg === '已取消') return null;
+                showToast('导入失败：' + lastMsg, 'error');
+                return null;
+            }
+        }
+        if (!plain) { showToast('导入失败：口令解不开这份备份', 'error'); return null; }
+        return decodeBackupText(plain);
+    }
+    if (!parsed || !parsed.data) { showToast('导入失败：文件里没有账本数据', 'error'); return null; }
+    return parsed;
+}
+
+// 「覆盖恢复」要先把本地清掉。关键坑：不能照抄「清空数据」一律打墓碑 ——
+// 备份里的记录时间戳都比"现在"早，一律打墓碑的话，等下合并时会被自己的墓碑吃掉，
+// 结果什么也没恢复回来。所以只给"备份里没有、这次真的要删掉"的记录打墓碑。
+function wipeForReplace(data) {
+    const idsOf = list => new Set((Array.isArray(list) ? list : []).map(x => x && x.id));
+    const keep = {
+        transactions: idsOf(data.transactions), categories: idsOf(data.categories),
+        budgets: idsOf(data.budgets), accounts: idsOf(data.accounts),
+        balances: idsOf(data.balances), returns: idsOf(data.returns),
+        insurancePolicies: idsOf(data.insurancePolicies),
+    };
+    const mark = (list, coll) => (list || []).forEach(x => {
+        if (x && !keep[coll].has(x.id)) addTombstone(coll, x.id);
+    });
+    mark(state.transactions, 'transactions');
+    mark(state.categories, 'categories');
+    mark(state.budgets, 'budgets');
+    mark(state.accounts, 'accounts');
+    mark(state.balances, 'balances');
+    mark(state.returns, 'returns');
+    mark(state.insurancePolicies, 'insurance');
+
+    const keepPm = new Set(Array.isArray(data.paymentMethods) ? data.paymentMethods : []);
+    state.paymentMethods.filter(p => !keepPm.has(p)).forEach(p => addTombstone('paymentMethods', p));
+    const keepMem = new Set(Array.isArray(data.balanceMembers) ? data.balanceMembers : []);
+    state.balanceMembers.filter(m => m !== '本人' && !keepMem.has(m)).forEach(m => addTombstone('members', m));
+    const keepIns = new Set(Array.isArray(data.insuranceMembers) ? data.insuranceMembers : []);
+    state.insuranceMembers.filter(m => m !== '本人' && !keepIns.has(m)).forEach(m => addTombstone('insuranceMembers', m));
+
+    // 内置账户/分类会被默认值补回来，所以只给"用户自己加的、且备份里没有"的打墓碑
+    const defaultIds = new Set(DEFAULT_ACCOUNTS.map(a => a.id));
+    state.accounts.filter(a => !defaultIds.has(a.id)).forEach(a => { if (!keep.accounts.has(a.id)) addTombstone('accounts', a.id); });
+    const defaultCats = new Set([...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES].map(c => c.id));
+    state.categories.filter(c => !defaultCats.has(c.id)).forEach(c => { if (!keep.categories.has(c.id)) addTombstone('categories', c.id); });
+
+    state.accounts = DEFAULT_ACCOUNTS.map(a => Object.assign({}, a));
+    state.categories = [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES];
+    state.transactions = []; state.budgets = []; state.balances = []; state.returns = [];
+    state.insurancePolicies = []; state.paymentMethods = []; state.pmAddedAt = {};
+    state.memberAddedAt = {}; state.insuranceMemberAddedAt = {};
+    state.balanceMembers = ['本人']; state.insuranceMembers = [...DEFAULT_INSURANCE_MEMBERS];
+    state.balanceOwner = 'all';
+}
+
+const SYNC_BUCKETS = {
+    transactions: 'transactions', categories: 'categories', budgets: 'budgets',
+    accounts: 'accounts', balances: 'balances', returns: 'returns',
+    insurancePolicies: 'insurance', paymentMethods: 'paymentMethods',
+    balanceMembers: 'members', insuranceMembers: 'insuranceMembers', recurring: 'recurring',
+};
+
+// 备份里存在的记录，它们身上的删除标记要一并抹掉。
+// 否则「8 月手滑删了一条 → 9 月想用 8 月的备份退回去」这条路会失败：
+// 删除标记的时间是"现在"，备份里那条的时间是 8 月，合并时被判定成"已删除"直接吃掉。
+function clearTombstonesFor(data) {
+    Object.keys(SYNC_BUCKETS).forEach(coll => {
+        const bucket = state.deleted[SYNC_BUCKETS[coll]];
+        const list = data[coll];
+        if (!Array.isArray(bucket) || !bucket.length || !Array.isArray(list)) return;
+        const ids = new Set(list.map(x => (typeof x === 'string' ? x : (x && x.id))).filter(Boolean));
+        state.deleted[SYNC_BUCKETS[coll]] = bucket.filter(t => !ids.has(t.id));
+    });
+}
+
+// 「补回缺失」：只把"备份里有、本地没有"的记录捞回来，本地已有的一条不动、也不删任何东西。
+// 复活时把 updatedAt 刷成现在 —— 不刷的话，别的设备（和本机残留的标记）会把它再次吃掉。
+function recoverMissingFromBackup(data) {
+    const report = { added: 0, byKind: {} };
+    Object.keys(SYNC_BUCKETS).forEach(coll => {
+        const bucketName = SYNC_BUCKETS[coll];
+        const list = Array.isArray(data[coll]) ? data[coll] : [];
+        const target = coll === 'balanceMembers' ? state.balanceMembers
+            : coll === 'insuranceMembers' ? state.insuranceMembers : state[coll];
+        if (!Array.isArray(target)) return;
+        const have = new Set(target.map(x => (typeof x === 'string' ? x : (x && x.id))));
+        list.forEach(row => {
+            const key = typeof row === 'string' ? row : (row && row.id);
+            if (!key || have.has(key)) return;
+            if (Array.isArray(state.deleted[bucketName])) {
+                state.deleted[bucketName] = state.deleted[bucketName].filter(t => t.id !== key);
+            }
+            if (coll === 'balanceMembers' || coll === 'insuranceMembers') {
+                target.push(key);
+                const at = coll === 'balanceMembers' ? state.memberAddedAt : state.insuranceMemberAddedAt;
+                at[key] = Date.now();
+            } else {
+                const clone = Object.assign({}, row);
+                clone.updatedAt = Date.now();
+                target.push(clone);
+            }
+            have.add(key);
+            report.added++;
+            report.byKind[coll] = (report.byKind[coll] || 0) + 1;
+        });
+    });
+    return report;
+}
+
+async function applyImportedJSON(text, opts) {
+    // 明文备份走同步快路：先就地解析，只有加密的才 await 解锁。
+    // （改成"进函数先 await"会让不 await 调用方的老代码看到"什么都没发生"）
     let parsed = null;
     try { parsed = JSON.parse(text); } catch (e) { showToast('导入失败：不是有效的 JSON', 'error'); return false; }
     if (LedgerCrypto.looksEncrypted(parsed)) {
-        let plain = null;
-        try {
-            await ensureUnlocked(parsed.keyring, '这份备份是加密的');
-            plain = await LedgerCrypto.decryptEnvelope(parsed);
-        } catch (e) {
-            showToast(e && e.message === '已取消' ? '已取消导入' : '导入失败：' + (e && e.message || e), 'error');
-            return false;
-        }
-        // iCloud / 同步文件是「先压缩再加密」，解密后是 BKZ1:… 压缩串，必须先解压再解析；
-        // 手动导出的加密备份是「加密原始 JSON」，解压函数对明文同样安全（直接 JSON.parse）。
-        try {
-            plain = await decodeSyncPayload(plain);
-        } catch (e) {
-            showToast('导入失败：' + (e && e.message || e), 'error');
-            return false;
-        }
-        return applyImportedJSON(typeof plain === 'string' ? plain : JSON.stringify(plain));
+        parsed = await decodeBackupText(text);
+        if (!parsed) return false;
+    } else if (!parsed || !parsed.data) {
+        showToast('导入失败：文件里没有账本数据', 'error');
+        return false;
     }
-    if (!parsed || !parsed.data) { showToast('导入失败：文件里没有账本数据', 'error'); return false; }
+    const mode = (opts && opts.mode) || (opts && opts.replace ? 'replace' : 'merge');
+    const replace = mode === 'replace';
+    if (mode === 'recover') {
+        const rep = recoverMissingFromBackup(parsed.data);
+        saveState();
+        applyTheme(state.settings.theme);
+        renderView(state.currentView);
+        updateSidebarSummary();
+        updateICloudSyncUI();
+        showToast(rep.added ? `已补回 ${rep.added} 条记录，本地原有的没动` : '备份里没有可补回的记录（一条都没少）',
+            rep.added ? 'success' : 'info');
+        return true;
+    }
+    if (replace) {
+        const d = parsed.data;
+        const n = list => (Array.isArray(list) ? list.length : 0);
+        if (!confirm(`用这份备份【覆盖】当前账本？
+
+当前：交易 ${state.transactions.length} 笔、余额 ${state.balances.length} 条、收益 ${state.returns.length} 条
+备份：交易 ${n(d.transactions)} 笔、余额 ${n(d.balances)} 条、收益 ${n(d.returns)} 条
+
+不在备份里的现有记录会被删除，并且这个删除会同步到另一台设备。覆盖不能撤销 —— 建议先点「导出备份」把现在的数据存一份。`)) return false;
+        wipeForReplace(d);
+    }
+    // 覆盖恢复 = 以备份为准，所以备份里有的记录不能留着旧的删除标记
+    if (replace) clearTombstonesFor(parsed.data);
     mergeRemoteData(parsed);
     applyTheme(state.settings.theme);
     renderView(state.currentView);
     updateSidebarSummary();
-    showToast('已导入并合并 JSON 备份', 'success');
+    updateICloudSyncUI();
+    showToast(replace ? '已按这份备份覆盖恢复' : '已导入并合并 JSON 备份', 'success');
     return true;
 }
 
-async function importJsonFile() {
+async function importJsonFile(opts) {
     const picked = await pickLocalFile(['json']);
     if (!picked) return;
-    applyImportedJSON(base64ToText(picked.base64));
+    if (picked.error) { showToast(picked.error, 'error'); return; }
+    applyImportedJSON(base64ToText(picked.base64), opts);
+}
+
+// 真正的回滚入口：先清掉本地、再按那份备份重建
+function restoreBackupOverwrite() {
+    return importJsonFile({ mode: 'replace' });
+}
+
+// 治手滑删除的入口：只补回缺的，不删任何东西
+function restoreBackupMissing() {
+    return importJsonFile({ mode: 'recover' });
 }
 
 // PWA: Import from iCloud (file input)
@@ -1737,20 +2289,14 @@ function updateICloudSyncUI() {
         container.innerHTML = `
             <div class="icloud-status">
                 <div class="settings-row">
-                    <div class="settings-label">从 iCloud 导入<div class="settings-sublabel">选择之前导出的同步文件</div></div>
-                    <button class="secondary-btn" onclick="importJsonFile()">
-                        <i class="fa-solid fa-cloud-arrow-down"></i> 导入
-                    </button>
-                </div>
-                <div class="settings-row">
-                    <div class="settings-label">导出到 iCloud<div class="settings-sublabel">存到 iCloud Drive 的「记账本」文件夹，文件名 ${ICLOUD_SYNC_FILENAME}，Mac 端会自动读到</div></div>
+                    <div class="settings-label">存为 iCloud 同步文件<div class="settings-sublabel">存成固定的 ${ICLOUD_SYNC_FILENAME}，Mac 端会自动读到；同名会盖掉上一次，所以它只是"最新一份"，想留历史请用上面的「导出备份」</div></div>
                     <button class="secondary-btn" onclick="exportToICloud()">
-                        <i class="fa-solid fa-cloud-arrow-up"></i> 导出
+                        <i class="fa-solid fa-cloud-arrow-up"></i> 存一份
                     </button>
                 </div>
                 <div class="icloud-hint">
                     <i class="fa-solid fa-circle-info"></i>
-                    Mac 端自动同步，手机端点「导入」即可获取 Mac 最新数据
+                    浏览器读不到 iCloud：想把 Mac 的数据拿过来，用上面的「导入 / 合并」，在文件选择里选 iCloud Drive → 记账本 → 那个文件
                 </div>
                 <div class="icloud-status-info">上次操作: ${timeStr}</div>
             </div>
@@ -1761,16 +2307,21 @@ function updateICloudSyncUI() {
 async function syncFromICloudNow() {
     if (!isElectron() || !iCloudSyncEnabled) return;
     try {
-        const raw = await window.electronAPI.icloud.readData();
-        const remoteData = await resolveCloudPayload(raw);
-        if (remoteData && remoteData.data) {
-            mergeRemoteData(remoteData);
+        const r = await mergeAllCloud('manual');
+        if (r.merged === 0) {
+            showToast(r.locked ? `有 ${r.locked} 份加密文件解不开（口令不对，或不是同一把钥匙）`
+                              : 'iCloud 文件夹里没有可读的账本',
+                r.locked ? 'error' : 'info');
+            return;
+        }
+        if (r.changed) {
             renderView(state.currentView);
-            showToast('已从 iCloud 同步最新数据', 'success');
-        } else if (LedgerCrypto.looksEncrypted(raw)) {
-            showToast('云端那份是加密的，需要口令或恢复码', 'error');
+            updateSidebarSummary();
+            showToast(`已合并 ${r.merged} 份文件，账本有更新`, 'success');
+        } else if (__remoteLastError) {
+            showToast(__remoteLastError, 'error');
         } else {
-            showToast('iCloud 中暂无同步数据', 'info');
+            showToast(`已检查 ${r.merged} 份文件，没有新内容`, 'info');
         }
     } catch (e) {
         showToast('同步失败', 'error');
@@ -2178,6 +2729,9 @@ function loadState() {
             state.balances = Array.isArray(data.balances) ? data.balances : [];
             state.returns = Array.isArray(data.returns) ? data.returns : [];
             state.recurring = Array.isArray(data.recurring) ? data.recurring : [];
+            state.pendingRecurring = Array.isArray(data.pendingRecurring) ? data.pendingRecurring : [];
+            state.recurringSkipped = (data.recurringSkipped && typeof data.recurringSkipped === 'object')
+                ? data.recurringSkipped : {};
             state.memberAddedAt = Object.assign({}, data.memberAddedAt || {});
             state.insuranceMemberAddedAt = Object.assign({}, data.insuranceMemberAddedAt || {});
             state.fundTargets = { cash: 0, steady: 0, growth: 0, ...(data.fundTargets || {}) };
@@ -2190,6 +2744,12 @@ function loadState() {
             state.deleted = normalizeTombstones(data.deleted);
             state.pmAddedAt = normalizeAddedAtMap(data.pmAddedAt);
             state.lastExportAt = Number(data.lastExportAt) || 0;
+            const ui = data.uiPrefs || {};
+            if (ui.balanceOwner === 'all' || state.balanceMembers.includes(ui.balanceOwner)) state.balanceOwner = ui.balanceOwner;
+            ['balancePeriod', 'reportPeriod', 'returnPeriod'].forEach(k => {
+                if (['month', 'year', 'all'].indexOf(ui[k]) >= 0) state[k] = ui[k];
+            });
+            if (typeof ui.closeMonth === 'string') state.closeMonth = ui.closeMonth;
             // 仪表盘页面已移除：旧设置迁移到交易记录
             if (state.settings.defaultView === 'dashboard') state.settings.defaultView = 'transactions';
 
@@ -2353,6 +2913,8 @@ function renderView(viewName) {
     }
     // Sidebar month summary always reflects current month regardless of active view
     updateSidebarSummary();
+    renderPendingRecurring();
+    updateInsBadges();
 }
 
 // ---- Sidebar summary (desktop sidebar month card) ----
@@ -3211,6 +3773,7 @@ const METRIC_META = {
 
 function renderReports() {
     renderReportSelectors();
+    renderCloseCard();
 
     const { range, txns } = getReportFiltered();
     const income = txns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
@@ -4688,7 +5251,12 @@ function pickLocalFile(extensions) {
     const exts = extensions || [];
     if (isElectron() && window.electronAPI && typeof window.electronAPI.openFile === 'function') {
         return window.electronAPI.openFile({ extensions: exts })
-            .then(r => (r && !r.cancelled && r.base64) ? { name: r.name, base64: r.base64 } : null)
+            .then(r => {
+                if (!r || r.cancelled) return null;
+                // 读不到文件时原生侧会给出中文原因，透给调用方去提示
+                if (r.error) return { error: r.error };
+                return r.base64 ? { name: r.name, base64: r.base64 } : null;
+            })
             .catch(() => null);
     }
     return new Promise(resolve => {
@@ -4853,6 +5421,7 @@ async function importExcelFile() {
     }
     const picked = await pickLocalFile(['xlsx', 'xls']);
     if (!picked) return;
+    if (picked.error) { showToast(picked.error, 'error'); return; }
     try {
         const wb = XLSX.read(base64ToUint8(picked.base64), { type: 'array', cellDates: true });
         const res = applyWorkbook(wb) || {};
@@ -5286,7 +5855,7 @@ function renderBalance() {
     renderBalanceMemberBar();
     renderFamilySummary();
     renderNetBridge();
-    renderBalanceCloseCard();
+    updateNavBadges();
 }
 
 // ==================== 净资产变动桥 ====================
@@ -5314,9 +5883,8 @@ function netWorthBridge(month) {
     const delta = closeT.net - openT.net;
     const saved = income - expense;
     const unexplained = delta - saved - profit - fixedMove;
-    // 容忍度：基础 50 元吸收四舍五入/小额手续费；动得大的月份再放宽到 delta 的 0.1%，
-    // 但封顶 100 元——避免净资产大涨的月份把几千元漏记也算成"对得上"。
-    const tol = Math.min(100, Math.max(50, Math.abs(delta) * 0.001));
+    // 同一个封顶容差：按当月实际变动量算，但最多放过 500 元
+    const tol = reconTolerance(delta);
     return {
         month, prev, open: openT.net, close: closeT.net, income, expense, saved, profit,
         fixedMove, fixedTouched, delta, unexplained, txnCount: txns.length,
@@ -5349,7 +5917,10 @@ function renderNetBridge() {
     }
     rows.push({
         k: '待核对差额', v: b.unexplained, cls: b.balanced ? 'ok' : 'warn',
-        note: b.balanced ? '两套记录对得上' : '既不在流水里、也不算收益，需要查一下',
+        note: b.balanced ? '两套记录对得上'
+            : (b.unexplained < 0
+                ? '少了一笔支出或多记了一笔收入；也可能是分红既进了流水又算进了收益（重复计算）'
+                : '多了一笔收入，或有市值变动没录成收益'),
     });
     rows.push({ k: '期末净资产', v: b.close, cls: 'neutral' });
     document.getElementById('bridgeRows').innerHTML = rows.map(r => `
@@ -5422,6 +5993,8 @@ function balanceCandidateAccounts() {
 
 function closeChecklist(month) {
     const member = state.balanceOwner;
+    // 周期账改成待确认后，"这个月有几笔还没入账"也是每月要做的一步
+    const pend = (state.pendingRecurring || []).filter(p => p.date && p.date.slice(0, 7) === month);
     const map = balancesAtMonth(month, member);
     const cands = balanceCandidateAccounts();
     const missingBal = cands.filter(a => map[a.id] === undefined || map[a.id] === null);
@@ -5461,8 +6034,13 @@ function closeChecklist(month) {
             : {
                 state: 'warn',
                 text: `有 ${formatCurrency(Math.abs(b.unexplained))} 对不上：可能是漏记流水、余额记错，或者收益没录`,
-                act: { label: '看变动明细', run: () => document.getElementById('bridgeCard')
-                    ?.scrollIntoView({ behavior: 'smooth', block: 'center' }) },
+                // 变动桥在资产负债页里；清单搬到报表页之后，光 scrollIntoView
+                // 会滚到一个 display:none 的元素上，点了没反应 —— 必须先切页。
+                act: { label: '看变动明细', run: () => {
+                    switchView('balance');
+                    setTimeout(() => document.getElementById('bridgeCard')
+                        ?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
+                } },
             });
     }
 
@@ -5473,22 +6051,77 @@ function closeChecklist(month) {
             act: { label: '去记一笔', run: () => { switchView('transactions'); openTransactionModal(); } },
         });
 
+    // 周期账待确认：这个月有几笔房租/工资还压在队列里没入账
+    if (pend.length) {
+        items.push({
+            state: 'warn',
+            text: `这个月有 ${pend.length} 笔周期账还没确认入账`,
+            act: { label: '去确认', run: () => { switchView('transactions'); openRecurQueue(); } },
+        });
+    }
+
+    // 同步新鲜度：月结最怕拿着一份旧账在核对
+    const DAY = 86400000;
+    if (isElectron()) {
+        if (typeof iCloudSyncEnabled === 'undefined' || !iCloudSyncEnabled) {
+            items.push({ state: 'info', text: '未开启 iCloud 同步，请确认手机数据已经通过「导入 / 合并」传过来', act: null });
+        } else {
+            const age = iCloudLastSyncTime ? Math.floor((Date.now() - iCloudLastSyncTime) / DAY) : null;
+            items.push(age === null
+                ? { state: 'warn', text: '本机还没从 iCloud 同步过，先拉一次最新数据再核对这个月',
+                    act: { label: '立即同步', run: () => syncFromICloudNow() } }
+                : age >= 3
+                    ? { state: 'warn', text: `已经 ${age} 天没同步 iCloud，手机上的新记录可能还没过来`,
+                        act: { label: '立即同步', run: () => syncFromICloudNow() } }
+                    : { state: 'ok', text: `iCloud 同步正常（${relTimeText(iCloudLastSyncTime)}）`, act: null });
+        }
+    } else {
+        const expAge = state.lastExportAt ? Math.floor((Date.now() - state.lastExportAt) / DAY) : null;
+        items.push(expAge === null
+            ? { state: 'warn', text: '这台设备还没导出过备份，Mac 那边看不到这里记的账',
+                act: { label: '去导出', run: () => exportToICloud() } }
+            : expAge >= 7
+                ? { state: 'warn', text: `这台设备已经 ${expAge} 天没导出，Mac 上核对的可能是旧账`,
+                    act: { label: '去导出', run: () => exportToICloud() } }
+                : { state: 'ok', text: `这台设备上次导出 ${relTimeText(state.lastExportAt)}`, act: null });
+    }
+
     return { items, bridge: b, month };
 }
 
-function renderBalanceCloseCard() {
+// 结账清单默认盯"最近一个已经过完的月"：当月还没过完，催结账没意义。
+function closeCheckMonth() {
+    const months = balanceMonths();
+    if (!months.length) return null;
+    if (state.closeMonth && months.indexOf(state.closeMonth) >= 0) return state.closeMonth;
+    const now = new Date();
+    const nowKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const past = months.filter(m => m < nowKey);
+    return past.length ? past[past.length - 1] : months[months.length - 1];
+}
+
+function renderCloseCard() {
     const card = document.getElementById('closeCard');
     if (!card) return;
-    const info = balancePeriodInfo();
-    if (!info.month) { card.classList.add('hidden'); return; }
-    const cl = closeChecklist(info.month);
+    const month = closeCheckMonth();
+    if (!month) { card.classList.add('hidden'); return; }
+    const cl = closeChecklist(month);
     card.classList.remove('hidden');
-    document.getElementById('closeMonthLabel').textContent = info.month.replace('-', '年') + '月';
+    const ms = document.getElementById('closeMonthSelect');
+    if (ms) {
+        const opts = balanceMonths().slice(-24).reverse();
+        ms.innerHTML = opts.map(m => `<option value="${m}" ${m === month ? 'selected' : ''}>${m.replace('-', '年')}月</option>`).join('');
+        if (!ms.$wired) {
+            ms.$wired = true;
+            ms.addEventListener('change', () => { state.closeMonth = ms.value; saveState(); renderCloseCard(); updateNavBadges(); });
+        }
+    }
     const todo = cl.items.filter(i => i.state === 'warn').length;
     const scored = cl.items.filter(i => i.state !== 'info').length;
-    document.getElementById('closeProgress').textContent = todo === 0
-        ? `${info.month.replace('-', '年')}月已结清 · ${scored} 项全部通过`
-        : `还有 ${todo} 项待处理`;
+    const who = state.balanceOwner === 'all' ? '全家' : state.balanceOwner;
+    document.getElementById('closeProgress').textContent = (todo === 0
+        ? `已结清 · ${scored} 项全部通过`
+        : `还有 ${todo} 项待处理`) + ` · ${who}`;
 
     const ICONS = { ok: 'fa-circle-check', warn: 'fa-circle-exclamation', info: 'fa-circle-info' };
     const list = document.getElementById('closeList');
@@ -5504,6 +6137,21 @@ function renderBalanceCloseCard() {
             if (it && it.act) it.act.run();
         });
     });
+    updateNavBadges();
+}
+
+// 导航角标：结账清单里还有"待处理"就在报表分析上点个小红点。
+// 清单本身不显眼，容易被忽略；角标负责在别的页面时也提醒一句。
+function updateNavBadges() {
+    const dot = document.getElementById('navDotReports');
+    if (!dot) return;
+    let todo = 0;
+    try {
+        const m = closeCheckMonth();
+        if (m) todo = closeChecklist(m).items.filter(i => i.state === 'warn').length;
+    } catch (e) { todo = 0; }
+    dot.classList.toggle('hidden', todo === 0);
+    if (todo) dot.title = `有 ${todo} 项结账事项待处理`;
 }
 
 function balanceTrendMonths() {
@@ -5721,13 +6369,52 @@ function renderBalanceBreakdown() {
         const raw = map[a.id];
         const amount = raw === undefined ? null
             : (metric === 'net' && a.kind === 'liability' ? -raw : raw);
-        return { a, amount, signed: amount === null ? -1 : Math.abs(amount) };
+        const shown = amount === null ? 0
+            : (metric === 'net' && a.kind === 'liability' ? -Math.abs(amount) : Math.abs(amount));
+        return { a, amount, shown, signed: amount === null ? -1 : Math.abs(amount) };
     });
     rows.sort((x, y) => y.signed - x.signed);
     const total = rows.reduce((sum, r) => sum + (r.signed > 0 ? r.signed : 0), 0);
     const top = rows.length && rows[0].signed > 0 ? rows[0].signed : 1;
+    rows.forEach((r, i) => { r.rank = i + 1; });
 
-    container.innerHTML = rows.map((r, i) => {
+    // 按钱包折叠：一个支付宝下有活期/基金/定期/花呗，平铺着看很散，收成卡片先看总数
+    const groups = [], byName = {};
+    rows.forEach(r => {
+        const w = accountWallet(r.a) || '未分组';
+        if (!byName[w]) { byName[w] = { name: w, rows: [] }; groups.push(byName[w]); }
+        byName[w].rows.push(r);
+    });
+    const sumOf = g => Math.abs(g.rows.reduce((t, r) => t + r.shown, 0));
+    if (groups.length > 1) groups.sort((x, y) => sumOf(y) - sumOf(x));
+    const flat = rows.length <= 1 || groups.length <= 1;
+    container.innerHTML = (flat ? [{ name: '', rows }] : groups).map(g => {
+        const open = flat || g.rows.length === 1 || balOpenWallets.has(g.name);
+        const card = g.rows.map(r => breakdownRowHTML(r, total, top, metric)).join('');
+        if (flat) return card;
+        const net = g.rows.reduce((t, r) => t + r.shown, 0);
+        return `<div class="bal-wallet${open ? ' open' : ''}">
+            <div class="bw-head" data-bal-wallet="${_esc(g.name)}">
+                <span class="bw-name">${_esc(g.name)}<em>${g.rows.length} 项</em></span>
+                <span class="bw-net">${formatCurrency(net)}</span>
+                <i class="fa-solid ${open ? 'fa-chevron-up' : 'fa-chevron-down'}"></i>
+            </div>
+            ${open ? `<div class="bw-body">${card}</div>` : ''}
+        </div>`;
+    }).join('');
+    container.querySelectorAll('[data-bal-wallet]').forEach(el =>
+        el.addEventListener('click', () => toggleBalWallet(el.dataset.balWallet)));
+}
+
+// 展开状态只活在本次会话里：折叠是为了"看一眼总数"，不值得存到账本里
+const balOpenWallets = new Set();
+function toggleBalWallet(name) {
+    if (balOpenWallets.has(name)) balOpenWallets.delete(name); else balOpenWallets.add(name);
+    renderBalanceBreakdown();
+}
+
+function breakdownRowHTML(r, total, top, metric) {
+    {
         const a = r.a;
         const color = a.color || '#8e8e8e';
         const has = r.amount !== null;
@@ -5740,7 +6427,7 @@ function renderBalanceBreakdown() {
                 </div>
                 <div class="breakdown-main">
                     <div class="breakdown-head">
-                        <span class="breakdown-name">${a.name}${has ? `<span class="breakdown-rank">${i + 1}</span>` : ''}</span>
+                        <span class="breakdown-name">${a.name}${has ? `<span class="breakdown-rank">${r.rank}</span>` : ''}</span>
                         <span class="breakdown-amount">${has ? `${sign}${formatCurrency(Math.abs(r.amount))}<em>${pct.toFixed(1)}%</em>` : '<span class="bd-no">未记录</span>'}</span>
                     </div>
                     <div class="breakdown-bar"><div class="breakdown-fill" style="width:${has ? Math.max(3, (r.signed / top) * 100) : 0}%;background:${color}"></div></div>
@@ -5748,7 +6435,7 @@ function renderBalanceBreakdown() {
                 <span class="bal-group-tag">${a.group || ''}</span>
                 <i class="fa-solid fa-chevron-right breakdown-arrow"></i>
             </div>`;
-    }).join('');
+    }
 }
 
 // ---------------- 账户历史弹窗 ----------------
@@ -5768,6 +6455,11 @@ function openAccountHistoryForAccount(accountId, fallbackName) {
         ? `${a.kind === 'asset' ? '资产' : '负债'} · ${a.group}` : '';
     const del = document.getElementById('acctHistDelete');
     del.style.display = a ? 'flex' : 'none';
+    const editBtn = document.getElementById('acctHistEdit');
+    if (editBtn) { editBtn.style.display = a ? 'flex' : 'none'; editBtn.onclick = () => openAccountEdit(accountId); }
+    const rc = accountRecordCounts(accountId), rn = rc.bal + rc.ret;
+    del.title = rn ? `还有 ${rn} 条记录，得先清掉才能删` : '删除账户';
+    del.classList.toggle('bh-blocked', !!rn);
     del.onclick = () => deleteAccountFromHistory(accountId);
     renderAccountHistory();
     document.getElementById('accountHistoryModal').classList.remove('hidden');
@@ -5831,9 +6523,51 @@ function renderAccountHistory() {
             <div class="bal-history-row">
                 <span class="bh-month">${b.month.replace('-', '年')}月${all ? `<span class="bh-member">${_esc(b.member || '')}</span>` : ''}</span>
                 <span class="bh-amount">${formatCurrency(b.amount)}</span>
+                <button class="bh-edit" onclick="editBalanceRecord('${b.id}')" title="修改这一期"><i class="fa-solid fa-pen"></i></button>
                 <button class="bh-delete" onclick="deleteBalanceSnapshot('${b.id}')" title="删除这一期"><i class="fa-solid fa-xmark"></i></button>
             </div>`).join('')
         : '<div class="breakdown-empty">该账户还没有记录过余额</div>';
+}
+
+// 「修改」不另做一套表单：直接打开那个月的录入面板（它本来就带着现值），
+// 再把成员切到这条记录的人、滚到这个账户并高亮，改完照原路保存覆盖。
+function editReturnRecord(id) {
+    const r = state.returns.find(x => x.id === id);
+    if (!r) { showToast('这条记录已经不在了', 'error'); return; }
+    closeAccountHistoryModal();
+    openReturnModal(r.month);
+    focusMonthlyRow(r.member, r.accountId, 'ret');
+}
+
+function editBalanceRecord(id) {
+    const b = state.balances.find(x => x.id === id);
+    if (!b) { showToast('这条记录已经不在了', 'error'); return; }
+    closeAccountHistoryModal();
+    openBalanceModal(b.month);
+    focusMonthlyRow(b.member, b.accountId, 'bal');
+}
+
+// 打开合并弹窗后，滚到那一行、聚焦要改的那一格
+function focusMonthlyRow(member, accountId, which) {
+    const ms = document.getElementById('monthlyMemberSelect');
+    if (ms && member && ms.value !== member && Array.from(ms.options || []).some(o => o.value === member)) {
+        ms.value = member;
+        ms.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    setTimeout(() => {
+        const inp = document.querySelector(`#monthlyEntryList [data-${which}="${accountId}"]`);
+        if (!inp) return;
+        const cell = inp.closest('.mw-c') || inp.closest('td') || inp.closest('th');
+        const tr = inp.closest('.mw-tr') || inp.closest('tr');
+        if (cell) cell.classList.add('be-editing');
+        if (tr) tr.classList.add('be-editing');
+        (inp.closest('.mw-scroll') || inp).scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+        if (inp && inp.select) inp.select();
+        setTimeout(() => {
+            if (cell) cell.classList.remove('be-editing');
+            if (tr) tr.classList.remove('be-editing');
+        }, 5000);
+    }, 150);
 }
 
 function deleteBalanceSnapshot(id) {
@@ -5842,19 +6576,300 @@ function deleteBalanceSnapshot(id) {
     addTombstone('balances', id);
     state.balances = state.balances.filter(b => b.id !== id);
     saveState();
-    renderAccountHistory();
     renderBalance();
+    refreshOpenSurfaces();
     if (row && pushUndo('该期余额', { balances: [row] })) showUndoToast('该期余额');
     else showToast('已删除该期余额', 'success');
+}
+
+// ==================== 收益率口径面板 ====================
+// 以前只能靠"算不算活钱 / 算不算房产"两个总开关调，粒度太粗：
+// 想单独把某个基金剔出收益率就得改它的归类，改完资产负债页的分组也跟着乱了。
+function returnScopeGroups() {
+    const st = state.settings || {};
+    const auto = new Set((() => {
+        const keep = st.returnAccountMode;
+        st.returnAccountMode = 'auto';
+        const ids = investmentAccountIds();
+        st.returnAccountMode = keep;
+        return ids;
+    })());
+    const assets = state.accounts.filter(a => a.kind === 'asset');
+    const groups = [
+        { key: 'steady', title: '稳健理财', rows: assets.filter(a => a.bucket === 'steady') },
+        { key: 'growth', title: '长期投资', rows: assets.filter(a => a.bucket === 'growth') },
+        { key: 'cash', title: '活钱（一般不算）', rows: assets.filter(a => a.bucket === 'cash') },
+        { key: 'other', title: '其他', rows: assets.filter(a => !['steady', 'growth', 'cash'].includes(a.bucket)) },
+    ];
+    return { groups, auto, picked: new Set(investmentAccountIds()) };
+}
+
+function openReturnScope() {
+    const modal = document.getElementById('scopeModal');
+    if (!modal) return;
+    renderScopeModal();
+    modal.classList.remove('hidden');
+    raiseOverlay(modal);
+}
+
+function closeReturnScope() {
+    const modal = document.getElementById('scopeModal');
+    if (modal) modal.classList.add('hidden');
+    renderReturns();
+}
+
+function renderScopeModal() {
+    const body = document.getElementById('scopeModalBody');
+    if (!body) return;
+    const { groups, auto, picked } = returnScopeGroups();
+    const manual = (state.settings || {}).returnAccountMode === 'manual';
+    document.getElementById('scopeModalSub').textContent = manual
+        ? `手动挑选中 · 共 ${picked.size} 个账户参与收益率`
+        : `按「四笔钱」归类自动选 · 共 ${picked.size} 个账户参与收益率`;
+    body.innerHTML = `<div class="scope-head">
+            <span></span><span>账户</span><span></span><span>记收益</span><span>算收益率</span><span></span>
+        </div>` + groups.map(g => {
+        if (!g.rows.length) return '';
+        return `<div class="scope-group">
+            <div class="scope-group-title">${_esc(g.title)}<span class="sg-count">${g.rows.length}</span></div>
+            ${g.rows.map(a => `<div class="scope-row">
+                <span class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></span>
+                <span class="sr-name">${_esc(a.name)}</span>
+                ${auto.has(a.id) ? '<span class="sr-tag">自动</span>' : '<span class="sr-tag ph">自动</span>'}
+                <input type="checkbox" data-scope-earn="${a.id}" ${accountEarnsReturn(a) ? 'checked' : ''} title="会不会出现在「记收益」列表里">
+                <input type="checkbox" data-scope-account="${a.id}" ${picked.has(a.id) ? 'checked' : ''} title="算不算进收益率">
+                <span class="sr-sub">${_esc(a.group || '')}</span>
+            </div>`).join('')}
+        </div>`;
+    }).join('') + `<div class="settings-sublabel scope-note">「记收益」= 出现在记收益列表；「算收益率」= 进收益率的分子分母。本金未知的月份会自动跳过。</div>`;
+    body.querySelectorAll('[data-scope-account]').forEach(cb => cb.addEventListener('change', () => {
+        toggleScopeAccount(cb.dataset.scopeAccount);
+    }));
+    body.querySelectorAll('[data-scope-earn]').forEach(cb => cb.addEventListener('change', () => {
+        const a = accountById(cb.dataset.scopeEarn);
+        if (!a) return;
+        setAccountEarnsReturn(a, cb.checked);
+        saveState();
+        renderScopeModal();
+        refreshOpenSurfaces();
+    }));
+    const reset = document.getElementById('scopeAutoBtn');
+    if (reset) {
+        reset.disabled = !manual;
+        reset.onclick = () => {
+            state.settings.returnAccountMode = 'auto';
+            state.settings.returnAccountIds = [];
+            saveState(); renderScopeModal(); refreshOpenSurfaces();
+            showToast('已恢复按归类自动选择', 'success');
+        };
+    }
+}
+
+function toggleScopeAccount(id) {
+    const st = state.settings || (state.settings = {});
+    // 第一次手动勾选时，把当前自动选中的那套原样搬进手动名单，避免"一勾就全丢"
+    if (st.returnAccountMode !== 'manual') {
+        st.returnAccountIds = investmentAccountIds();
+        st.returnAccountMode = 'manual';
+    }
+    const list = st.returnAccountIds;
+    const at = list.indexOf(id);
+    if (at >= 0) list.splice(at, 1); else list.push(id);
+    st.updatedAtSeed = Date.now();
+    saveState();
+    renderScopeModal();
+    refreshOpenSurfaces();
+}
+
+// ==================== 编辑单个账户（名称 / 类型 / 分类 / 图标 / 颜色）====================
+// 账户管理弹窗里也能改，但那是"一行一行扒拉着改"；这里给一个针对单个账户的完整表单，
+// 从账户历史、排行、月度明细点进来就能直接改，不用先关窗再去找那个列表。
+let editingAccountId = null;
+let acctEditDraft = { icon: 'fa-wallet', color: '#007aff' };
+
+function openAccountEdit(accountId) {
+    const a = accountById(accountId);
+    if (!a) { showToast('账户不存在', 'error'); return; }
+    editingAccountId = accountId;
+    acctEditDraft = { icon: a.icon || 'fa-wallet', color: a.color || '#007aff', earnsReturn: accountEarnsReturn(a) };
+    document.getElementById('acctEditName').value = a.name;
+    document.getElementById('acctEditSub').textContent = `${a.group || (a.kind === 'liability' ? '负债' : '资产')} · ${(state.balances.filter(b => b.accountId === a.id).length)} 期余额 · ${(state.returns.filter(r => r.accountId === a.id).length)} 期收益`;
+    const kindSel = document.getElementById('acctEditKind');
+    kindSel.value = a.kind;
+    paintAcctEditGroups(a.kind, a.group);
+    const er = document.getElementById('acctEditEarns');
+    if (er) { er.checked = acctEditDraft.earnsReturn; }
+    const wl = document.getElementById('acctEditWallet');
+    if (wl) {
+        wl.value = typeof a.wallet === 'string' ? a.wallet : (guessWalletFromName(a.name) || '');
+        const dl = document.getElementById('walletChoices');
+        if (dl) {
+            const seen = [...new Set(state.accounts.map(accountWallet).filter(Boolean))];
+            dl.innerHTML = seen.map(w => `<option value="${_esc(w)}">`).join('');
+        }
+    }
+    renderAcctEditPickers();
+    const modal = document.getElementById('accountEditModal');
+    modal.classList.remove('hidden');
+    raiseOverlay(modal);
+    setTimeout(() => { const n = document.getElementById('acctEditName'); if (n) { n.focus(); n.select(); } }, 60);
+}
+
+function paintAcctEditGroups(kind, want) {
+    const g = document.getElementById('acctEditGroup');
+    if (!g) return;
+    const list = groupsForKind(kind);
+    g.innerHTML = list.map(x => `<option value="${_esc(x)}" ${x === want ? 'selected' : ''}>${_esc(x)}</option>`).join('');
+}
+
+function renderAcctEditPickers() {
+    const icons = document.getElementById('acctEditIcons');
+    if (icons) icons.innerHTML = ACCOUNT_ICON_CHOICES.map(i =>
+        `<div class="icon-pick-item ${i === acctEditDraft.icon ? 'selected' : ''}" data-icon="${i}"><i class="fa-solid ${i}"></i></div>`).join('');
+    const colors = document.getElementById('acctEditColors');
+    if (colors) colors.innerHTML = COLOR_OPTIONS.map(c =>
+        `<div class="color-pick-item ${c === acctEditDraft.color ? 'selected' : ''}" data-color="${c}" style="background:${c}"></div>`).join('');
+}
+
+function closeAccountEdit() {
+    const modal = document.getElementById('accountEditModal');
+    if (modal) modal.classList.add('hidden');
+    editingAccountId = null;
+}
+
+function saveAccountEdit() {
+    const a = accountById(editingAccountId);
+    if (!a) { closeAccountEdit(); return; }
+    const name = (document.getElementById('acctEditName').value || '').trim();
+    if (!name) { showToast('名称不能为空', 'error'); return; }
+    if (state.accounts.some(x => x.id !== a.id && String(x.name).trim() === name)) {
+        showToast(`已经有叫「${name}」的账户了`, 'error'); return;
+    }
+    const walletEl = document.getElementById('acctEditWallet');
+    const wallet = walletEl ? String(walletEl.value || '').trim() : '';
+    const kind = document.getElementById('acctEditKind').value === 'liability' ? 'liability' : 'asset';
+    let group = document.getElementById('acctEditGroup').value;
+    if (!groupsForKind(kind).includes(group)) group = groupsForKind(kind)[0];
+    Object.assign(a, { name, kind, group, wallet, icon: acctEditDraft.icon, color: acctEditDraft.color,
+        earnsReturn: kind === 'asset' ? !!acctEditDraft.earnsReturn : undefined, updatedAt: Date.now() });
+    if (kind !== 'asset' && a.earnsReturn === undefined) delete a.earnsReturn;
+    ensureAccountOrder();
+    saveState();
+    refreshOpenSurfaces();
+    closeAccountEdit();
+    showToast(`已保存「${name}」`, 'success');
+}
+
+function initAccountEditModal() {
+    const kind = document.getElementById('acctEditKind');
+    if (kind) kind.addEventListener('change', () => paintAcctEditGroups(kind.value, groupsForKind(kind.value)[0]));
+    const icons = document.getElementById('acctEditIcons');
+    if (icons) icons.addEventListener('click', e => {
+        const el = e.target.closest ? e.target.closest('[data-icon]') : null;
+        if (!el) return;
+        acctEditDraft.icon = el.dataset.icon; renderAcctEditPickers();
+    });
+    const colors = document.getElementById('acctEditColors');
+    if (colors) colors.addEventListener('click', e => {
+        const el = e.target.closest ? e.target.closest('[data-color]') : null;
+        if (!el) return;
+        acctEditDraft.color = el.dataset.color; renderAcctEditPickers();
+    });
+    const earns = document.getElementById('acctEditEarns');
+    if (earns) earns.addEventListener('change', () => { acctEditDraft.earnsReturn = earns.checked; });
+}
+
+// ==================== 「还有记录，删不掉」弹窗 ====================
+// 以前删账户只问一句"它的 N 期余额也会一并删除"就连带删光，而且 N 只数了余额、
+// 没数收益：一个只录过收益、没记过月末余额的账户，提示里连个数字都没有，等于静默清库。
+// 现在改成有记录就不给删，两类记录各多少条摆出来，再给跳到那些记录面前的按钮。
+let __guardActions = [];
+
+function showDeleteGuard(opt) {
+    const modal = document.getElementById('guardModal');
+    if (!modal) return false;
+    __guardActions = opt.actions || [];
+    document.getElementById('guardTitle').textContent = opt.title;
+    document.getElementById('guardSub').textContent = opt.sub || '';
+    document.getElementById('guardRows').innerHTML = (opt.rows || []).map(r =>
+        `<div class="guard-row"><span>${_esc(r.k)}</span><b>${_esc(String(r.v))}</b></div>`).join('');
+    document.getElementById('guardActions').innerHTML = __guardActions.map((a, i) =>
+        `<button class="${a.primary ? 'primary-btn' : 'secondary-btn'}${a.danger ? ' guard-danger' : ''}" data-guard="${i}">${_esc(a.label)}</button>`
+    ).join('') + `<button class="link-btn" data-guard-close>知道了</button>`;
+    document.getElementById('guardActions').querySelectorAll('[data-guard]').forEach(b =>
+        b.addEventListener('click', () => runDeleteGuard(Number(b.dataset.guard))));
+    const x = document.getElementById('guardActions').querySelector('[data-guard-close]');
+    if (x) x.addEventListener('click', closeDeleteGuard);
+    modal.classList.remove('hidden');
+    raiseOverlay(modal);
+    return true;
+}
+
+function runDeleteGuard(i) {
+    const a = __guardActions[i];
+    closeDeleteGuard();
+    if (a && typeof a.fn === 'function') a.fn();
+}
+
+function closeDeleteGuard() {
+    const modal = document.getElementById('guardModal');
+    if (modal) modal.classList.add('hidden');
+    __guardActions = [];
+}
+
+function accountRecordCounts(id) {
+    return {
+        bal: state.balances.filter(b => b.accountId === id).length,
+        ret: state.returns.filter(r => r.accountId === id).length,
+    };
+}
+
+// 有记录 → 弹窗拦下、返回 true；没记录 → 返回 false，调用方继续删
+function guardAccountWithRecords(a) {
+    const c = accountRecordCounts(a.id);
+    if (!c.bal && !c.ret) return false;
+    const rows = [], actions = [];
+    if (c.bal) { rows.push({ k: '余额记录（资产负债）', v: c.bal + ' 期' });
+        actions.push({ label: '去看这些余额', fn: () => { switchView('balance'); openAccountHistoryForAccount(a.id); } }); }
+    if (c.ret) { rows.push({ k: '收益记录（投资收益）', v: c.ret + ' 期' });
+        actions.push({ label: '去看这些收益', fn: () => { switchView('returns'); openReturnHistoryForAccount(a.id); } }); }
+    actions.push({ label: `一键清空这 ${c.bal + c.ret} 条记录`, danger: true, fn: () => clearAccountRecords(a.id) });
+    showDeleteGuard({
+        title: `「${a.name}」还挂着 ${c.bal + c.ret} 条记录，删不掉`,
+        sub: '可以一条条删掉，也可以一键清空（两种方式删完都有 8 秒撤销）。清空后这个账户就能删了。',
+        rows, actions,
+    });
+    return true;
+}
+
+// 一键清空某账户的余额 + 收益记录：写墓碑、进撤销栈，撤销时按 id 塞回去并清掉墓碑。
+function clearAccountRecords(accountId) {
+    const a = accountById(accountId);
+    if (!a) return;
+    const bal = state.balances.filter(b => b.accountId === accountId);
+    const ret = state.returns.filter(r => r.accountId === accountId);
+    const n = bal.length + ret.length;
+    if (!n) { showToast('这个账户已经没有记录了', 'info'); return; }
+    if (!confirm(`清空「${a.name}」的 ${n} 条记录？（余额 ${bal.length} 期 / 收益 ${ret.length} 期）\n清空后 8 秒内可以撤销。`)) return;
+    bal.forEach(b => addTombstone('balances', b.id));
+    ret.forEach(r => addTombstone('returns', r.id));
+    state.balances = state.balances.filter(b => b.accountId !== accountId);
+    state.returns = state.returns.filter(r => r.accountId !== accountId);
+    const label = `清空「${a.name}」的 ${n} 条记录`;
+    const canUndo = pushUndo(label, { balances: bal, returns: ret });
+    saveState();
+    refreshOpenSurfaces();
+    if (canUndo) showUndoToast(label);
+    else showToast('已清空', 'success');
 }
 
 function deleteAccountFromHistory(accountId) {
     const a = accountById(accountId);
     if (!a) return;
-    if (!confirm(`确定删除账户「${a.name}」吗？其余额记录也会一并删除。`)) return;
+    if (guardAccountWithRecords(a)) return;
+    if (!confirm(`确定删除账户「${a.name}」吗？它名下已经没有余额和收益记录了。`)) return;
     removeAccount(accountId);
     closeAccountHistoryModal();
-    showToast('账户已删除', 'success');
 }
 
 function removeAccount(accountId) {
@@ -5867,18 +6882,26 @@ function removeAccount(accountId) {
     state.accounts = state.accounts.filter(a => a.id !== accountId);
     state.balances = state.balances.filter(b => b.accountId !== accountId);
     state.returns = state.returns.filter(r => r.accountId !== accountId);
-    if (acct) pushUndo(`账户「${acct.name}」`, {
+    const label = acct ? `账户「${acct.name}」` : '账户';
+    const canUndo = !!acct && pushUndo(label, {
         accounts: [acct], balances: goneBal, returns: goneRet,
     });
     saveState();
-    renderView(state.currentView);
-    refreshAccountLists();
-    refreshAccountsModalIfOpen();
+    refreshOpenSurfaces();
+    // 以前删账户只弹一句"已删除"、没有撤销按钮，删错只能翻备份文件
+    if (canUndo) showUndoToast(label);
 }
 
 function closeAccountHistoryModal() {
     document.getElementById('accountHistoryModal').classList.add('hidden');
+    markHistoryModalReturnsTone(false);
     historyAccountId = null;
+}
+
+// 从投资收益页打开的明细弹窗用"盈利红、亏损绿"；从资产负债页打开的保持全局配色
+function markHistoryModalReturnsTone(on) {
+    const m = document.getElementById('accountHistoryModal');
+    if (m) m.classList.toggle('returns-tone', !!on);
 }
 
 // ---------------- 记余额 / 记收益的「年 + 月」选择 ----------------
@@ -5955,55 +6978,7 @@ function bindModalMonth(prefix, onChange) {
 }
 
 // ---------------- 记余额弹窗 ----------------
-function openBalanceModal(month) {
-    const info = balancePeriodInfo();
-    const want = month || info.month || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-    paintModalMonth('balance', want);
-    const ms = document.getElementById('balanceMemberSelect');
-    if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
-    renderBalanceEntry();
-    document.getElementById('balanceModal').classList.remove('hidden');
-    raiseOverlay('balanceModal');
-}
-
-function closeBalanceModal() {
-    document.getElementById('balanceModal').classList.add('hidden');
-}
-
-function renderBalanceEntry() {
-    const month = getModalMonth('balance');
-    const ms = document.getElementById('balanceMemberSelect');
-    if (ms) {
-        const want = ms.value || state.balanceMembers[0] || '本人';
-        ms.innerHTML = state.balanceMembers.map(m => `<option ${m === want ? 'selected' : ''}>${m}</option>`).join('');
-    }
-    const member = ms ? ms.value : (state.balanceMembers[0] || '本人');
-    document.getElementById('balanceModalSub').textContent = month ? `${member} · ${month.replace('-', '年')}月底各账户余额` : '请先选择月份';
-    const existing = balancesAtMonth(month, member);
-    const list = document.getElementById('balanceEntryList');
-    if (!state.accounts.length) {
-        list.innerHTML = '<div class="breakdown-empty">还没有账户，先到「账户」里添加</div>';
-        return;
-    }
-    ensureAccountOrder();
-    const rowHTML = a => `
-        <div class="bal-entry-row">
-            <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
-            <div class="be-name">${_esc(a.name)}<span class="be-kind ${a.kind}">${_esc(a.group || '')}</span></div>
-            <div class="be-input">
-                <span class="currency-symbol">${state.settings.currency}</span>
-                <input type="number" step="0.01" min="0" class="text-input be-field" data-account="${a.id}"
-                       value="${existing[a.id] !== undefined ? existing[a.id] : ''}" placeholder="0">
-            </div>
-        </div>`;
-    const beSections = [['asset', '资产'], ['liability', '负债']];
-    list.innerHTML = beSections.map(([kind, label]) => {
-        const rows = accountsSortedByKind(kind);
-        if (!rows.length) return '';
-        return `<div class="be-section-title ${kind}">${label}账户（${rows.length}）</div>` + rows.map(rowHTML).join('');
-    }).join('');
-}
-
+// 月份工具：'YYYY-MM' 前进 / 后退一个月（余额是月末快照，缺月不能拿上期顶替）
 function previousMonthOf(month) {
     if (!month) return null;
     const [y, m] = month.split('-').map(Number);
@@ -6016,55 +6991,460 @@ function nextMonthOf(month) {
     return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
 }
 
-function copyLastMonthBalances() {
-    const month = getModalMonth('balance');
-    const prev = previousMonthOf(month);
-    if (!prev) { showToast('没有更早的记录可沿用', 'error'); return; }
-    const member = (document.getElementById('balanceMemberSelect') || {}).value || state.balanceMembers[0] || '本人';
-    const src = carriedBalances(prev, member);
-    document.querySelectorAll('#balanceEntryList .be-field').forEach(inp => {
-        const v = src[inp.dataset.account];
-        if (v !== undefined && !inp.value) inp.value = v;
+// ==================== 记月度账单：余额 + 收益 + 净入金，按钱包分节 ====================
+// 一个支付宝里同时有活期、基金、定期、花呗；以前要在「记余额」和「记收益」两个弹窗里
+// 来回填，同一个账户填两遍。这里合成一屏：一行一个账户，横向把它的数一次填完。
+// 「钱包」只是录入和显示时的分组，不是记账实体 —— 余额、收益仍然一条一个账户，
+// 所以收益率、四笔钱、净资产桥的计算完全不变，也不可能重复计算。
+
+const WALLET_BRANDS = ['支付宝', '微信', '云闪付', '京东', '美团', '抖音', '数字人民币'];
+const WALLET_BANKS = ['招商', '工商', '建设', '农业', '交通', '民生', '兴业', '浦发', '中信', '平安',
+    '光大', '华夏', '邮储', '邮政', '农村商业', '农商', '农村信用', '宁波', '杭州', '江苏', '北京',
+    '上海', '广发', '浙商', '恒丰', '渤海', '汇丰', '花旗', '东亚', '微众', '网商'];
+
+// 没设过钱包的账户按名字猜一个初始值，省得几十个点要一个个填
+function guessWalletFromName(name) {
+    const n = String(name || '');
+    for (const b of WALLET_BRANDS) if (n.indexOf(b) >= 0) return b;
+    if (/花呗|借呗|余额宝/.test(n)) return '支付宝';
+    if (/白条|金条/.test(n)) return '京东';
+    for (const k of WALLET_BANKS) {
+        if (n.indexOf(k) >= 0 && /银行|储蓄卡|借记卡|信用卡/.test(n)) return k + '银行';
+    }
+    if (/储蓄卡|借记卡/.test(n)) return '银行';
+    if (/信用卡/.test(n)) return '信用卡';
+    return '';
+}
+
+// 用户明确设过的（含设成空串 = 不分组）优先；没设过才猜
+function accountWallet(a) {
+    if (!a) return '';
+    if (typeof a.wallet === 'string') return a.wallet.trim();
+    return guessWalletFromName(a.name);
+}
+
+// 按钱包把账户分节：先资产后负债，同一钱包的两类放一节里（负债在行上标出来）
+function walletGroups() {
+    const order = [], map = {};
+    const put = (a) => {
+        const name = accountWallet(a) || '未分组';
+        if (!map[name]) { map[name] = { name, rows: [] }; order.push(name); }
+        map[name].rows.push(a);
+    };
+    accountsSortedByKind('asset').forEach(put);
+    accountsSortedByKind('liability').forEach(put);
+    // 「未分组」永远排最后，别把真正有钱包的挤到后面
+    const at = order.indexOf('未分组');
+    if (at >= 0 && at !== order.length - 1) { order.splice(at, 1); order.push('未分组'); }
+    return order.map(n => map[n]);
+}
+
+let monthlyFocus = '';                       // 'bal' | 'ret'：从哪个入口进来，决定滚到哪
+const monthlyFlowOpen = new Set();           // 本次打开里展开过「净入金」的账户
+// 展开「＋入金」、切换"显示收益列"都会重画整张表；不先把没保存的输入值收下来，
+// 用户刚填的数就会被已保存的旧值冲掉（实测踩过）。
+let monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
+let monthlyDirty = false;                    // 只有真敲过字才需要收草稿，否则会把上一次打开的旧 DOM 又捡回来
+
+function captureMonthlyInputs() {
+    const list = document.getElementById('monthlyEntryList');
+    if (!list) return;
+    const grab = (sel, key, attr) => list.querySelectorAll(sel).forEach(el => { monthlyInput[key][el.dataset[attr]] = el.value; });
+    grab('[data-bal]', 'bal', 'bal');
+    grab('[data-ret]', 'ret', 'ret');
+    grab('[data-flow-in]', 'flow', 'flowIn');
+    grab('[data-wallet-total]', 'wt', 'walletTotal');
+}
+
+function monthlyVal(key, accountId, saved) {
+    const typed = monthlyInput[key][accountId];
+    if (typed === undefined) return saved === undefined ? '' : saved;
+    return String(typed).trim() === '' ? '' : typed;
+}
+
+function monthlyDefaultMonth() {
+    const ms = balanceMonths();
+    if (ms.length) return ms[ms.length - 1];
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthlyMember() {
+    const ms = document.getElementById('monthlyMemberSelect');
+    return (ms && ms.value) || state.balanceMembers[0] || '本人';
+}
+
+function openMonthlyModal(month, focus) {
+    const modal = document.getElementById('monthlyModal');
+    if (!modal) return;
+    monthlyFocus = focus || '';
+    monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
+    monthlyFlowOpen.clear();
+    monthlyDirty = false;
+    paintModalMonth('monthly', month || monthlyDefaultMonth());
+    const ms = document.getElementById('monthlyMemberSelect');
+    if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
+    modal.classList.remove('hidden');
+    raiseOverlay('monthlyModal');
+    renderMonthlyEntry();
+    if (monthlyFocus === 'ret') {
+        const first = document.querySelector('#monthlyEntryList [data-ret]');
+        if (first) setTimeout(() => { first.scrollIntoView({ behavior: 'smooth', block: 'center' }); first.focus(); }, 120);
+    }
+}
+
+function closeMonthlyModal() {
+    const modal = document.getElementById('monthlyModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function renderMonthlyEntry() {
+    if (monthlyDirty) captureMonthlyInputs();
+    const month = getModalMonth('monthly');
+    const list = document.getElementById('monthlyEntryList');
+    if (!list) return;
+    const ms = document.getElementById('monthlyMemberSelect');
+    if (ms) {
+        const want = ms.value || state.balanceMembers[0] || '本人';
+        ms.innerHTML = state.balanceMembers.map(m => `<option ${m === want ? 'selected' : ''}>${m}</option>`).join('');
+    }
+    const member = monthlyMember();
+    const sub = document.getElementById('monthlyModalSub');
+    if (sub) sub.textContent = month ? `${member} · ${month.replace('-', '年')}月：一行一个钱包，横着把它的余额、收益、净入金填完` : '请先选择月份';
+    if (!state.accounts.length) {
+        list.innerHTML = '<div class="breakdown-empty">还没有账户，先到「账户」里添加</div>';
+        return;
+    }
+    if (!month) { list.innerHTML = ''; return; }
+    ensureAccountOrder();
+    const balAt = balancesAtMonth(month, member);
+    const retAt = returnsAtMonth(month, member);
+    const flowAt = {};
+    state.returns.forEach(r => {
+        if (r.month !== month) return;
+        if (member !== 'all' && r.member !== member) return;
+        if (r.flow === undefined || r.flow === null || r.flow === '') return;
+        flowAt[r.accountId] = r.flow;
     });
-    showToast(`已沿用 ${prev.replace('-', '年')}月的余额`, 'success');
+
+    // 列 = 资产账户（按分类排）+ 负债 + 收益 + 净入金；行 = 钱包（没填钱包的进「未分组」）
+    const assets = accountsSortedByKind('asset');
+    const liabs = accountsSortedByKind('liability');
+    const earnsSet = new Set(returnEntryAccounts(month, member).map(a => a.id));
+    const val = (key, id, saved) => {
+        const typed = monthlyInput[key][id];
+        if (typed === undefined) return saved === undefined || saved === null ? '' : saved;
+        return String(typed).trim() === '' ? '' : typed;
+    };
+    const balCell = a => val('bal', a.id, balAt[a.id]);
+    const retCell = a => earnsSet.has(a.id) ? val('ret', a.id, retAt[a.id]) : undefined;
+    const flowCell = a => earnsSet.has(a.id) ? val('flow', a.id, flowAt[a.id]) : undefined;
+
+    const rows = walletGroups().map(g => {
+        const mine = new Set(g.rows.map(a => a.id));
+        const name = g.name;
+        const cell = a => mine.has(a.id)
+            ? `<div class="mw-c"><input type="number" step="0.01" min="0" class="text-input be-field" data-bal="${a.id}"
+                 value="${_esc(balCell(a))}" placeholder="—"></div>`
+            : '<div class="mw-c mw-off"></div>';
+        const stack = (arr, mk) => {
+            const items = arr.filter(Boolean);
+            return `<div class="mw-c mw-stack${items.length > 1 ? ' multi' : ''}">${items.length ? items.map(mk).join('') : ''}</div>`;
+        };
+        const liabStack = stack(liabs.filter(a => mine.has(a.id)),
+            a => `<input type="number" step="0.01" min="0" class="text-input be-field mw-liab" data-bal="${a.id}"
+                 value="${_esc(balCell(a))}" placeholder="0" title="${_esc(a.name)}">`);
+        const earnRows = assets.filter(a => mine.has(a.id) && earnsSet.has(a.id));
+        const retStack = stack(earnRows,
+            a => `<input type="number" step="0.01" class="text-input be-field" data-ret="${a.id}"
+                 value="${_esc(retCell(a))}" placeholder="0" title="${_esc(a.name)} 收益">
+                 <span class="be-rate" data-rate-for="${a.id}"></span>`);
+        const flowStack = stack(earnRows,
+            a => `<input type="number" step="0.01" class="text-input be-flow" data-flow-in="${a.id}"
+                 value="${_esc(flowCell(a))}" placeholder="0" title="${_esc(a.name)} 净入金">`);
+        const net = assets.filter(a => mine.has(a.id)).reduce((t, a) => t + (parseFloat(monthlyInput.bal[a.id] !== undefined ? monthlyInput.bal[a.id] : (balAt[a.id] === undefined ? 0 : balAt[a.id])) || 0), 0)
+            - liabs.filter(a => mine.has(a.id)).reduce((t, a) => t + (parseFloat(monthlyInput.bal[a.id] !== undefined ? monthlyInput.bal[a.id] : (balAt[a.id] === undefined ? 0 : balAt[a.id])) || 0), 0);
+        return `<div class="mw-tr" data-mw-wallet="${_esc(name)}">
+            <div class="mw-rowname"><span class="mw-name">${_esc(name)}</span></div>
+            ${assets.map(cell).join('')}
+            ${liabStack}${retStack}${flowStack}
+            <div class="mw-c mw-sumcol"><span class="mw-rownet">小计 <b data-wsum>${formatCurrency(Math.round(net * 100) / 100)}</b></span>
+                <input type="number" step="0.01" class="text-input mw-total" placeholder="对账单总额"
+                    data-wallet-total="${_esc(name)}" value="${_esc(monthlyInput.wt[name] || '')}">
+                <span class="mw-diff" data-wdiff></span></div>
+            <div class="mw-c mw-pctcol"><b data-pct>—</b></div>
+        </div>`;
+    }).join('');
+
+    // 底部「合计」行：逐列纵向汇总（每个账户列、负债、收益、净入金、净资产），最右是占比列。
+    // 这里只有静态骨架，数字全部由 updateMonthlyDerived() 实时填，
+    // 和上面那些输入框用同一批"还没保存的草稿值"，保证两边永远一致。
+    const totalRow = `<div class="mw-tr mw-total-row">
+        <div class="mw-rowname"><span class="mw-name">合计</span></div>
+        ${assets.map(a => `<div class="mw-c mw-tcell" data-tcol="${_esc(a.id)}"><b data-tval>—</b></div>`).join('')}
+        <div class="mw-c mw-tcell" data-tcol="__liab"><b data-tval>—</b></div>
+        <div class="mw-c mw-tcell" data-tcol="__ret"><b data-tval>—</b></div>
+        <div class="mw-c mw-tcell" data-tcol="__flow"><b data-tval>—</b></div>
+        <div class="mw-c mw-tcell mw-sumcol" data-tcol="__net"><span class="mw-rownet">净资产 <b data-tval>—</b></span></div>
+        <div class="mw-c mw-pctcol" data-tcol="__pct"><b data-tval>—</b></div>
+    </div>`;
+
+    list.innerHTML = `<div class="mw-scroll"><div class="mw-grid" style="--mw-cols:${assets.length}">
+        <div class="mw-h mw-corner">钱包</div>
+        ${assets.map(a => `<div class="mw-h mw-col" title="${_esc(a.group || '')}">${_esc(a.name)}</div>`).join('')}
+        <div class="mw-h mw-col mw-col-liab">负债</div><div class="mw-h mw-col">收益</div>
+        <div class="mw-h mw-col">净入金</div><div class="mw-h mw-col mw-col-sum">小计 / 对账</div>
+        <div class="mw-h mw-col mw-col-pct">占比</div>
+        ${rows}
+        ${totalRow}
+    </div></div>`
+        + (assets.some(a => !accountEarnsReturn(a))
+            ? `<div class="re-hidden-note"><span>「收益 / 净入金」两列只给会生收益的账户；改哪些账户生收益，去「口径」面板</span></div>` : '');
+    bindMonthlyEntry();
 }
 
-function clearBalanceInputs() {
-    document.querySelectorAll('#balanceEntryList .be-field').forEach(inp => { inp.value = ''; });
+function bindMonthlyEntry() {
+    const list = document.getElementById('monthlyEntryList');
+    if (!list) return;
+    list.querySelectorAll('[data-bal],[data-ret],[data-flow-in]').forEach(inp =>
+        inp.addEventListener('input', () => { monthlyDirty = true; updateMonthlyDerived(); }));
+    list.querySelectorAll('[data-wallet-total]').forEach(inp =>
+        inp.addEventListener('input', () => { monthlyDirty = true; updateMonthlyDerived(); }));
+    updateMonthlyDerived();
 }
 
-function saveBalances() {
-    const month = getModalMonth('balance');
+// 小计、差额、以及每行的实时收益率角标 —— 全部拿"还没保存的输入值"算
+function monthlyDraftStats(month, member) {
+    const list = document.getElementById('monthlyEntryList');
+    const draft = {};
+    if (!list) return draft;
+    list.querySelectorAll('[data-ret]').forEach(inp => {
+        const raw = String(inp.value).trim();
+        if (raw === '') return;
+        const v = parseFloat(raw);
+        if (!isFinite(v)) return;
+        const id = inp.dataset.ret;
+        draft[id] = draft[id] || {};
+        draft[id].profit = v;
+    });
+    list.querySelectorAll('[data-flow-in]').forEach(inp => {
+        const raw = String(inp.value).trim();
+        const id = inp.dataset.flowIn;
+        draft[id] = draft[id] || {};
+        draft[id].flow = raw === '' ? '' : (parseFloat(raw) || 0);
+    });
+    list.querySelectorAll('[data-bal]').forEach(inp => {
+        const raw = String(inp.value).trim();
+        if (raw === '') return;
+        const v = parseFloat(raw);
+        if (!isFinite(v)) return;
+        const id = inp.dataset.bal;
+        draft[id] = draft[id] || {};
+        draft[id].balance = v;
+    });
+    return draft;
+}
+
+function updateMonthlyDerived() {
+    const month = getModalMonth('monthly');
+    if (!month) return;
+    const member = monthlyMember();
+    const list = document.getElementById('monthlyEntryList');
+    const draft = monthlyDraftStats(month, member);
+    // 1) 每行的收益率角标
+    Object.keys(draft).forEach(id => {
+        const badge = list.querySelector(`[data-rate-for="${id}"]`);
+        if (!badge) return;
+        const st = portfolioMonthStats(month, [id], draft[id] ? { [id]: draft[id] } : null, member);
+        // 算不出率时必须说清是"本金未知"，不能干脆不显示 —— 那是最容易让人以为没收益的错觉
+        const noRate = st.rate === null
+            ? ((st.unknown && st.unknown.length) || st.reason === 'no-capital' ? '本金未知' : '')
+            : pctText(st.rate);
+        badge.textContent = noRate;
+        badge.className = 'be-rate' + (st.rate === null ? ' unknown' : (st.rate > 0 ? ' up' : (st.rate < 0 ? ' down' : '')));
+    });
+    // 2) 每个钱包的小计与对账差额（一行一个钱包：资产 − 负债）
+    //    顺手把纵向合计收下来，给底部「合计」行和「占比」列用
+    const rowNets = [], colSum = {};
+    let sumAsset = 0, sumLiab = 0, sumRet = 0, sumFlow = 0;
+    const numOf = inp => {
+        const raw = String(inp.value).trim();
+        if (raw === '') return null;
+        const v = parseFloat(raw);
+        return isFinite(v) ? v : null;
+    };
+    list.querySelectorAll('.mw-tr[data-mw-wallet]').forEach(tr => {
+        let net = 0, filled = 0;
+        tr.querySelectorAll('[data-bal]').forEach(inp => {
+            const v = numOf(inp);
+            if (v === null) return;
+            const acct = accountById(inp.dataset.bal);
+            const isLiab = !!(acct && acct.kind === 'liability');
+            net += isLiab ? -v : v;
+            if (isLiab) sumLiab += v; else sumAsset += v;
+            colSum[inp.dataset.bal] = (colSum[inp.dataset.bal] || 0) + v;
+            filled++;
+        });
+        const sumEl = tr.querySelector('[data-wsum]');
+        if (sumEl) sumEl.textContent = formatCurrency(Math.round(net * 100) / 100);
+        rowNets.push({ tr, net, filled });
+        const totalEl = tr.querySelector('[data-wallet-total]');
+        const diffEl = tr.querySelector('[data-wdiff]');
+        if (!totalEl || !diffEl) return;
+        const tRaw = String(totalEl.value).trim();
+        if (tRaw === '' || !filled) { diffEl.textContent = ''; diffEl.className = 'mw-diff'; return; }
+        const t = parseFloat(tRaw);
+        if (!isFinite(t)) { diffEl.textContent = ''; return; }
+        const diff = Math.round((net - t) * 100) / 100;
+        if (diff === 0) { diffEl.textContent = '对上了'; diffEl.className = 'mw-diff ok'; }
+        else {
+            diffEl.textContent = `差 ${formatCurrency(diff)}${Math.abs(diff) >= 1 ? '，是不是漏了一项' : ''}`;
+            diffEl.className = 'mw-diff warn';
+        }
+    });
+    list.querySelectorAll('[data-ret]').forEach(inp => { const v = numOf(inp); if (v !== null) sumRet += v; });
+    list.querySelectorAll('[data-flow-in]').forEach(inp => { const v = numOf(inp); if (v !== null) sumFlow += v; });
+
+    // 3) 「占比」= 该钱包合计 ÷ 所有钱包合计（净资产口径）。
+    //    合计为 0（或这一行一格都没填）时不给百分比：分母是 0 的百分比看着就像错账。
+    const grand = rowNets.reduce((s, r) => s + r.net, 0);
+    rowNets.forEach(r => {
+        const el = r.tr.querySelector('[data-pct]');
+        if (!el) return;
+        el.textContent = (!r.filled || !grand) ? '—' : (r.net / grand * 100).toFixed(1) + '%';
+    });
+
+    // 4) 底部「合计」行：逐列纵向汇总
+    const trow = list.querySelector('.mw-total-row');
+    if (trow) {
+        const show = v => v ? formatCurrency(Math.round(v * 100) / 100) : '—';
+        trow.querySelectorAll('[data-tcol]').forEach(cell => {
+            const b = cell.querySelector('[data-tval]');
+            if (!b) return;
+            const key = cell.dataset.tcol;
+            if (key === '__pct') { b.textContent = grand ? '100.0%' : '—'; return; }
+            if (key === '__net') { b.textContent = show(sumAsset - sumLiab); return; }
+            if (key === '__liab') { b.textContent = show(sumLiab); return; }
+            if (key === '__ret') { b.textContent = show(sumRet); return; }
+            if (key === '__flow') { b.textContent = show(sumFlow); return; }
+            b.textContent = show(colSum[key] || 0);
+        });
+    }
+}
+
+function clearMonthlyInputs() {
+    captureMonthlyInputs();
+    monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
+    document.querySelectorAll('#monthlyEntryList input').forEach(i => {
+        if (i.dataset.walletTotal !== undefined || i.dataset.bal !== undefined
+            || i.dataset.ret !== undefined || i.dataset.flowIn !== undefined) i.value = '';
+    });
+    updateMonthlyDerived();
+}
+
+function copyLastMonthBalances() {
+    const month = getModalMonth('monthly');
+    if (!month) { showToast('请先选月份', 'error'); return; }
+    const prev = previousMonthOf(month);
+    if (!prev) { showToast('没有上个月的记录', 'info'); return; }
+    const member = monthlyMember();
+    const prevMap = balancesAtMonth(prev, member);
+    let filled = 0;
+    document.querySelectorAll('#monthlyEntryList [data-bal]').forEach(inp => {
+        if (String(inp.value).trim() !== '') return;
+        const v = prevMap[inp.dataset.bal];
+        if (v === undefined) return;
+        inp.value = v; filled++;
+    });
+    if (!filled) { showToast('上个月也没有记余额', 'info'); return; }
+    monthlyDirty = true;
+    updateMonthlyDerived();
+    showToast(`已带入 ${filled} 个账户的上期余额，改成这个月的数就行`, 'success');
+}
+
+function saveMonthly() {
+    const month = getModalMonth('monthly');
     if (!month) { showToast('请选择月份', 'error'); return; }
-    const member = (document.getElementById('balanceMemberSelect') || {}).value || state.balanceMembers[0] || '本人';
-    let saved = 0;
-    document.querySelectorAll('#balanceEntryList .be-field').forEach(inp => {
-        const raw = inp.value.trim();
+    const member = monthlyMember();
+    const list = document.getElementById('monthlyEntryList');
+    if (!list) return;
+    let savedBal = 0, savedRet = 0;
+    // 1) 余额：一条一个「成员+账户+月份」，重记就是覆盖
+    list.querySelectorAll('[data-bal]').forEach(inp => {
+        const raw = String(inp.value).trim();
         if (raw === '') return;
         const amount = parseFloat(raw);
         if (!isFinite(amount) || amount < 0) return;
-        const accountId = inp.dataset.account;
+        const accountId = inp.dataset.bal;
         const id = `${member}__${accountId}__${month}`;
         const existing = state.balances.find(b => b.id === id);
         if (existing) {
+            if (existing.amount === amount) return;
             existing.amount = amount;
             existing.updatedAt = Date.now();
         } else {
             state.balances.push({ id, member, accountId, month, amount, createdAt: Date.now(), updatedAt: Date.now() });
         }
-        saved += 1;
+        savedBal++;
     });
-    if (!saved) { showToast('没有需要保存的金额', 'error'); return; }
+    // 2) 收益 + 净入金
+    list.querySelectorAll('[data-ret]').forEach(inp => {
+        const raw = String(inp.value).trim();
+        if (raw === '') return;
+        const amount = parseFloat(raw);
+        if (!isFinite(amount)) return;
+        const accountId = inp.dataset.ret;
+        const id = _rebalanceId(member, accountId, month);
+        const flowEl = list.querySelector(`[data-flow-in="${accountId}"]`);
+        const flowRaw = flowEl ? String(flowEl.value).trim() : '';
+        const flow = flowRaw === '' ? null : (parseFloat(flowRaw) || 0);
+        const existing = state.returns.find(r => r.id === id);
+        if (existing) {
+            const sameAmount = existing.amount === amount;
+            const sameFlow = (existing.flow === null || existing.flow === undefined)
+                ? flow === null : Number(existing.flow) === flow;
+            if (sameAmount && sameFlow) return;
+            existing.amount = amount;
+            if (flow !== null) existing.flow = flow; else delete existing.flow;
+            existing.updatedAt = Date.now();
+        } else {
+            const rec = { id, member, accountId, month, amount, createdAt: Date.now(), updatedAt: Date.now() };
+            if (flow !== null) rec.flow = flow;
+            state.returns.push(rec);
+        }
+        savedRet++;
+    });
+    if (!savedBal && !savedRet) { showToast('没有需要保存的数', 'error'); return; }
     saveState();
-    closeBalanceModal();
-    state.balancePeriod = 'month';
+    closeMonthlyModal();
     const [y, m] = month.split('-').map(Number);
-    state.balanceYear = y;
-    state.balanceMonth = m;
-    document.querySelectorAll('[data-bal-period]').forEach(b => b.classList.toggle('active', b.dataset.balPeriod === 'month'));
+    state.balancePeriod = 'month'; state.balanceYear = y; state.balanceMonth = m;
+    state.returnPeriod = 'month'; state.returnYear = y; state.returnMonth = m; state.returnGran = null;
+    document.querySelectorAll('[data-bal-period]').forEach(b =>
+        b.classList.toggle('active', b.dataset.balPeriod === 'month'));
+    document.querySelectorAll('[data-ret-period]').forEach(b =>
+        b.classList.toggle('active', b.dataset.retPeriod === 'month'));
     renderBalance();
-    showToast(`已保存 ${saved} 个账户的余额`, 'success');
+    renderReturns();
+    updateSidebarSummary();
+    const parts = [];
+    if (savedBal) parts.push(`${savedBal} 个账户的余额`);
+    if (savedRet) parts.push(`${savedRet} 笔收益`);
+    showToast('已保存' + parts.join('和'), 'success');
 }
+
+// ---- 老入口全部指向同一个弹窗（结账清单、账户历史里的「修改」都还在调它们）----
+function openBalanceModal(month) { return openMonthlyModal(month, 'bal'); }
+function closeBalanceModal() { return closeMonthlyModal(); }
+function renderBalanceEntry() { return renderMonthlyEntry(); }
+function saveBalances() { return saveMonthly(); }
+function clearBalanceInputs() { return clearMonthlyInputs(); }
+function openReturnModal(month) { return openMonthlyModal(month, 'ret'); }
+function closeReturnModal() { return closeMonthlyModal(); }
+function renderReturnEntry() { return renderMonthlyEntry(); }
+function saveReturns() { return saveMonthly(); }
+function clearReturnInputs() { return clearMonthlyInputs(); }
+function bindReturnRatePreview() { return updateMonthlyDerived(); }
 
 // ---------------- 账户管理弹窗 ----------------
 function openAccountsModal() {
@@ -6092,7 +7472,7 @@ function renderAccountManageList() {
         const rows = accountsSortedByKind(kind);
         return `
             <div class="account-section-title">${label}（${rows.length}）<span class="acct-order-hint">↑↓ 可调顺序</span></div>
-            ${rows.map((a, i) => `
+            ${rows.map((a, i) => { const recN = accountRecordCounts(a.id); const n = recN.bal + recN.ret; return `
                 <div class="account-row">
                     <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
                     <div class="ar-name" onclick="renameAccount('${a.id}')">${_esc(a.name)}<span class="be-kind ${a.kind}">${_esc(a.group || '')}</span></div>
@@ -6107,8 +7487,9 @@ function renderAccountManageList() {
                         <button class="acct-move" data-move-account="${a.id}" data-dir="-1" ${i === 0 ? 'disabled' : ''} title="上移"><i class="fa-solid fa-arrow-up"></i></button>
                         <button class="acct-move" data-move-account="${a.id}" data-dir="1" ${i === rows.length - 1 ? 'disabled' : ''} title="下移"><i class="fa-solid fa-arrow-down"></i></button>
                     </span>
-                    <button class="bh-delete" onclick="deleteAccountFromList('${a.id}')" title="删除"><i class="fa-solid fa-trash"></i></button>
-                </div>`).join('') || '<div class="breakdown-empty">暂无账户</div>'}`;
+                    <button class="bh-edit" onclick="openAccountEdit('${a.id}')" title="编辑账户"><i class="fa-solid fa-pen"></i></button>
+                    <button class="bh-delete${n ? ' bh-blocked' : ''}" onclick="deleteAccountFromList('${a.id}')" title="${n ? '还有 ' + n + ' 条记录，得先清掉才能删' : '删除'}"><i class="fa-solid ${n ? 'fa-lock' : 'fa-trash'}"></i></button>
+                </div>`; }).join('') || '<div class="breakdown-empty">暂无账户</div>'}`;
     }).join('');
 
     if (!box.$acctWired) {
@@ -6171,27 +7552,25 @@ function renameAccount(id) {
     a.name = name.trim();
     a.updatedAt = Date.now();
     saveState();
-    renderAccountManageList();
-    refreshAccountsModalIfOpen();
-    renderBalance();
+    // 改名会牵动所有页面（排行、日历、预算…），统一走"开着的面板全部重画"
+    refreshOpenSurfaces();
     showToast('已重命名', 'success');
 }
 
 function deleteAccountFromList(id) {
     const a = accountById(id);
     if (!a) return;
-    const count = state.balances.filter(b => b.accountId === id).length;
-    if (!confirm(`确定删除「${a.name}」吗？${count ? `它的 ${count} 期余额记录也会一并删除。` : ''}`)) return;
+    if (guardAccountWithRecords(a)) return;
+    if (!confirm(`确定删除「${a.name}」吗？它名下没有余额和收益记录，删掉不影响别的地方。`)) return;
     removeAccount(id);
-    showToast('账户已删除', 'success');
 }
 
 function refreshAccountLists() {
     if (state.currentView === 'balance') renderBalance();
     if (state.currentView === 'returns') renderReturns();
     // 记收益弹窗开着时，新增/删除账户要立刻反映到列表里
-    const retModal = document.getElementById('returnModal');
-    if (retModal && !retModal.classList.contains('hidden')) renderReturnEntry();
+    const monthly = document.getElementById('monthlyModal');
+    if (monthly && !monthly.classList.contains('hidden')) renderMonthlyEntry();
 }
 
 function initBalanceListeners() {
@@ -6221,9 +7600,9 @@ function initBalanceListeners() {
         state.balanceMonth = parseInt(e.target.value);
         renderBalance();
     });
-    bindModalMonth('balance', renderBalanceEntry);
-    const balMemberSel = document.getElementById('balanceMemberSelect');
-    if (balMemberSel) balMemberSel.addEventListener('change', renderBalanceEntry);
+    bindModalMonth('monthly', renderMonthlyEntry);
+    const monthlyMemberSel = document.getElementById('monthlyMemberSelect');
+    if (monthlyMemberSel) monthlyMemberSel.addEventListener('change', renderMonthlyEntry);
     document.getElementById('newAccountKind').addEventListener('change', () => {
         const kind = document.getElementById('newAccountKind').value;
         document.getElementById('newAccountGroup').innerHTML =
@@ -6269,9 +7648,8 @@ function changeAccountGroup(id, group) {
     a.group = group;
     a.updatedAt = Date.now();
     saveState();
-    renderAccountManageList();
-    refreshAccountLists();
-    refreshAccountsModalIfOpen();
+    // 换分类会改变"哪些账户算投资"，收益页必须跟着重算
+    refreshOpenSurfaces();
     showToast(`「${a.name}」已归到${group}`, 'success');
 }
 
@@ -6314,9 +7692,7 @@ function changeAccountType(id, kind) {
     if (!groupsForKind(kind).includes(a.group)) a.group = groupsForKind(kind)[0];
     a.updatedAt = Date.now();
     saveState();
-    renderAccountManageList();
-    refreshAccountLists();
-    refreshAccountsModalIfOpen();
+    refreshOpenSurfaces();
     showToast(`「${a.name}」已改为${kind === 'asset' ? '资产' : '负债'}账户`, 'success');
 }
 
@@ -6382,6 +7758,17 @@ function insCoveredCount() {
 function insTotalAmount() {
     return INSURANCE_TYPES.reduce((s, t) => s + insTypeAmount(t), 0);
 }
+// 某个成员名下的年保费（只算已配置的；没勾上的那份不算钱）
+function memberPremium(member) {
+    return state.insurancePolicies
+        .filter(p => p.member === member && p.covered)
+        .reduce((s, p) => s + (Number(p.premium) || 0), 0);
+}
+function memberPremiumText(member) {
+    const n = memberPremium(member);
+    return n ? formatCurrency(n) : '—';
+}
+
 function insTotalPremium() {
     return state.insurancePolicies.filter(p => p.covered).reduce((s, p) => s + (Number(p.premium) || 0), 0);
 }
@@ -6541,10 +7928,12 @@ function renderInsuranceSection() {
     const listBox = document.getElementById('insList');
     if (!membersBox || !listBox) return;
     membersBox.innerHTML = state.insuranceMembers.map(m =>
-        `<span class="ins-member-wrap"><button class="ins-member ${m === fundEditMember ? 'active' : ''}" data-insmember="${_esc(m)}">${_esc(m)}</button>` +
+        `<span class="ins-member-wrap"><button class="ins-member ${m === fundEditMember ? 'active' : ''}" data-insmember="${_esc(m)}" title="${_esc(m)} 的年保费">${_esc(m)}<span class="im-prem">${memberPremiumText(m)}</span></button>` +
         `<i class="fa-solid fa-pen" data-insact="rename" data-insmember="${_esc(m)}" title="改名"></i>` +
         `<i class="fa-solid fa-xmark" data-insact="del" data-insmember="${_esc(m)}" title="删除"></i></span>`
-    ).join('') + `<button class="ins-member ins-add" data-insadd="1"><i class="fa-solid fa-plus"></i> 成员</button>`;
+    ).join('') + `<button class="ins-member ins-add" data-insadd="1"><i class="fa-solid fa-plus"></i> 成员</button>`
+        // 全家一年要交多少保费，以前得自己把每个人头上的数加起来
+        + `<span class="ins-prem-total">全部保费 <b>${formatCurrency(insTotalPremium())}</b>/年</span>`;
 
     if (!membersBox.$wired) {
         membersBox.$wired = true;
@@ -6572,12 +7961,137 @@ function renderInsuranceSection() {
             <span class="ins-type">${type}</span>
             <span class="ins-field"><em>保额</em><input type="number" class="ins-amt" data-type="${type}" value="${p && p.amount ? p.amount : ''}" placeholder="0" inputmode="decimal"></span>
             <span class="ins-field"><em>年保费</em><input type="number" class="ins-prem" data-type="${type}" value="${p && p.premium ? p.premium : ''}" placeholder="0" inputmode="decimal"></span>
+            <span class="ins-field ins-renew"><em>下次缴费/到期</em><input type="date" class="ins-renew-at" data-type="${type}" value="${p && p.renewAt ? p.renewAt : ''}"></span>
+            <button class="link-btn ins-claim-btn" type="button" data-claim="${type}">${claimSum(p)}${p && p.claims && p.claims.length ? `（${p.claims.length} 次）` : ''}</button>
         </div>`;
     }).join('');
 
     listBox.querySelectorAll('.ins-check input').forEach(cb => cb.addEventListener('change', () => upsertIns(cb.dataset.type, { covered: cb.checked })));
     listBox.querySelectorAll('.ins-amt').forEach(inp => inp.addEventListener('change', () => upsertIns(inp.dataset.type, { amount: parseFloat(inp.value) || 0 })));
     listBox.querySelectorAll('.ins-prem').forEach(inp => inp.addEventListener('change', () => upsertIns(inp.dataset.type, { premium: parseFloat(inp.value) || 0 })));
+    listBox.querySelectorAll('.ins-renew-at').forEach(inp => inp.addEventListener('change', () => {
+        const v = (inp.value || '').trim();
+        upsertIns(inp.dataset.type, { renewAt: v || null });
+    }));
+    listBox.querySelectorAll('[data-claim]').forEach(btn => btn.addEventListener('click', () => openInsClaims(btn.dataset.claim)));
+    const banner = document.getElementById('insRenewBanner');
+    if (banner) { banner.innerHTML = insRenewSummary(); banner.classList.toggle('hidden', !insUpcomingRenewals(30).length); }
+    updateInsBadges();
+}
+
+// 理赔金额小计
+function claimSum(p) {
+    const sum = ((p && p.claims) || []).reduce((s, c) => s + (Number(c.amount) || 0), 0);
+    return sum ? `已赔 ${formatCurrency(sum)}` : '理赔记录';
+}
+
+// 到期提醒扫全家，不是只扫当前看的那个人 —— 续保错过就白交了
+function insUpcomingRenewals(days) {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const limit = days === undefined ? 30 : days;
+    return state.insurancePolicies.filter(p => p.covered && p.renewAt)
+        .map(p => {
+            const d = new Date(String(p.renewAt) + 'T00:00:00');
+            if (isNaN(d.getTime())) return null;
+            const diff = Math.round((d - today) / 86400000);
+            return diff <= limit ? { p, diff } : null;
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.diff - b.diff);
+}
+
+function insRenewSummary() {
+    const soon = insUpcomingRenewals(30);
+    if (!soon.length) return '';
+    const overdue = soon.filter(x => x.diff < 0);
+    const txt = soon.slice(0, 4).map(x =>
+        `${_esc(x.p.member)} 的 ${_esc(x.p.type)} ${x.diff < 0 ? `已过期 ${-x.diff} 天` : (x.diff === 0 ? '今天到期' : `还有 ${x.diff} 天`)}`
+    ).join('；');
+    const head = overdue.length === soon.length ? `${soon.length} 张保单都已过期`
+        : (overdue.length ? `${soon.length} 张保单要处理（其中 ${overdue.length} 张已过期）`
+            : `${soon.length} 张保单临近缴费/到期`);
+    return `<i class="fa-solid fa-bell"></i> <b>${head}</b>`
+        + `<span class="rb-hint">${txt}${soon.length > 4 ? ' …' : ''}</span>`;
+}
+
+function updateInsBadges() {
+    const dot = document.getElementById('navDotFunds');
+    if (!dot) return;
+    const n = insUpcomingRenewals(30).length;
+    dot.classList.toggle('hidden', n === 0);
+    dot.title = n ? `${n} 张保单临近缴费/到期` : '';
+}
+
+// ---- 理赔记录 ----
+let claimPolicyType = null;
+function insPolicyFor(type) { return insPolicy(type, fundEditMember); }
+
+function openInsClaims(type) {
+    const p = insPolicyFor(type);
+    if (!p) { showToast('先勾上这份保单再记理赔', 'info'); return; }
+    claimPolicyType = type;
+    const modal = document.getElementById('insClaimModal');
+    document.getElementById('insClaimTitle').textContent = `${p.member} · ${type} 理赔`;
+    renderInsClaims();
+    modal.classList.remove('hidden');
+    raiseOverlay(modal);
+}
+
+function closeInsClaims() {
+    const modal = document.getElementById('insClaimModal');
+    if (modal) modal.classList.add('hidden');
+    claimPolicyType = null;
+}
+
+function renderInsClaims() {
+    const p = insPolicyFor(claimPolicyType);
+    if (!p) { closeInsClaims(); return; }
+    const list = (p.claims || []).slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    document.getElementById('insClaimSub').textContent =
+        `保额 ${formatCurrency(Number(p.amount) || 0)} · 已赔 ${formatCurrency((p.claims || []).reduce((s, c) => s + (Number(c.amount) || 0), 0))}`;
+    document.getElementById('insClaimList').innerHTML = list.length ? list.map(c => `
+        <div class="claim-row">
+            <span class="cr-date">${_esc(c.date || '')}</span>
+            <span class="cr-amt">${formatCurrency(Number(c.amount) || 0)}</span>
+            <span class="cr-note">${_esc(c.note || '')}</span>
+            <button class="bh-delete" type="button" data-claim-del="${_esc(c.id)}" title="删除"><i class="fa-solid fa-xmark"></i></button>
+        </div>`).join('') : '<div class="breakdown-empty">还没有理赔记录</div>';
+}
+
+function addInsClaim() {
+    const p = insPolicyFor(claimPolicyType);
+    if (!p) return;
+    const date = (document.getElementById('claimDate').value || '').trim();
+    const amount = parseFloat(document.getElementById('claimAmount').value);
+    if (!date) { showToast('选一下理赔日期', 'error'); return; }
+    if (!(amount > 0)) { showToast('理赔金额要大于 0', 'error'); return; }
+    const note = (document.getElementById('claimNote').value || '').trim();
+    if (!Array.isArray(p.claims)) p.claims = [];
+    const row = { id: `cl_${Date.now()}_${Math.floor(Math.random() * 1000)}`, date, amount, note, createdAt: Date.now() };
+    p.claims.push(row);
+    p.updatedAt = Date.now();
+    const label = `${p.type} 理赔 ${formatCurrency(amount)}`;
+    const canUndo = pushUndo(label, { claimAdd: [{ policyId: p.id, claimId: row.id }] });
+    saveState();
+    ['claimDate', 'claimAmount', 'claimNote'].forEach(id => { document.getElementById(id).value = ''; });
+    renderInsClaims();
+    renderInsuranceSection();
+    if (canUndo) showUndoToast(label);
+}
+
+function removeInsClaim(claimId) {
+    const p = insPolicyFor(claimPolicyType);
+    if (!p || !Array.isArray(p.claims)) return;
+    const at = p.claims.findIndex(c => c.id === claimId);
+    if (at < 0) return;
+    const row = p.claims[at];
+    p.claims.splice(at, 1);
+    p.updatedAt = Date.now();
+    const canUndo = pushUndo('删除的理赔记录', { claimDel: [{ policyId: p.id, claim: Object.assign({}, row) }] });
+    saveState();
+    renderInsClaims();
+    renderInsuranceSection();
+    if (canUndo) showUndoToast('删除的理赔记录');
 }
 
 function setInsMember(m) { fundEditMember = m; renderInsuranceSection(); }
@@ -6603,23 +8117,25 @@ function renameInsuranceMember(old) {
     renderFourFunds();
 }
 
+// 保险成员直接删：保单是"这个人的这份保障"，把人并到别人名下等于凭空造出一份不属于他的保障，
+// 所以不并入、直接连人带保单一起删，删完给 8 秒撤销。
 function deleteInsuranceMember(name) {
     if (state.insuranceMembers.length <= 1) { showToast('至少保留一个成员', 'error'); return; }
-    const fallback = state.insuranceMembers.find(m => m !== name);
-    const mine = state.insurancePolicies.filter(p => p.member === name).length;
-    if (!confirm(`删除保险成员「${name}」？${mine ? `TA 的 ${mine} 份保单会并入「${fallback}」。` : ''}`)) return;
-    state.insurancePolicies.forEach(p => {
-        if (p.member !== name) return;
-        p.member = fallback;
-        p.id = `${p.type}__${fallback}`;
-        p.updatedAt = Date.now();
-    });
+    const mine = state.insurancePolicies.filter(p => p.member === name);
+    if (!confirm(`删除保险成员「${name}」？${mine.length ? `TA 名下的 ${mine.length} 份保单会一起删掉（8 秒内可撤销）。` : 'TA 名下没有保单。'}`)) return;
+    mine.forEach(pc => addTombstone('insurance', pc.id));
+    state.insurancePolicies = state.insurancePolicies.filter(pc => pc.member !== name);
     state.insuranceMembers = state.insuranceMembers.filter(m => m !== name);
     addTombstone('insuranceMembers', name);
     delete state.insuranceMemberAddedAt[name];
-    if (fundEditMember === name) fundEditMember = fallback;
+    const next = state.insuranceMembers[0] || '本人';
+    if (fundEditMember === name) fundEditMember = next;
+    const canUndo = pushUndo(`保险成员「${name}」`, { insuranceMembers: [name], insurancePolicies: mine });
     saveState();
+    refreshOpenSurfaces();
     renderFourFunds();
+    if (canUndo) showUndoToast(`保险成员「${name}」`);
+    else showToast('成员已删除', 'success');
 }
 
 function addInsMember() {
@@ -6692,20 +8208,25 @@ function memberBarHTML() {
     return html;
 }
 
-function renderBalanceMemberBar() {
-    ['balMemberBar', 'retMemberBar'].forEach(id => {
-        const bar = document.getElementById(id);
-        if (!bar) return;
-        bar.innerHTML = memberBarHTML();
-        if (bar.$wired) return;                 // 监听挂在容器上，重渲染不需要重复加
-        bar.$wired = true;
-        bar.addEventListener('click', e => {
-            const chip = e.target.closest ? e.target.closest('.bm-chip') : null;
-            if (!chip) return;
-            if (chip.dataset.add) { addBalanceMember(); return; }
-            if (chip.dataset.owner !== undefined) setBalanceOwner(chip.dataset.owner);
-        });
+// 画 + 挂监听。监听挂在容器上（innerHTML 换掉子节点不会丢），$wired 保证只挂一次。
+// 以前监听是跟着 renderBalance() 顺带挂的，所以一开屏就停在投资收益页时
+// 点「本人 / 家人」完全没反应 —— 得先去别的页面绕一圈把资产负债画出来才行。
+function paintMemberBar(id) {
+    const bar = document.getElementById(id);
+    if (!bar) return;
+    bar.innerHTML = memberBarHTML();
+    if (bar.$wired) return;
+    bar.$wired = true;
+    bar.addEventListener('click', e => {
+        const chip = e.target.closest ? e.target.closest('.bm-chip') : null;
+        if (!chip) return;
+        if (chip.dataset.add) { addBalanceMember(); return; }
+        if (chip.dataset.owner !== undefined) setBalanceOwner(chip.dataset.owner);
     });
+}
+
+function renderBalanceMemberBar() {
+    ['balMemberBar', 'retMemberBar'].forEach(paintMemberBar);
 }
 
 function renderFamilyBars() {
@@ -6786,23 +8307,77 @@ function _mergeMemberRows(list, from, to) {
     return list.filter(r => dropIds.indexOf(r.id) < 0);
 }
 
-function deleteBalanceMember(name) {
-    if (state.balanceMembers.length <= 1) { showToast('至少保留一个成员', 'error'); return; }
-    const fallback = state.balanceMembers.find(m => m !== name);
-    const mineBal = state.balances.filter(b => b.member === name).length;
-    const mineRet = state.returns.filter(r => r.member === name).length;
-    const total = mineBal + mineRet;
-    if (!confirm(`删除成员「${name}」？${total ? `TA 的 ${total} 条记录（余额 ${mineBal} / 收益 ${mineRet}）会并入「${fallback}」。` : ''}`)) return;
-    state.balances = _mergeMemberRows(state.balances, name, fallback);
-    state.returns = _mergeMemberRows(state.returns, name, fallback);
+// 把某个成员名下的余额 / 收益记录整体挪到另一个成员名下（同月同账户撞车时以接手的那位为准）
+function transferMemberRecords(from, to) {
+    state.balances = _mergeMemberRows(state.balances, from, to);
+    state.returns = _mergeMemberRows(state.returns, from, to);
+}
+
+// 真正移除一个"名下已经没有记录"的成员。删除和撤销都走这里，别处不要自己改数组。
+// extraUndo：并入再删时把"哪些记录被搬走了"一起塞进撤销包，撤销才做得干净。
+function removeEmptyMember(name, extraUndo) {
     state.balanceMembers = state.balanceMembers.filter(m => m !== name);
-    addTombstone('members', name);          // 关键：不写墓碑的话，并集合并会把它带回来
     delete state.memberAddedAt[name];
+    addTombstone('members', name);          // 关键：不写墓碑的话，并集合并会把它带回来
     if (state.balanceOwner === name) state.balanceOwner = 'all';
+    const canUndo = pushUndo(`成员「${name}」`, Object.assign({ members: [name] }, extraUndo || {}));
     saveState();
     renderFamilyBars();
     renderAccountManageList();
     refreshAccountsModalIfOpen();
+    if (canUndo) showUndoToast(`成员「${name}」`);
+    else showToast('成员已删除', 'success');
+}
+
+function deleteBalanceMember(name) {
+    if (state.balanceMembers.length <= 1) { showToast('至少保留一个成员', 'error'); return; }
+    const mineBal = state.balances.filter(b => b.member === name).length;
+    const mineRet = state.returns.filter(r => r.member === name).length;
+    if (mineBal + mineRet > 0) { guardMemberWithRecords(name, mineBal, mineRet); return; }
+    if (!confirm(`删除成员「${name}」？TA 名下没有任何记录，删掉只是去掉这个选项。`)) return;
+    removeEmptyMember(name);
+}
+
+// 和删账户同一套规矩：有记录就不给直接删，先说清有多少条、跳过去看，
+// 想省事就显式点"并入再删"，不再把它做成删除的隐藏副作用。
+function guardMemberWithRecords(name, mineBal, mineRet) {
+    const fallback = state.balanceMembers.find(m => m !== name);
+    const rows = [], actions = [];
+    if (mineBal) rows.push({ k: '余额记录', v: mineBal + ' 期' });
+    if (mineRet) rows.push({ k: '收益记录', v: mineRet + ' 条' });
+    actions.push({ label: '去看 TA 名下的记录', fn: () => {
+        state.balanceOwner = name;
+        renderBalance(); renderReturns();
+        switchView(mineBal ? 'balance' : 'returns');
+    } });
+    if (fallback) actions.push({ label: `并入「${fallback}」后再删`, primary: true, fn: () => mergeMemberAndDelete(name) });
+    showDeleteGuard({
+        title: `成员「${name}」名下还有 ${mineBal + mineRet} 条记录`,
+        sub: fallback ? `可以一条条删掉，也可以整体并入「${fallback}」再删这个成员。` : '至少保留一个成员。',
+        rows, actions,
+    });
+}
+
+function mergeMemberAndDelete(name) {
+    const fallback = state.balanceMembers.find(m => m !== name);
+    if (!fallback) { showToast('至少保留一个成员', 'error'); return; }
+    const n = state.balances.filter(b => b.member === name).length
+        + state.returns.filter(r => r.member === name).length;
+    if (!confirm(`把「${name}」名下的 ${n} 条记录并入「${fallback}」，然后删除这个成员？`)) return;
+    // 记下搬走之前的原样：并入时如果和接手人同月同账户撞车，TA 那条会被直接吃掉，
+    // 所以撤销不能只是"把 member 改回去"，得先按搬完的 id 删掉、再把原行塞回去。
+    const before = {};
+    const move = ['balances', 'returns'].map(coll => {
+        const rows = state[coll].filter(r => r.member === name).map(r => Object.assign({}, r));
+        before[coll] = rows;
+        return { coll, rows, ids: [] };
+    });
+    transferMemberRecords(name, fallback);
+    move.forEach(mv => {
+        const mine = new Set(before[mv.coll].map(r => `${fallback}__${r.accountId}__${r.month}`));
+        mv.ids = state[mv.coll].filter(r => mine.has(r.id)).map(r => r.id);
+    });
+    removeEmptyMember(name, { memberMove: move });
 }
 
 function renderFamilySummary() {
@@ -6857,7 +8432,13 @@ function returnYears() { return [...new Set(returnMonths().map(m => m.slice(0, 4
 
 // 哪些账户算"投资账户"：沿用四笔钱的归类（稳健理财 + 长期投资），
 // 现金/房产/车辆/公积金算收益率没意义，还会被存取款严重扭曲。
+// 默认按「四笔钱」归类自动选；用户在「口径」面板里手勾过之后走手动名单。
 function investmentAccountIds() {
+    const st = state.settings || {};
+    if (st.returnAccountMode === 'manual') {
+        const ids = Array.isArray(st.returnAccountIds) ? st.returnAccountIds : [];
+        return state.accounts.filter(a => a.kind === 'asset' && ids.includes(a.id)).map(a => a.id);
+    }
     const includeCash = !!(state.settings && state.settings.returnIncludeCash);
     const wanted = includeCash ? ['steady', 'growth', 'cash'] : ['steady', 'growth'];
     // 房产/车辆虽然归在"长期投资"，但市值几百万、收益基本不录，混进来只会把收益率摊平成 0
@@ -6902,6 +8483,11 @@ function portfolioMonthStats(month, ids, draft, memberOverride) {
                 flowOf[id] = Number(d.flow) || 0; flowKnownOf[id] = true;
             }
         }
+        // 「记月度账单」里余额和收益是同一屏填的，草稿也得能覆盖期末市值，
+        // 否则刚改完余额、角标还按老余额算率，看着就是错的。
+        if ('balance' in d && d.balance !== '' && d.balance !== null && d.balance !== undefined) {
+            curMap[id] = Number(d.balance) || 0;
+        }
     });
 
     const eligible = [], unknown = [];
@@ -6936,8 +8522,10 @@ function portfolioMonthStats(month, ids, draft, memberOverride) {
     if (flowKnown && v0 > 0) {
         const implied = v1 - v0 - flow;
         const gap = profit - implied;
-        const tol = Math.max(1, Math.abs(v1) * 0.005);   // 0.5% 以内当四舍五入
-        if (Math.abs(gap) > tol) check = { implied, gap };
+        // 按"这个月真实动过多少钱"算容差（市值变化 + 进出账），
+        // 不能按总市值算 —— 170 万市值按 0.5% 会放过 8500 元的错账
+        const tol = reconTolerance(Math.abs(v1 - v0) + Math.abs(flow));
+        if (Math.abs(gap) > tol) check = { implied, gap, tol };
     }
 
     return { v0, v1, profit, flow, flowKnown, base, rate, check, eligible, unknown, reason };
@@ -7001,6 +8589,28 @@ function returnMonthHasRecords(month) {
 
 // 只列用户真正持有的资产账户（记过余额/收益），但用户自己新建的账户一律列出——
 // 否则刚加的账户还没有任何记录，出现在弹窗里的话会像是没生效。
+// 这个账户会不会有收益。用户在「编辑账户 / 口径」里明确设过就听他的，
+// 否则按分类推断：只有「储蓄存款」和「投资理财」默认会生收益 ——
+// 现金、储蓄卡、应收借款（借出去的钱）、房产车辆这些，本来就不会"涨出收益"这一栏。
+function accountEarnsReturn(a) {
+    if (!a || a.kind !== 'asset') return false;
+    if (a.earnsReturn === true || a.earnsReturn === false) return a.earnsReturn;
+    return a.group === '储蓄存款' || a.group === '投资理财';
+}
+function setAccountEarnsReturn(a, on) {
+    a.earnsReturn = !!on;
+    a.updatedAt = Date.now();
+}
+
+// 记收益弹窗该列哪些账户：会生收益的 + 这个月已经录过的
+// （已经录过的必须能改，哪怕后来把开关关了，否则历史就锁死了）
+function returnEntryAccounts(month, member) {
+    const all = returnCandidateAccounts();
+    if (state.returnEntryShowAll) return all;
+    const recorded = new Set(Object.keys(returnsAtMonth(month, member) || {}));
+    return all.filter(a => accountEarnsReturn(a) || recorded.has(a.id));
+}
+
 function returnCandidateAccounts() {
     const defaultIds = new Set(DEFAULT_ACCOUNTS.map(a => a.id));
     const held = new Set();
@@ -7072,14 +8682,24 @@ function renderReturnSelectors() {
 }
 
 function renderReturnMemberBar() {
-    const bar = document.getElementById('retMemberBar');
-    if (bar) bar.innerHTML = memberBarHTML();
+    paintMemberBar('retMemberBar');
 }
 
 function setReturnChartType(t) {
     state.returnChartType = t;
     document.querySelectorAll('#view-returns [data-ret-chart]').forEach(b =>
         b.classList.toggle('active', b.dataset.retChart === t));
+    renderReturnChart();
+}
+
+function setReturnMetric(m) {
+    state.returnMetric = m === 'rate' ? 'rate' : 'amount';
+    // 切到收益率时饼图无意义，退回柱状
+    if (state.returnMetric === 'rate' && state.returnChartType === 'pie') state.returnChartType = 'bar';
+    document.querySelectorAll('#retMetric [data-ret-metric]').forEach(b =>
+        b.classList.toggle('active', b.dataset.retMetric === state.returnMetric));
+    document.querySelectorAll('#view-returns [data-ret-chart]').forEach(b =>
+        b.classList.toggle('active', b.dataset.retChart === state.returnChartType));
     renderReturnChart();
 }
 
@@ -7104,176 +8724,353 @@ function returnTrendBuckets() {
     return all.map(m => ({ key: m, label: m.replace('-', '年') + '月', months: [m] }));
 }
 
+// 收益口径说明：一次性引导，关掉就不再打扰。
+// 存独立键，不进 state.settings —— 那个会同步到别的设备，
+// 一台设备上点掉，另一台就永远看不到这个提醒了。
+const CALIBER_NOTE_KEY = 'bookkeeping_caliber_dismissed';
+function renderCaliberNote() {
+    const el = document.getElementById('caliberNote');
+    if (!el) return;
+    let off = false;
+    try { off = localStorage.getItem(CALIBER_NOTE_KEY) === '1'; } catch (e) { /* 读不到就当没关过 */ }
+    el.classList.toggle('hidden', off);
+}
+function dismissCaliberNote() {
+    try { localStorage.setItem(CALIBER_NOTE_KEY, '1'); } catch (e) { /* 存不下也只是下次还显示 */ }
+    renderCaliberNote();
+}
+
+// ==================== 总资产变动 ====================
+// 跟随页面顶部的 月报 / 年报 / 总：月份区间直接取 returnPeriodInfo()
+function totalAssetChange() {
+    const info = returnPeriodInfo();
+    const months = (info.months || []).slice().sort();
+    const member = state.balanceOwner;
+    const assetAt = (m) => {
+        if (!m) return null;
+        const map = balancesAtMonth(m, member);
+        if (!Object.keys(map).length) return null;
+        return totalsFromMap(map).asset;
+    };
+    const first = months[0] || null;
+    const last = months[months.length - 1] || null;
+    // 看"总"时，起点应该是"最早有余额记录的月份"本身 —— 余额可能比收益早好几个月，
+    // 用最早有收益的月份当起点会把中间那段变化吞掉
+    const balMs = balanceMonths();
+    const openMonth = info.period === 'all'
+        ? (balMs[0] || first)
+        : previousMonthOf(first);
+    const open = assetAt(openMonth);
+    const close = assetAt(last);
+
+    let flow = 0, flowKnown = false;
+    state.returns.forEach(r => {
+        if (!r.month || months.indexOf(r.month) < 0) return;
+        if (member !== 'all' && r.member !== member) return;
+        if (r.flow === undefined || r.flow === null || r.flow === '') return;
+        flow += Number(r.flow) || 0; flowKnown = true;
+    });
+    const profit = months.length ? returnSummary(months, member).total : 0;
+    const delta = (open === null || close === null) ? null : close - open;
+    // 剩下那截主要是日常收支和非投资账户的变动，不是"算错了"
+    const other = delta === null ? null : delta - flow - profit;
+    return { info, months, openMonth, open, close, flow, flowKnown, profit, delta, other };
+}
+
+function setTacTab(t) {
+    state.tacTab = t === 'trend' ? 'trend' : 'stats';
+    document.querySelectorAll('#tacTabs [data-tac-tab]').forEach(b =>
+        b.classList.toggle('active', b.dataset.tacTab === state.tacTab));
+    renderAssetChange();
+}
+
+function renderAssetChange() {
+    const card = document.getElementById('tacCard');
+    if (!card) return;
+    const t = totalAssetChange();
+    if (!t.months.length) { card.classList.add('hidden'); return; }
+    card.classList.remove('hidden');
+    document.getElementById('tacPeriodLabel').textContent = `（${t.info.title}）`;
+
+    const stats = document.getElementById('tacStats');
+    const trendBox = document.querySelector('#tacCard .tac-trend');
+    const showTrend = state.tacTab === 'trend';
+    stats.classList.toggle('hidden', showTrend);
+    trendBox.classList.toggle('hidden', !showTrend);
+
+    const mLabel = m => m ? m.replace('-', '年') + '月' : '—';
+    const signed = v => (v > 0 ? '+' : '') + formatCurrency(v);
+    const tiles = [
+        { k: '期初总资产', v: t.open, sub: t.open === null ? `${mLabel(t.openMonth)}未记余额` : mLabel(t.openMonth), plain: true },
+        { k: '净入金', v: t.flowKnown ? t.flow : null, sub: t.flowKnown ? '转入 − 转出（投资账户）' : '未录入' },
+        { k: '投资收益', v: t.profit, sub: '区间内各账户合计' },
+        { k: '其他资产变动', v: t.other, sub: '日常收支 / 还贷款 / 非投资账户' },
+        { k: '期末总资产', v: t.close, sub: mLabel(t.months[t.months.length - 1]), plain: true },
+    ];
+    let html = tiles.map(tile => {
+        const cls = tile.plain ? '' : (((tile.v || 0) > 0) ? ' up' : (((tile.v || 0) < 0) ? ' down' : ''));
+        const val = (tile.v === null || tile.v === undefined)
+            ? '<span class="tac-na">—</span>'
+            : (tile.plain ? _esc(formatCurrency(tile.v)) : _esc(signed(tile.v)));
+        return `<div class="tac-tile${cls}"><span class="tt-k">${_esc(tile.k)}</span>`
+            + `<span class="tt-v">${val}</span><span class="tt-s">${_esc(tile.sub)}</span></div>`;
+    }).join('');
+    const dCls = (t.delta || 0) > 0 ? ' up' : ((t.delta || 0) < 0 ? ' down' : '');
+    html += `<div class="tac-tile total${dCls}"><span class="tt-k">总资产变动</span>`
+        + `<span class="tt-v">${t.delta === null ? '<span class="tac-na">—</span>' : _esc(signed(t.delta))}</span>`
+        + `<span class="tt-s">${t.delta !== null && t.open ? (t.delta / t.open * 100).toFixed(2) + '%' : ''}</span></div>`;
+    stats.innerHTML = html;
+
+    const note = document.getElementById('tacNote');
+    note.innerHTML = t.open === null
+        ? `<i class="fa-solid fa-circle-info"></i> ${_esc(mLabel(t.openMonth))} 没记余额，期初取不到，"其他资产变动"也就算不出来 —— 补上那个月的余额这里才完整。`
+        : `<i class="fa-solid fa-circle-info"></i> "其他资产变动" = 期末 − 期初 − 净入金 − 投资收益。`
+          + `它通常不等于 0，因为总资产里还包含：日常收支让现金 / 储蓄卡增减、`
+          + `<b>还房贷或信用卡</b>（现金减少但净资产不变，所以只体现在这里）、以及没录到收益的账户变动。`
+          + `想看扣掉负债后的口径，用资产负债页的「净资产变动」，那里的"待核对"才是严格对账。`;
+
+    if (showTrend) renderTacChart(t);
+}
+
+function renderTacChart(t) {
+    const canvas = document.getElementById('tacChart');
+    if (!canvas) return;
+    const draw = () => {
+        const member = state.balanceOwner;
+        // 起点那个月也画进去，才看得出"从哪儿变到哪儿"
+        const keys = (t.openMonth && t.months.indexOf(t.openMonth) < 0)
+            ? [t.openMonth].concat(t.months) : t.months.slice();
+        const series = keys.map(m => {
+            const map = balancesAtMonth(m, member);
+            return Object.keys(map).length ? Math.round(totalsFromMap(map).asset * 100) / 100 : null;
+        });
+        const empty = document.getElementById('tacChartEmpty');
+        if (series.filter(v => v !== null).length < 2) {
+            if (empty) { empty.textContent = '这段时间只有不到两个月记了余额，看不出趋势'; empty.classList.remove('hidden'); }
+            if (charts.assetChange) { charts.assetChange.destroy(); charts.assetChange = null; }
+            return;
+        }
+        if (empty) empty.classList.add('hidden');
+        if (charts.assetChange) { charts.assetChange.destroy(); charts.assetChange = null; }
+        const palette = chartPalette();
+        charts.assetChange = new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: keys.map(m => m.replace('-', '年') + '月'),
+                datasets: [{
+                    data: series, borderColor: '#0a84ff', backgroundColor: 'rgba(10,132,255,0.10)',
+                    borderWidth: 2, fill: true, tension: 0.3, spanGaps: true,
+                    pointRadius: keys.length > 24 ? 0 : 3, pointHoverRadius: 6,
+                    pointBackgroundColor: '#0a84ff',
+                }],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: (c) => (c.raw === null || c.raw === undefined)
+                        ? '该月未记余额' : `总资产: ${formatCurrency(c.raw)}` } },
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: palette.text, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+                    y: { grid: { color: palette.grid }, ticks: { color: palette.text, font: { size: 10 },
+                        callback: (v) => (Math.abs(v) >= 10000 ? (v / 10000).toFixed(1) + '万' : v) } },
+                },
+            },
+        });
+    };
+    if (typeof Chart === 'undefined') { loadChartLib().then(draw).catch(() => {}); return; }
+    draw();
+}
+
 function renderReturns() {
     if (!document.getElementById('view-returns')) return;
     renderReturnSelectors();
+    renderCaliberNote();
+    renderAssetChange();
+    renderReturnCalendar();
 
     const info = returnPeriodInfo();
-    const cur = returnSummary(info.months);
-    const total = returnSummary(returnMonths()).total;
-    const years = returnYears();
-    const yearMonths = info.year ? returnMonths().filter(m => m.slice(0, 4) === String(info.year)) : [];
-    const yearTotal = info.year ? returnSummary(yearMonths).total : 0;
 
-    // 上期：月报=上一月，年报=上一年，总=最后一期的上一月
-    let prevMonths = [], prevLabel = '';
-    if (info.period === 'month' && info.month) {
-        const p = previousMonthOf(info.month);
-        prevMonths = p ? [p] : [];
-        prevLabel = p ? p.replace('-', '年') + '月' : '';
-    } else if (info.period === 'year' && info.year) {
-        const py = String(Number(info.year) - 1);
-        prevMonths = returnMonths().filter(m => m.slice(0, 4) === py);
-        prevLabel = `${py}年`;
-    }
-
-    const setText = (id, v) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.textContent = formatCurrency(v);
-        el.classList.toggle('income', v > 0);
-        el.classList.toggle('expense', v < 0);
-    };
-    const label = document.getElementById('retPeriodLabel');
-    const monthsWithData = returnMonths().length;
-    let periodValue = cur.total;
-    if (info.period === 'all') {
-        if (label) label.textContent = '月均收益';
-        periodValue = monthsWithData ? Math.round((total / monthsWithData) * 100) / 100 : 0;
-    } else {
-        if (label) label.textContent = info.period === 'year' ? '本年收益' : '本月收益';
-    }
-    setText('retPeriodAmount', periodValue);
-    setText('retTotalAmount', total);
-    setText('retYearAmount', info.period === 'year' ? cur.total : yearTotal);
-
-    const hint = document.getElementById('retPeriodHint');
-    if (hint) {
-        if (info.period === 'all') hint.textContent = monthsWithData ? `按 ${monthsWithData} 个月平均` : '';
-        else hint.textContent = info.months.length ? info.title : '该期未记录';
-    }
-    const prevEl = document.getElementById('retPrevAmount');
-    if (prevEl) {
-        if (prevMonths.length) {
-            const pv = returnSummary(prevMonths).total;
-            prevEl.textContent = formatCurrency(pv);
-            prevEl.classList.toggle('income', pv > 0);
-            prevEl.classList.toggle('expense', pv < 0);
-        } else {
-            prevEl.textContent = '—';
-            prevEl.classList.remove('income', 'expense');
-        }
-    }
-    const momEl = document.getElementById('retMomHint');
-    if (momEl) {
-        if (prevMonths.length) {
-            const diff = cur.total - returnSummary(prevMonths).total;
-            momEl.textContent = `${prevLabel} 环比 ${diff >= 0 ? '+' : ''}${formatCurrency(diff)}`;
-        } else {
-            momEl.textContent = '没有上一期数据';
-        }
-    }
-    const monthsHint = document.getElementById('retMonthsHint');
-    if (monthsHint) monthsHint.textContent = returnMonths().length ? `共 ${returnMonths().length} 个月有记录` : '';
+    // ---- 顶部四张卡：金额在上、同一区间的收益率在下；口径挪到卡片行下面 ----
+    renderReturnSummary(info);
+    renderReturnScope(info);
 
     renderReturnChart();
     renderReturnBreakdown(info);
     renderReturnMonthly();
     renderReturnMemberBar();
-    renderReturnRates(info);
     updateReturnToggleStates();
 }
 
-// 收益率卡片：组合口径（稳健理财 + 长期投资），不是全部资产账户
-function renderReturnRates(info) {
-    const setText = (id, txt, cls) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.textContent = txt;
-        if (cls !== undefined) {
-            el.classList.toggle('income', cls === 'up');
-            el.classList.toggle('expense', cls === 'down');
-        }
-    };
-    const ids = investmentAccountIds();
-    const cum = portfolioCumulative();
-    const cur = portfolioMonthStats(info.month, ids);
-    // 本年收益率 = 只看这一年的月份逐月连乘，不往外推
+// ==================== 投资收益顶部四张卡（金额 + 同区间收益率）====================
+// 一张卡里"上面金额、下面同一区间的收益率"，四张卡随时间档换一套指标：
+//   月报 = 本月 / 上月 / 当年 / 累计
+//   年报 = 当年 / 上一年 / 当年月均 / 累计
+//   总   = 月均 / 最新一个月 / 最后有记录的这一年 / 累计
+// 这么挑是为了不出现两张一模一样的卡（以前年报下第 1、3 张都叫"本年收益"），
+// 也不出现常年空白的卡（以前总览下"上月收益"没有上一期，一直是"—"）。
+function renderReturnSummary(info) {
+    const box = document.getElementById('retSummary');
+    if (!box) return;
+    const monthsAll = returnMonths();
     const nowYear = new Date().getFullYear();
-    const viewYear = info.selYear || info.year || nowYear;
-    const ytd = portfolioCumulative(returnMonths().filter(m => Number(m.slice(0, 4)) === Number(viewYear)));
+    const viewYear = Number(info.selYear || info.year || nowYear);
+    const monthsOf = y => monthsAll.filter(m => Number(m.slice(0, 4)) === Number(y));
+    const sumOf = list => returnSummary(list).total;
+    const namesOf = ids => ids.map(id => (accountById(id) || {}).name).filter(Boolean).join('、');
+    // 月均收益率 = 累计率开 n 次方（几何平均）。不做年化折算，那只会把人吓一跳。
+    const avgRateOf = list => {
+        const c = portfolioCumulative(list);
+        return c.cumulative !== null && c.months > 0 ? Math.pow(1 + c.cumulative, 1 / c.months) - 1 : null;
+    };
+    const ymd = m => m ? Number(m.slice(0, 4)) + '年' + Number(m.slice(5, 7)) + '月' : '';
 
-    const rateCls = r => (r === null ? undefined : (r > 0 ? 'up' : (r < 0 ? 'down' : undefined)));
-    setText('retRateMonth', pctText(cur.rate), rateCls(cur.rate));
-    setText('retRateCum', pctText(cum.cumulative), rateCls(cum.cumulative));
-    setText('retRateYear', pctText(ytd.cumulative), rateCls(ytd.cumulative));
+    // 本月（月报是选中的那个月，总览是最后一个有记录的月）
+    const mKey = info.month || monthsAll[monthsAll.length - 1] || null;
+    const mStat = mKey ? portfolioMonthStats(mKey) : { rate: null, reason: 'no-account', unknown: [], base: 0, flowKnown: false, flow: 0 };
+    const NO_RATE = {
+        'no-account': '还没有归类为稳健理财 / 长期投资的账户',
+        'no-capital': '本金未知：这些账户都没记上月余额，先去「资产负债」补上',
+        'no-profit': '这个月没有收益记录',
+        'zero-opening': '上月余额记的是 0，本月进来的钱算新入金：填一下「净入金」才能算准',
+        'zero-base': '本金为 0，算不出比率',
+    };
+    let monthHint;
+    if (!mKey) monthHint = '还没有收益记录';
+    else if (mStat.rate === null) monthHint = NO_RATE[mStat.reason] || '暂时算不出收益率';
+    else if (mStat.unknown.length) monthHint = `本金 ${formatCurrency(mStat.base)} · 未计入 ${namesOf(mStat.unknown)}（缺上月余额）`;
+    else if (mStat.flowKnown) monthHint = `本金 ${formatCurrency(mStat.base)} · 含净入金 ${formatCurrency(mStat.flow)}`;
+    else monthHint = `平均本金 ${formatCurrency(mStat.base)} · 未录入金（近似）`;
+    const monthCard = {
+        label: mKey ? `${ymd(mKey)} 收益` : '本月收益',
+        amount: mKey ? sumOf([mKey]) : 0, rate: mStat.rate,
+        amountId: 'retMonthAmount', rateId: 'retMonthRate', hintId: 'retMonthHint', hint: monthHint,
+    };
 
-    const yh = document.getElementById('retRateYearHint');
-    if (yh) {
-        yh.textContent = ytd.months
-            ? `${viewYear} 年 ${ytd.months} 个月连乘${Number(viewYear) === nowYear ? '（至今）' : ''}`
-            : `${viewYear} 年还没有可计算的收益率`;
-    }
+    // 第二张固定给"投资以来年化复合收益率"：它本来就是跨区间的指标，
+    // 不随月报/年报/总切换，所以放在哪个档位都是同一个数。
+    // （上月 / 上年的对比没丢 —— 下面的日历格和月度表里每个月都在。）
+    const cumAll = portfolioCumulative(monthsAll);
+    const annual = (cumAll.cumulative !== null && cumAll.months > 0 && 1 + cumAll.cumulative > 0)
+        ? Math.pow(1 + cumAll.cumulative, 12 / cumAll.months) - 1 : null;
+    const annualCard = {
+        label: '投资以来年化',
+        big: pctText(annual), bigCls: rateClsOf(annual),
+        sub: cumAll.cumulative === null ? '还算不出' : '累计 ' + pctText(cumAll.cumulative),
+        subCls: rateClsOf(cumAll.cumulative),
+        amountId: 'retAnnualAmount', rateId: 'retAnnualSub', hintId: 'retAnnualHint',
+        hint: cumAll.months >= 12 ? `按 ${cumAll.months} 个月复合折算`
+            : (cumAll.months ? `只有 ${cumAll.months} 个月样本，折算出来波动大，先看趋势` : '记录满一个月后才能折算'),
+    };
 
-    const mh = document.getElementById('retRateMonthHint');
-    if (mh) {
-        const REASON = {
-            'no-account': '还没有归类为稳健理财 / 长期投资的账户',
-            'no-capital': '本金未知：这些账户都没记上月余额，先去「资产负债」补上',
-            'no-profit': '这个月没有收益记录',
-            'zero-opening': '上月余额记的是 0，本月进来的钱算新入金：填一下「净入金」才能算准',
-            'zero-base': '本金为 0，算不出比率',
-        };
-        if (cur.rate === null) {
-            mh.textContent = REASON[cur.reason] || '暂时算不出收益率';
-        } else if (cur.unknown.length) {
-            const names = cur.unknown.map(id => (accountById(id) || {}).name).filter(Boolean);
-            mh.textContent = `本金 ${formatCurrency(cur.base)} · 未计入 ${names.join('、')}（缺上月余额）`;
-        } else {
-            mh.textContent = cur.flowKnown
-                ? `本金 ${formatCurrency(cur.base)} · 含净入金 ${formatCurrency(cur.flow)}`
-                : `平均本金 ${formatCurrency(cur.base)} · 未录入金（近似）`;
-        }
-    }
-    const ch = document.getElementById('retRateCumHint');
-    if (ch) ch.textContent = cum.months ? `按 ${cum.months} 个有收益率的月份连乘` : '';
+    const yMonths = monthsOf(viewYear);
+    const yCum = portfolioCumulative(yMonths);
+    const yearCard = {
+        label: `${viewYear} 年收益`,
+        amount: sumOf(yMonths), rate: yCum.cumulative,
+        amountId: 'retYearAmount', rateId: 'retYearRate', hintId: 'retYearHint',
+        hint: yCum.months ? `${yCum.months} 个月连乘${viewYear === nowYear ? '（至今）' : ''}`
+            : (yMonths.length ? '这些月份本金未知，算不出率' : '这一年没有记录'),
+    };
 
-    const scope = document.getElementById('retScopeNote');
-    if (scope) {
-        const incCash = !!(state.settings && state.settings.returnIncludeCash);
-        const incFixed = !!(state.settings && state.settings.returnIncludeFixed);
-        const names = ids.map(id => (accountById(id) || {}).name).filter(Boolean);
-        const prevM = previousMonthOf(info.month);
-        const missing = (cur.unknown || []).map(id => (accountById(id) || {}).name).filter(Boolean);
-        const outFixed = state.accounts.filter(a => a.kind === 'asset' && a.group === '固定资产'
-            && (incCash ? ['steady', 'growth', 'cash'] : ['steady', 'growth']).includes(a.bucket)
-            && !ids.includes(a.id)).map(a => a.name);
-        scope.innerHTML = `只统计<b>稳健理财 / 长期投资</b>类账户${incCash ? ' + 活钱' : ''}${incFixed ? ' + 固定资产' : ''}：`
-            + `${_esc(names.join('、') || '（还没有投资账户，去「四笔钱」归类）')}`
+    const avgList = info.period === 'year' ? yMonths : monthsAll;
+    const avgCum = portfolioCumulative(avgList);
+    const avgCard = {
+        label: info.period === 'year' ? `${viewYear} 年月均` : '月均收益',
+        amount: avgList.length ? Math.round(sumOf(avgList) / avgList.length * 100) / 100 : 0,
+        rate: avgRateOf(avgList),
+        amountId: 'retAvgAmount', rateId: 'retAvgRate', hintId: 'retAvgHint',
+        hint: avgList.length ? `按 ${avgList.length} 个月平均${avgCum.months < avgList.length ? `（${avgCum.months} 个月能算出率）` : ''}`
+            : '还没有收益记录',
+    };
+
+    const totalCard = {
+        label: '累计收益', amount: sumOf(monthsAll), rate: cumAll.cumulative,
+        amountId: 'retTotalAmount', rateId: 'retTotalRate', hintId: 'retMonthsHint',
+        hint: monthsAll.length ? `共 ${monthsAll.length} 个月有记录` : '还没有收益记录',
+    };
+
+    const slots = info.period === 'year' ? [yearCard, annualCard, avgCard, totalCard]
+        : info.period === 'all' ? [avgCard, annualCard, yearCard, totalCard]
+            : [monthCard, annualCard, yearCard, totalCard];
+
+    // 卡上不再写"XX收益率"：百分数跟在金额后面一眼就懂，省下来的一行留给小字说明
+    box.innerHTML = slots.map(c => {
+        const big = c.big !== undefined ? c.big
+            : (c.amount === null || c.amount === undefined ? '—' : formatCurrency(c.amount));
+        const bigCls = c.big !== undefined ? (c.bigCls || '') : rateClsOf(c.amount);
+        const small = c.sub !== undefined ? c.sub : pctText(c.rate);
+        const smallCls = c.sub !== undefined ? (c.subCls || '') : rateClsOf(c.rate);
+        return `<div class="report-card ret-sum-card">
+            <div class="report-card-top"><span class="report-label">${_esc(c.label)}</span></div>
+            <div class="ret-card-line">
+                <span class="report-value${bigCls}" id="${c.amountId}">${_esc(big)}</span>
+                <b class="rcr-v${smallCls}" id="${c.rateId}">${_esc(small)}</b>
+            </div>
+            <div class="bal-asof" id="${c.hintId}">${_esc(c.hint || '')}</div>
+        </div>`;
+    }).join('');
+}
+
+// 涨/跌用 .income / .expense 表意，具体红绿由投资收益页的配色规则决定
+function rateClsOf(v) {
+    return (v === null || v === undefined) ? '' : (v > 0 ? ' income' : (v < 0 ? ' expense' : ''));
+}
+
+// ---- 口径：卡片行下面的一行小字，默认只露账户名单，「详情」里放排除项和开关 ----
+function renderReturnScope(info) {
+    const box = document.getElementById('retScope');
+    if (!box) return;
+    const ids = investmentAccountIds();
+    const incCash = !!(state.settings && state.settings.returnIncludeCash);
+    const incFixed = !!(state.settings && state.settings.returnIncludeFixed);
+    const names = ids.map(id => (accountById(id) || {}).name).filter(Boolean);
+    const mKey = info.month || returnMonths()[returnMonths().length - 1] || null;
+    const cur = mKey ? portfolioMonthStats(mKey) : { unknown: [] };
+    const missing = (cur.unknown || []).map(id => (accountById(id) || {}).name).filter(Boolean);
+    const outFixed = state.accounts.filter(a => a.kind === 'asset' && a.group === '固定资产'
+        && (incCash ? ['steady', 'growth', 'cash'] : ['steady', 'growth']).includes(a.bucket)
+        && !ids.includes(a.id)).map(a => a.name);
+    const prevM = mKey ? previousMonthOf(mKey) : null;
+    const open = !!state.returnScopeOpen;
+
+    const manual = (state.settings || {}).returnAccountMode === 'manual';
+    // 本金未知的账户是这一屏里唯一需要用户动手补的，所以留在折叠外面，不藏进详情
+    const warnTxt = missing.length
+        ? ` · <span class="rsl-warn">${_esc(missing.join('、'))} 本金未知，`
+            + `<button class="link-btn" id="retGoBalance">去记 ${_esc(prevM ? prevM.replace('-', '年') + '月' : '')} 余额</button></span>`
+        : '';
+    const ruleTxt = manual
+        ? `手动挑选 <b>${names.length}</b> 个账户`
+        : `只统计<b>稳健理财 / 长期投资</b>${incCash ? ' + 活钱' : ''}${incFixed ? ' + 固定资产' : ''}`;
+    const head = `<span class="rsl-tag">口径</span>`
+        + `<span class="rsl-text" id="retScopeNote">${ruleTxt}：`
+        + `${_esc(names.join('、') || '（还没有投资账户，去「四笔钱」归类）')}${warnTxt}</span>`;
+    const toggles = `<span class="rsl-actions">`
+        + `<button class="link-btn" id="retScopeOpen">调整</button>`
+        + (manual ? '' : `<button class="link-btn" id="retScopeCash">${incCash ? '不含活钱' : '把活钱也算进来'}</button>`)
+        + (!manual && (outFixed.length || incFixed) ? `<button class="link-btn" id="retScopeFixed">${incFixed ? '不含房产车辆' : '房产车辆也算进来'}</button>` : '')
+        + `<button class="link-btn rsl-more" id="retScopeMore">${open ? '收起' : '详情'}</button>`
+        + `</span>`;
+    const detail = open
+        ? `<div class="rsl-detail">`
             + (outFixed.length ? `<div class="ret-excluded">已排除固定资产：${_esc(outFixed.join('、'))}（市值大、一般不录收益）</div>` : '')
-            + (missing.length ? `<div class="ret-excluded">本金未知，暂时不算进收益率：${_esc(missing.join('、'))}`
-                + `<button class="link-btn" id="retGoBalance">去记 ${_esc(prevM ? prevM.replace('-', '年') + '月' : '')} 余额</button></div>` : '')
-            + `<div class="ret-scope-toggles">`
-            + `<button class="link-btn" id="retScopeCash">${incCash ? '不含活钱' : '把活钱也算进来'}</button>`
-            + (outFixed.length || incFixed ? `<button class="link-btn" id="retScopeFixed">${incFixed ? '不含房产车辆' : '房产车辆也算进来'}</button>` : '')
-            + `</div>`;
-        const goBal = document.getElementById('retGoBalance');
-        if (goBal) goBal.addEventListener('click', () => {
-            switchView('balance');
-            openBalanceModal(prevM);
-        });
-        const t = document.getElementById('retScopeCash');
-        if (t) t.addEventListener('click', () => {
-            state.settings.returnIncludeCash = !state.settings.returnIncludeCash;
-            saveState(); renderReturns();
-        });
-        const tf = document.getElementById('retScopeFixed');
-        if (tf) tf.addEventListener('click', () => {
-            state.settings.returnIncludeFixed = !state.settings.returnIncludeFixed;
-            saveState(); renderReturns();
-        });
-    }
+            + (missing.length ? `<div class="ret-excluded">上面标了"本金未知"的账户，是因为缺 ${_esc(prevM ? prevM.replace('-', '年') + '月' : '上月')} 的余额，`
+                + `本月只能算收益金额、算不出收益率。</div>` : '')
+            + `<div class="ret-excluded">收益率只按"能算出本金"的月份逐月连乘（时间加权），本金未知的月份会被跳过，不会当成 0% 拖低结果。</div>`
+            + `</div>`
+        : '';
+    box.innerHTML = `<div class="rsl-head">${head}${toggles}</div>${detail}`;
 
+    const bind = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
+    bind('retScopeMore', () => { state.returnScopeOpen = !state.returnScopeOpen; saveState(); renderReturns(); });
+    bind('retScopeOpen', () => openReturnScope());
+    bind('retGoBalance', () => { switchView('balance'); openBalanceModal(prevM); });
+    bind('retScopeCash', () => { state.settings.returnIncludeCash = !state.settings.returnIncludeCash; saveState(); renderReturns(); });
+    bind('retScopeFixed', () => { state.settings.returnIncludeFixed = !state.settings.returnIncludeFixed; saveState(); renderReturns(); });
+
+    // 本月录的收益和"期末−期初−净入金"对不上时，当场说一声
     const warn = document.getElementById('retCheckWarn');
     if (warn) {
         if (cur.check) {
@@ -7288,7 +9085,6 @@ function renderReturnRates(info) {
         }
     }
 }
-
 function updateReturnToggleStates() {
     document.querySelectorAll('#view-returns [data-ret-chart]').forEach(b =>
         b.classList.toggle('active', b.dataset.retChart === state.returnChartType));
@@ -7313,12 +9109,10 @@ function returnHideEmpty() {
 
 function renderReturnChart() {
     const info = returnPeriodInfo();
-    const title = document.getElementById('retChartTitle');
-    const sub = document.getElementById('retChartSubtitle');
     const chartType = state.returnChartType;
-    const gran = activeReturnGran();
-    if (title) title.textContent = chartType === 'pie' ? '账户收益构成' : (gran === 'year' ? '年度收益' : '月度收益');
-    if (sub) sub.textContent = state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner;
+    // 收益率没有"构成占比"可言，饼图在这个模式下直接收起
+    const pieBtn = document.querySelector('#view-returns [data-ret-chart="pie"]');
+    if (pieBtn) pieBtn.classList.toggle('hidden', state.returnMetric === 'rate');
 
     if (!returnMonths().length) {
         returnShowEmpty('还没有记录过收益，点右上角「记收益」开始');
@@ -7338,27 +9132,40 @@ function renderReturnTrend(ctx, chartType) {
     if (typeof Chart === 'undefined') { loadChartLib().then(() => renderReturnTrend(ctx, chartType)).catch(() => {}); return; }
     if (charts.returns) { charts.returns.destroy(); charts.returns = null; }
     const buckets = returnTrendBuckets();
-    const values = buckets.map(b => Math.round(returnSummary(b.months).total * 100) / 100);
+    const rate = state.returnMetric === 'rate';
+    // 收益率：单月直接取该月的率；跨年汇总用逐月连乘，不能相加
+    const values = buckets.map(b => {
+        if (!rate) return Math.round(returnSummary(b.months).total * 100) / 100;
+        if (b.months.length === 1) return portfolioMonthStats(b.months[0]).rate;
+        return portfolioCumulative(b.months).cumulative;
+    });
+    // 百分比数值（null = 本金未知，留空不画）
+    const plotted = values.map(v => (v === null || v === undefined) ? null : (rate ? Math.round(v * 10000) / 100 : v));
     const palette = chartPalette();
     if (!buckets.length) { returnShowEmpty('该期间没有收益记录'); return; }
     returnHideEmpty();
-    const accent = values.map(v => v < 0 ? '#ff3b30' : '#34c759');
+    if (rate && plotted.every(v => v === null)) {
+        returnShowEmpty('这些月份的本金未知（缺上月余额），算不出收益率——先去「资产负债」补上余额');
+        return;
+    }
+    // 投资收益按 A 股习惯配色：盈利红、亏损绿
+    const accent = plotted.map(v => v === null ? '#c7c7cc' : (v < 0 ? '#34c759' : '#ff3b30'));
 
     charts.returns = new Chart(ctx, {
         type: chartType,
         data: {
             labels: buckets.map(b => b.label),
             datasets: [{
-                label: '收益',
-                data: values,
-                borderColor: '#34c759',
-                backgroundColor: chartType === 'line' ? 'rgba(52,199,89,0.12)' : accent,
+                label: rate ? '收益率' : '收益',
+                data: plotted,
+                borderColor: '#ff3b30',
+                backgroundColor: chartType === 'line' ? 'rgba(255,59,48,0.12)' : accent,
                 borderWidth: chartType === 'line' ? 2 : 0,
                 fill: chartType === 'line',
                 tension: 0.3,
                 pointRadius: buckets.length > 24 ? 0 : 3,
                 pointHoverRadius: 6,
-                pointBackgroundColor: '#34c759',
+                pointBackgroundColor: '#ff3b30',
                 borderRadius: 5,
                 maxBarThickness: 40,
             }],
@@ -7377,7 +9184,9 @@ function renderReturnTrend(ctx, chartType) {
             },
             plugins: {
                 legend: { display: false },
-                tooltip: { callbacks: { label: (c) => `收益: ${formatCurrency(c.raw)}` } },
+                tooltip: { callbacks: { label: (c) => c.raw === null || c.raw === undefined
+                    ? '本金未知，算不出收益率'
+                    : (rate ? `收益率: ${c.raw.toFixed(2)}%` : `收益: ${formatCurrency(c.raw)}`) } },
             },
             scales: {
                 x: {
@@ -7386,7 +9195,7 @@ function renderReturnTrend(ctx, chartType) {
                 },
                 y: {
                     grid: { color: palette.grid },
-                    ticks: { color: palette.text, font: { size: 10 }, callback: (v) => (Math.abs(v) >= 10000 ? (v / 10000).toFixed(1) + '万' : v) },
+                    ticks: { color: palette.text, font: { size: 10 }, callback: (v) => rate ? (v + '%') : (Math.abs(v) >= 10000 ? (v / 10000).toFixed(1) + '万' : v) },
                 },
             },
         },
@@ -7413,7 +9222,8 @@ function renderReturnPie(ctx, info) {
             labels: entries.map(e => e.name || accountById(e.id)?.name || '未知'),
             datasets: [{
                 data: entries.map(e => e.signed),
-                backgroundColor: entries.map(e => e.id === '__others__' ? PIE_OTHERS_COLOR : (e.amount < 0 ? '#ff3b30' : (e.color || '#34c759'))),
+                // 投资收益按 A 股习惯：盈利红、亏损绿
+                backgroundColor: entries.map(e => e.id === '__others__' ? PIE_OTHERS_COLOR : (e.amount < 0 ? '#34c759' : (e.color || '#ff3b30'))),
                 borderWidth: 0, hoverOffset: 10,
                 radius: (ctx.parentElement ? ctx.parentElement.clientWidth : 999) < 520 ? '68%' : '100%',
             }],
@@ -7478,10 +9288,138 @@ function renderReturnBreakdown(info) {
                     <span class="breakdown-name">${r.name}</span>
                     <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}${rateTxt ? ` <span class="breakdown-rate${rateCls}">${rateTxt}</span>` : ''}</span>
                 </div>
-                <div class="breakdown-bar"><div class="breakdown-bar-fill" style="width:${Math.min(pct, 100).toFixed(1)}%;background:${r.amount < 0 ? '#ff3b30' : r.color}"></div></div>
+                <div class="breakdown-bar"><div class="breakdown-bar-fill" style="width:${Math.min(pct, 100).toFixed(1)}%;background:${r.amount < 0 ? '#34c759' : r.color}"></div></div>
             </div>
         </div>`;
     }).join('');
+}
+
+// ==================== 月度收益格子（日历图）====================
+// 一年 12 格。投资收益整页按 A 股习惯上色：盈利红、亏损绿（css 里 #view-returns 覆盖了全局的 .income/.expense），
+// 所以这里的格子、上面的图表和下面的排行是同一套颜色；交易记录、资产负债不受影响。
+const CN_MONTHS = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
+
+function returnCalYears() {
+    return returnYears().map(Number).filter(Boolean);
+}
+
+function returnCalYear() {
+    const ys = returnCalYears();
+    const wanted = Number(state.returnCalYear);
+    if (wanted && ys.indexOf(wanted) >= 0) return wanted;
+    const pageYear = Number(state.returnYear || returnPeriodInfo().year);
+    if (pageYear && ys.indexOf(pageYear) >= 0) return pageYear;
+    return ys[ys.length - 1] || new Date().getFullYear();
+}
+
+function setReturnCalMetric(m) {
+    state.returnCalMetric = m === 'rate' ? 'rate' : 'amount';
+    document.querySelectorAll('#retCalMetric [data-ret-cal-metric]').forEach(b =>
+        b.classList.toggle('active', b.dataset.retCalMetric === state.returnCalMetric));
+    renderReturnCalendar();
+}
+
+function setReturnCalMode(m) {
+    state.returnCalMode = m === 'year' ? 'year' : 'month';
+    document.querySelectorAll('#retCalMode [data-ret-cal-mode]').forEach(b =>
+        b.classList.toggle('active', b.dataset.retCalMode === state.returnCalMode));
+    renderReturnCalendar();
+}
+
+// 两种视图共用同一块格子，避免样式走偏
+function calTile(cls, label, shown, attrs) {
+    return `<div class="ret-cal-cell ${cls}"${attrs || ''}>
+        <span class="rc-month">${_esc(label)}</span>
+        <span class="rc-val">${_esc(shown || '')}</span>
+    </div>`;
+}
+
+// 正负决定配色；val 为 null 表示"算不出"，用灰色 + —
+function tileCls(val, has) {
+    if (!has) return 'none';
+    if (val === null || val === undefined) return 'unknown';
+    return val > 0 ? 'up' : (val < 0 ? 'down' : 'flat');
+}
+
+function renderReturnCalendar() {
+    const card = document.getElementById('retCalCard');
+    if (!card) return;
+    const months = returnMonths();
+    const years = returnCalYears();
+    if (!years.length) { card.classList.add('hidden'); return; }
+    card.classList.remove('hidden');
+
+    const rate = state.returnCalMetric === 'rate';
+    const byYear = state.returnCalMode === 'year';
+    const year = returnCalYear();
+
+    // 年份下拉只在月收益视图有意义
+    const ySel = document.getElementById('retCalYearSelect');
+    if (ySel) {
+        ySel.classList.toggle('hidden', byYear);
+        ySel.innerHTML = years.map(y => `<option value="${y}">${y} 年</option>`).join('');
+        ySel.value = String(year);
+    }
+
+    const cells = [];
+    let amountTotal = 0, cum = null;
+
+    if (byYear) {
+        years.forEach(y => {
+            const ms = months.filter(m => m.slice(0, 4) === String(y));
+            const amount = returnSummary(ms).total;
+            const r = portfolioCumulative(ms).cumulative;
+            const val = rate ? r : amount;
+            cells.push(calTile(tileCls(val, true), `${y} 年`,
+                rate ? pctText(r) : formatCurrency(amount),
+                ` data-ret-cal-year="${y}" role="button" tabindex="0"`));
+        });
+        amountTotal = returnSummary(months).total;
+        cum = portfolioCumulative(months);
+    } else {
+        for (let m = 1; m <= 12; m++) {
+            const key = `${year}-${String(m).padStart(2, '0')}`;
+            const has = months.indexOf(key) >= 0;
+            const amount = has ? returnSummary([key]).total : 0;
+            amountTotal += amount;
+            const st = has ? portfolioMonthStats(key) : null;
+            const r = st ? st.rate : null;
+            const val = rate ? r : amount;
+            cells.push(calTile(tileCls(val, has), CN_MONTHS[m - 1],
+                rate ? (has ? pctText(r) : '') : (has ? formatCurrency(amount) : ''),
+                has ? ` data-ret-cal-month="${key}" role="button" tabindex="0"` : ''));
+        }
+        cum = portfolioCumulative(months.filter(m => m.slice(0, 4) === String(year)));
+    }
+
+    document.getElementById('retCalGrid').innerHTML = cells.join('');
+
+    const totalEl = document.getElementById('retCalTotal');
+    if (rate) {
+        const ok = (cum.cumulative || 0) >= 0;
+        totalEl.innerHTML = `${byYear ? '全部累计收益率' : '本年累计收益率'} <b class="${ok ? 'income' : 'expense'}">${pctText(cum.cumulative)}</b>`;
+    } else {
+        totalEl.innerHTML = `${byYear ? '全部收益' : '当年收益'} <b class="${amountTotal >= 0 ? 'income' : 'expense'}">${formatCurrency(amountTotal)}</b>`;
+    }
+    const note = document.getElementById('retCalNote');
+    if (byYear) {
+        note.textContent = rate ? '点年份看该年各月；— = 该年本金未知算不出' : '点年份看该年各月';
+    } else {
+        note.textContent = rate
+            ? '空白 = 该月没记录；— = 缺上月余额，本金未知算不出收益率'
+            : '空白 = 该月没记录';
+    }
+
+    document.querySelectorAll('#retCalGrid [data-ret-cal-month]').forEach(cell => {
+        const open = () => openReturnDetailForMonth(cell.dataset.retCalMonth);
+        cell.addEventListener('click', open);
+        cell.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    });
+    document.querySelectorAll('#retCalGrid [data-ret-cal-year]').forEach(cell => {
+        const open = () => { state.returnCalYear = Number(cell.dataset.retCalYear); setReturnCalMode('month'); };
+        cell.addEventListener('click', open);
+        cell.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    });
 }
 
 function renderReturnMonthly() {
@@ -7534,6 +9472,7 @@ function renderReturnMonthly() {
 function openReturnDetailForPeriod(months, label) {
     if (!months || !months.length) return;
     returnHistoryAccountId = null;
+    markHistoryModalReturnsTone(true);
     const { byAccount } = returnSummary(months);
     const rows = returnCandidateAccounts().map(a => ({
         id: a.id, name: a.name, color: a.color, icon: a.icon, amount: byAccount[a.id] || 0,
@@ -7552,6 +9491,9 @@ function openReturnDetailForPeriod(months, label) {
     if (s) s.textContent = state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner;
     const del = document.getElementById('acctHistDelete');
     if (del) del.style.display = 'none';
+    // 这是"多个账户的期间汇总"，没有单一账户可编辑
+    const editBtn = document.getElementById('acctHistEdit');
+    if (editBtn) editBtn.style.display = 'none';
     const sum = document.getElementById('acctHistSummary');
     const portCum = portfolioCumulative(months);
     if (sum) sum.innerHTML = `<span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">净收益 <b>${formatCurrency(total)}</b></span>
@@ -7588,6 +9530,7 @@ function openReturnHistoryForAccount(accountId, label) {
     if (!a) return;
     returnHistoryAccountId = accountId;
     historyAccountId = null;
+    markHistoryModalReturnsTone(true);
     const iconEl = document.getElementById('acctHistIcon');
     if (iconEl) {
         iconEl.style.background = `${a.color}22`;
@@ -7600,6 +9543,8 @@ function openReturnHistoryForAccount(accountId, label) {
     if (s) s.textContent = '收益历史';
     const del = document.getElementById('acctHistDelete');
     if (del) del.style.display = 'none';
+    const editBtn = document.getElementById('acctHistEdit');
+    if (editBtn) { editBtn.style.display = 'flex'; editBtn.onclick = () => openAccountEdit(accountId); }
     renderReturnAccountHistory();
     const modal = document.getElementById('accountHistoryModal');
     if (modal) { modal.classList.remove('hidden'); raiseOverlay('accountHistoryModal'); }
@@ -7629,6 +9574,7 @@ function renderReturnAccountHistory() {
         <div class="bal-history-row">
             <span class="bh-month">${r.month.replace('-', '年')}月${state.balanceOwner === 'all' ? `<span class="bh-member">${_esc(r.member || '')}</span>` : ''}</span>
             <span class="bh-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)} <span class="breakdown-rate ${mCls}">${mTxt}</span></span>
+            <button class="bh-edit" onclick="editReturnRecord('${r.id}')" title="修改这一期"><i class="fa-solid fa-pen"></i></button>
             <button class="bh-delete" onclick="deleteReturnSnapshot('${r.id}')" title="删除这一期"><i class="fa-solid fa-xmark"></i></button>
         </div>`;
     }).join('') : '<div class="breakdown-empty">该账户还没有记录过收益</div>';
@@ -7647,145 +9593,6 @@ function deleteReturnSnapshot(id) {
 }
 
 // ---------------- 记收益弹窗 ----------------
-function openReturnModal(month) {
-    const info = returnPeriodInfo();
-    const want = month || info.month || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-    paintModalMonth('return', want);
-    const ms = document.getElementById('returnMemberSelect');
-    if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
-    renderReturnEntry();
-    const modal = document.getElementById('returnModal');
-    if (modal) { modal.classList.remove('hidden'); raiseOverlay('returnModal'); }
-}
-
-function closeReturnModal() {
-    const modal = document.getElementById('returnModal');
-    if (modal) modal.classList.add('hidden');
-}
-
-function renderReturnEntry() {
-    const month = getModalMonth('return');
-    if (!month) return;
-    const ms = document.getElementById('returnMemberSelect');
-    if (ms) {
-        const want = ms.value || state.balanceMembers[0] || '本人';
-        ms.innerHTML = state.balanceMembers.map(m => `<option ${m === want ? 'selected' : ''}>${m}</option>`).join('');
-    }
-    const member = ms ? ms.value : (state.balanceMembers[0] || '本人');
-    const sub = document.getElementById('returnModalSub');
-    if (sub) sub.textContent = month ? `${member} · ${month.replace('-', '年')}月各账户收益` : '请先选择月份';
-    const list = document.getElementById('returnEntryList');
-    if (!list) return;
-    const accounts = returnCandidateAccounts();
-    if (!accounts.length) {
-        list.innerHTML = '<div class="breakdown-empty">还没有资产账户，先到「资产负债」里添加</div>';
-        return;
-    }
-    const existing = returnsAtMonth(month, member);
-    const invIds = investmentAccountIds();
-    // 净入金按「成员+账户+月份」取已有值，供账户级收益率使用
-    const flowOf = (accId) => {
-        const hit = state.returns.find(r => r.accountId === accId && r.month === month
-            && (member === 'all' ? true : r.member === member)
-            && r.flow !== undefined && r.flow !== null && r.flow !== '');
-        return hit ? hit.flow : '';
-    };
-    list.innerHTML = accounts.map(a => {
-        const needFlow = invIds.includes(a.id) || existing[a.id] !== undefined;
-        const st = needFlow ? portfolioMonthStats(month, [a.id], null, member) : null;
-        const badge = st ? `<span class="be-rate${st.rate === null ? ' unknown' : (st.rate > 0 ? ' up' : (st.rate < 0 ? ' down' : ''))}" data-account="${a.id}">${st.rate === null ? '本金未知' : pctText(st.rate)}</span>` : '';
-        return `
-        <div class="bal-entry-row ${needFlow ? 'has-flow' : ''}">
-            <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
-            <div class="be-name">${_esc(a.name)}${badge}<span class="be-kind asset">${_esc(a.group || '资产')}</span></div>
-            <div class="be-input">
-                <span class="currency-symbol">${state.settings.currency}</span>
-                <input type="number" step="0.01" class="text-input be-field" data-account="${a.id}"
-                       value="${existing[a.id] !== undefined ? existing[a.id] : ''}" placeholder="收益">
-            </div>
-            ${needFlow ? `<div class="be-input be-flow-input" title="本月从外部转入(+)或转出(−)；账户之间互转不用填；留空表示未录">
-                <span class="be-flow-label">净入金</span>
-                <input type="number" step="0.01" class="text-input be-flow" data-account="${a.id}"
-                       value="${flowOf(a.id)}" placeholder="0">
-            </div>` : ''}
-        </div>`;
-    }).join('');
-    bindReturnRatePreview();
-}
-
-// 边填边算：把弹窗里的未保存数值当草稿喂给收益率算法，实时更新那枚角标
-function bindReturnRatePreview() {
-    const list = document.getElementById('returnEntryList');
-    if (!list || list.dataset.previewBound === '1') return;
-    list.dataset.previewBound = '1';
-    list.addEventListener('input', () => {
-        const ms = document.getElementById('returnMemberSelect');
-        const month = getModalMonth('return');
-        const member = ms ? ms.value : (state.balanceMembers[0] || '本人');
-        if (!month) return;
-        list.querySelectorAll('.be-rate').forEach(badge => {
-            const accId = badge.dataset.account;
-            const profitEl = list.querySelector(`.be-field[data-account="${CSS.escape(accId)}"]`);
-            const flowEl = list.querySelector(`.be-flow[data-account="${CSS.escape(accId)}"]`);
-            const st = portfolioMonthStats(month, [accId], {
-                [accId]: { profit: profitEl ? profitEl.value : '', flow: flowEl ? flowEl.value : '' },
-            }, member);
-            badge.textContent = st.rate === null ? '本金未知' : pctText(st.rate);
-            badge.classList.toggle('unknown', st.rate === null);
-            badge.classList.toggle('up', st.rate !== null && st.rate > 0);
-            badge.classList.toggle('down', st.rate !== null && st.rate < 0);
-        });
-    });
-}
-
-function clearReturnInputs() {
-    document.querySelectorAll('#returnEntryList .be-field').forEach(inp => { inp.value = ''; });
-}
-
-function saveReturns() {
-    const month = getModalMonth('return');
-    if (!month) { showToast('请选择月份', 'error'); return; }
-    const ms = document.getElementById('returnMemberSelect');
-    const member = (ms && ms.value) || state.balanceMembers[0] || '本人';
-    let saved = 0;
-    document.querySelectorAll('#returnEntryList .be-field').forEach(inp => {
-        const raw = String(inp.value).trim();
-        if (raw === '') return;
-        const amount = parseFloat(raw);
-        if (!isFinite(amount)) return;
-        const accountId = inp.dataset.account;
-        const id = _rebalanceId(member, accountId, month);
-        const flowEl = document.querySelector(`#returnEntryList .be-flow[data-account="${accountId}"]`);
-        const flowRaw = flowEl ? String(flowEl.value).trim() : '';
-        const flow = flowRaw === '' ? null : (parseFloat(flowRaw) || 0);
-        const existing = state.returns.find(r => r.id === id);
-        if (existing) {
-            const sameAmount = existing.amount === amount;
-            const sameFlow = (existing.flow === null || existing.flow === undefined) ? flow === null : Number(existing.flow) === flow;
-            if (sameAmount && sameFlow) return;
-            existing.amount = amount;
-            if (flow !== null) existing.flow = flow; else delete existing.flow;
-            existing.updatedAt = Date.now();
-        } else {
-            const rec = { id, member, accountId, month, amount, createdAt: Date.now(), updatedAt: Date.now() };
-            if (flow !== null) rec.flow = flow;
-            state.returns.push(rec);
-        }
-        saved += 1;
-    });
-    if (!saved) { showToast('没有需要保存的收益', 'error'); return; }
-    flushState();
-    closeReturnModal();
-    state.returnPeriod = 'month';
-    const [y, m] = month.split('-').map(Number);
-    state.returnYear = y;
-    state.returnMonth = m;
-    state.returnGran = null;
-    document.querySelectorAll('[data-ret-period]').forEach(b => b.classList.toggle('active', b.dataset.retPeriod === 'month'));
-    renderReturns();
-    showToast(`已保存 ${saved} 个账户的收益`, 'success');
-}
-
 function initReturnListeners() {
     document.querySelectorAll('[data-ret-period]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -7802,13 +9609,28 @@ function initReturnListeners() {
     document.querySelectorAll('#view-returns [data-ret-gran]').forEach(btn => {
         btn.addEventListener('click', () => setReturnGran(btn.dataset.retGran));
     });
+    document.querySelectorAll('#retCalMetric [data-ret-cal-metric]').forEach(btn => {
+        btn.addEventListener('click', () => setReturnCalMetric(btn.dataset.retCalMetric));
+    });
+    document.querySelectorAll('#tacTabs [data-tac-tab]').forEach(btn => {
+        btn.addEventListener('click', () => setTacTab(btn.dataset.tacTab));
+    });
+    document.querySelectorAll('#retMetric [data-ret-metric]').forEach(btn => {
+        btn.addEventListener('click', () => setReturnMetric(btn.dataset.retMetric));
+    });
+    document.querySelectorAll('#retCalMode [data-ret-cal-mode]').forEach(btn => {
+        btn.addEventListener('click', () => setReturnCalMode(btn.dataset.retCalMode));
+    });
+    const calYearSel = document.getElementById('retCalYearSelect');
+    if (calYearSel) calYearSel.addEventListener('change', e => {
+        state.returnCalYear = Number(e.target.value);
+        renderReturnCalendar();
+    });
     const ySel = document.getElementById('returnYearSelect');
     if (ySel) ySel.addEventListener('change', e => { state.returnYear = parseInt(e.target.value); state.returnMonth = null; renderReturns(); });
     const mSel = document.getElementById('returnMonthSelect');
     if (mSel) mSel.addEventListener('change', e => { state.returnMonth = parseInt(e.target.value); renderReturns(); });
-    bindModalMonth('return', renderReturnEntry);
-    const rMemberSel = document.getElementById('returnMemberSelect');
-    if (rMemberSel) rMemberSel.addEventListener('change', renderReturnEntry);
+
 }
 
 // ---- Event Listeners ----
@@ -7886,6 +9708,9 @@ function initEventListeners() {
 
     // Balance sheet view
     initBalanceListeners();
+    initAccountEditModal();
+    initRecurQueueModal();
+    initInsClaimModal();
 
     // 四笔钱
     initFundListeners();

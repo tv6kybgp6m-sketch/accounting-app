@@ -42,6 +42,7 @@ let BRIDGE_JS = """
       icloud: {
         isAvailable: function () { return api._call('icloud.isAvailable', []); },
         readData: function () { return api._call('icloud.readData', []); },
+        readAll: function () { return api._call('icloud.readAll', []); },
         writeData: function (p, e) { return api._call('icloud.writeData', [p, e]); },
         onFileChange: function (cb) { window.__icloudChangeCb = cb; return api._call('icloud.onFileChange', []); }
       }
@@ -173,6 +174,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
             respond(id: id, ok: true, result: icloudAvailable())
         case "icloud.readData":
             respond(id: id, ok: true, result: readICloud() ?? NSNull())
+        case "icloud.readAll":
+            respond(id: id, ok: true, result: readICloudAll())
         case "icloud.writeData":
             writeICloud(args: args, id: id)
         case "icloud.onFileChange":
@@ -256,6 +259,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
               let data = str.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) else { return nil }
         return obj
+    }
+
+    // 同步文件夹里**全部**账本（已解析对象，按修改时间从旧到新）。
+    // 网页的 mergeAllCloud() 会逐份合并；只挑"最新那一份"的老做法会被自己每次保存
+    // 刷新的时间戳压住，手机导出的那份（以及 iOS 生成的"副本"）就永远合不进来。
+    // 解析失败的文件直接跳过，不因为一个坏文件把整批同步拖垮。
+    func readICloudAll() -> [Any] {
+        let dir = icloudDirURL()
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return [] }
+        let mtime: (URL) -> Date = { url in
+            (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        }
+        let jsons = files
+            .filter { $0.pathExtension.lowercased() == "json" }
+            .sorted { mtime($0) < mtime($1) }
+        var out: [Any] = []
+        for f in jsons {
+            guard let str = try? String(contentsOf: f, encoding: .utf8),
+                  let data = str.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) else { continue }
+            out.append(obj)
+        }
+        return out
     }
 
     func writeICloud(args: [Any], id: Int) {

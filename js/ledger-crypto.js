@@ -229,11 +229,13 @@ const LedgerCrypto = (() => {
         return { enc: ENC_MAGIC, v: 1, iv: b64(iv), data: b64(ct), keyring: { v: kring.v, alg: 'AES-GCM', pass: kring.pass, recovery: kring.recovery, hint: kring.hint } };
     }
 
-    // 封套 → 明文。优先用本机主密钥，没有就用口令/恢复码现场解
+    // 封套 → 明文。优先用本机主密钥；密钥不对时用口令重新解并覆盖本机缓存
     async function decryptEnvelope(env, secret) {
         if (!env || env.enc !== ENC_MAGIC) throw new Error('不是加密文件');
         const kr = env.keyring || keyring();
         if (!kr) throw new Error('缺少密钥信息');
+        const doDecrypt = async (k) => td.decode(
+            await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(env.iv) }, k, unb64(env.data)));
         let key = cachedKey;
         if (!key) {
             const stored = await idbGet('master');
@@ -242,10 +244,18 @@ const LedgerCrypto = (() => {
         if (!key) {
             if (!secret) throw new Error('NEED_SECRET');
             await unlock(secret, kr);
-            key = cachedKey;
+            return await doDecrypt(cachedKey);
         }
-        const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(env.iv) }, key, unb64(env.data));
-        return td.decode(pt);
+        try {
+            return await doDecrypt(key);
+        } catch (e) {
+            // 本机有密钥但开不了这份数据 —— 多半是两台设备各自点了"开启加密"，
+            // 于是有两把随机主密钥，同一个口令也互相打不开。
+            // 要用口令重新解出真正的主密钥并覆盖本机缓存，而不是报"需要口令"就完事。
+            if (!secret) throw new Error('WRONG_KEY');
+            await unlock(secret, kr);
+            return await doDecrypt(cachedKey);
+        }
     }
 
     function looksEncrypted(obj) { return !!(obj && typeof obj === 'object' && obj.enc === ENC_MAGIC); }
