@@ -3969,12 +3969,18 @@ table.bill-stats {
 /* ---- 记月度账单：行=钱包、列=账户的一张网格表 ----
    用 CSS grid 而不是 <table>：表格布局会把行高交给"最高的那个格子"，
    收益/净入金那种多出来的格子一叠加，整行就被撑到 180 多像素，怎么调都不对。 */
-.mw-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
+/* 记月度账单的弹窗要装下一整张横表：默认 460px 的弹窗宽度根本放不下，
+   一放不下就变成左右拉滚动条，录一行要来回拖，所以这个弹窗单独加宽。 */
+#monthlyModal .modal { width: min(1100px, 94vw); }
+
+.mw-scroll { overflow: visible; padding-bottom: 2px; }
+/* 列数固定（类别列 + 负债/收益/净入金），一律 1fr 等宽、总宽 100%：
+   不管你开了多少个账户，表格就这么宽，永远一屏看完，不出现横向滚动条。 */
 .mw-grid {
     display: grid;
-    grid-template-columns: 92px repeat(var(--mw-cols, 4), minmax(84px, 1fr)) 88px 84px 84px 124px;
+    grid-template-columns: var(--mw-name-w, 84px) repeat(var(--mw-cols, 7), minmax(0, 1fr)) var(--mw-sum-w, 156px);
     gap: 4px 6px; align-items: center;
-    min-width: max-content;
+    width: 100%;
 }
 .mw-tr { display: contents; }
 .mw-h {
@@ -3982,12 +3988,16 @@ table.bill-stats {
     text-align: center; padding: 0 2px 2px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.mw-corner, .mw-rowname { position: sticky; left: 0; z-index: 2; background: var(--bg-modal); }
 .mw-corner { text-align: left; padding-left: 2px; }
 .mw-rowname { display: flex; align-items: center; min-height: 38px; padding: 0 10px 0 2px; }
 .mw-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mw-c { display: flex; align-items: center; justify-content: center; min-height: 38px; }
-.mw-c .text-input { width: 100%; padding: 6px 6px; font-size: 13px; text-align: center; }
+.mw-c { display: flex; align-items: center; justify-content: center; min-height: 38px; min-width: 0; }
+.mw-c .text-input { width: 100%; min-width: 0; padding: 6px 6px; font-size: 13px; text-align: center; }
+/* 一个钱包里同类资产有好几个账户时，格子纵向叠，每个前面挂一个极小的账户名 */
+.mw-tag {
+    font-size: 9px; line-height: 11px; color: var(--text-tertiary);
+    text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .mw-c input::placeholder { color: var(--text-quaternary, var(--text-tertiary)); opacity: .5; }
 .mw-off { background: repeating-linear-gradient(45deg, transparent 0 5px, rgba(128,128,128,.06) 5px 10px); border-radius: 8px; }
 .mw-stack { flex-direction: column; gap: 3px; align-items: stretch; padding: 3px 0; }
@@ -3997,7 +4007,7 @@ table.bill-stats {
 .mw-sumcol .mw-rownet { font-size: 10.5px; color: var(--text-secondary); white-space: nowrap; }
 .mw-sumcol .mw-rownet b { font-variant-numeric: tabular-nums; }
 .mw-total { width: 100%; padding: 3px 6px; font-size: 11px; }
-.mw-diff { font-size: 10px; white-space: nowrap; min-height: 12px; }
+.mw-diff { font-size: 10px; min-height: 12px; line-height: 1.25; }
 .mw-diff.ok { color: var(--income); }
 .mw-diff.warn { color: #ff9500; }
 .mw-tr.be-editing .mw-rowname, .mw-tr.be-editing .mw-c { background: rgba(10, 132, 255, .08); }
@@ -4033,8 +4043,15 @@ table.bill-stats {
 .bw-body { padding: 2px 10px 8px; }
 .bw-body .breakdown-item { background: var(--bg-card); border-radius: 10px; margin-bottom: 4px; }
 
-@media (max-width: 640px) {
-    .mw-grid { grid-template-columns: 78px repeat(var(--mw-cols, 4), minmax(76px, 1fr)) 76px 74px 74px 104px; }
+/* 手机上屏幕就这么宽，十列硬塞进 375px 每列只剩 30px、数字根本看不清，
+   这时才允许横向滚动，并把钱包名列钉在左边不跟着滚。 */
+@media (max-width: 760px) {
+    .mw-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .mw-grid {
+        width: auto; min-width: max-content;
+        grid-template-columns: 72px repeat(var(--mw-cols, 7), minmax(78px, 1fr)) 124px;
+    }
+    .mw-corner, .mw-rowname { position: sticky; left: 0; z-index: 2; background: var(--bg-modal); }
     .mw-rowname { min-height: 34px; }
     .mw-c { min-height: 34px; }
 }
