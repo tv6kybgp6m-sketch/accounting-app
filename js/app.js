@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.35.4';
+const APP_VERSION = '1.35.5';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -5641,14 +5641,34 @@ function balAccounts() { return state.accounts; }
 function balanceMonths() { return [...new Set(state.balances.map(b => b.month))].sort(); }
 function balanceYears() { return [...new Set(balanceMonths().map(m => m.slice(0, 4)))].sort(); }
 
-// 只取「这个月本身」记过的账户。余额是快照不是流水，缺月不能拿上期顶替
+// 只取「这个月本身」记过的账户。余额是快照不是流水，缺月不能拿上期顶替。
+// 一个账户现在可能同时在好几个类别里有数（支付宝既有余额又有花呗），
+// 所以这里返回的是该账户的**净额**：各类资产相加、负债那一类减掉。
 function balancesAtMonth(month, member = state.balanceOwner) {
     const map = {};
     if (!month) return map;
     state.balances
         .filter(b => b.month === month && (member === 'all' || b.member === member))
-        .forEach(b => { map[b.accountId] = (map[b.accountId] || 0) + (Number(b.amount) || 0); });
+        .forEach(b => {
+            const v = Math.abs(Number(b.amount) || 0);
+            const neg = balanceCatOf(b) === BAL_CAT_LIAB;
+            map[b.accountId] = (map[b.accountId] || 0) + (neg ? -v : v);
+        });
     return map;
+}
+
+// 录入表格用：把每一格（账户 × 类别）的数原样取出来，负债类也是正数
+function balanceCellsAtMonth(month, member = state.balanceOwner) {
+    const cells = {};
+    if (!month) return cells;
+    state.balances
+        .filter(b => b.month === month && (member === 'all' || b.member === member))
+        .forEach(b => {
+            const cat = balanceCatOf(b);
+            const per = (cells[b.accountId] = cells[b.accountId] || {});
+            per[cat] = (per[cat] || 0) + Math.abs(Number(b.amount) || 0);
+        });
+    return cells;
 }
 
 function monthHasRecords(month) {
@@ -5670,12 +5690,14 @@ function carriedBalances(month, member = state.balanceOwner) {
     return map;
 }
 
+// 一个账户可能同时有资产和负债（支付宝里有余额也有花呗），所以不再靠账户的
+// 「资产 / 负债」标签去加减 —— 直接看这个账户的净额是正还是负：正的算资产，负的算负债
 function totalsFromMap(map) {
     let asset = 0, liability = 0;
     balAccounts().forEach(a => {
         const v = map[a.id];
         if (v === undefined || v === null) return;
-        if (a.kind === 'asset') asset += v; else liability += v;
+        if (v >= 0) asset += v; else liability += -v;
     });
     return { asset, liability, net: asset - liability, ratio: asset > 0 ? liability / asset : 0 };
 }
@@ -7028,6 +7050,25 @@ function assetClassName(key) {
     return (d || ASSET_CLASS_OTHER).name;
 }
 
+// ---- 余额的记账单位：账户 × 类别 ----
+// 一条余额 =「某个账户在某一类资产/负债上有多少钱」，不再是一个账户一个月只有一个数。
+// 负债只是类别之一（BAL_CAT_LIAB），跟现金、货币基金并列，不再当作账户的一种"类型"
+// —— 因为一个账户本来就既可能有资产也可能有负债。
+const BAL_CATS = ['cash', 'mmf', 'fixed', 'stock', 'other'];
+const BAL_CAT_LIAB = 'liab';
+const BAL_CAT_NAMES = { cash: '现金', mmf: '货币基金', fixed: '定期存款', stock: '股票基金', other: '其他', liab: '负债' };
+function balanceCatName(k) { return BAL_CAT_NAMES[k] || assetClassName(k); }
+
+// 老数据（还没有类别这一说的时候）一条账户一个月只有一个数，没有 cat 字段：
+// 按账户名推断它属于哪一类，负债账户直接归到负债类 —— 历史记录一条不丢，也不用手工迁移
+function balanceCatOf(b) {
+    if (b && b.cat) return b.cat;
+    const a = accountById(b && b.accountId);
+    if (!a) return 'other';
+    if (a.kind === 'liability') return BAL_CAT_LIAB;
+    return assetClassOf(a);
+}
+
 // 没设过钱包的账户按名字猜一个初始值，省得几十个点要一个个填
 function guessWalletFromName(name) {
     const n = String(name || '');
@@ -7076,7 +7117,8 @@ function captureMonthlyInputs() {
     const list = document.getElementById('monthlyEntryList');
     if (!list) return;
     const grab = (sel, key, attr) => list.querySelectorAll(sel).forEach(el => { monthlyInput[key][el.dataset[attr]] = el.value; });
-    grab('[data-bal]', 'bal', 'bal');
+    // 一格 = 账户 × 类别，草稿也按「账户__类别」存，否则同一账户几列的输入会互相覆盖
+    list.querySelectorAll('[data-bal]').forEach(el => { monthlyInput.bal[el.dataset.cell] = el.value; });
     grab('[data-ret]', 'ret', 'ret');
     grab('[data-flow-in]', 'flow', 'flowIn');
     grab('[data-wallet-total]', 'wt', 'walletTotal');
@@ -7136,14 +7178,13 @@ function renderMonthlyEntry() {
     }
     const member = monthlyMember();
     const sub = document.getElementById('monthlyModalSub');
-    if (sub) sub.textContent = month ? `${member} · ${month.replace('-', '年')}月：一行一个钱包，横着填它的各类资产、负债、收益、净入金；填完这一屏资产负债和投资收益就都记好了` : '请先选择月份';
+    if (sub) sub.textContent = month ? `${member} · ${month.replace('-', '年')}月：一行一个账户，横着填它的各类资产、负债、收益、净入金；填完这一屏资产负债和投资收益就都记好了` : '请先选择月份';
     if (!state.accounts.length) {
         list.innerHTML = '<div class="breakdown-empty">还没有账户，先到「账户」里添加</div>';
         return;
     }
     if (!month) { list.innerHTML = ''; return; }
     ensureAccountOrder();
-    const balAt = balancesAtMonth(month, member);
     const retAt = returnsAtMonth(month, member);
     const flowAt = {};
     state.returns.forEach(r => {
@@ -7153,12 +7194,17 @@ function renderMonthlyEntry() {
         flowAt[r.accountId] = r.flow;
     });
 
-    // 横轴 = 资产类别 + 负债 + 收益 + 净入金 + 小计对账；竖轴 = 一个钱包一行（没填钱包的进「未分组」）
-    const assets = accountsSortedByKind('asset');
-    const liabs = accountsSortedByKind('liability');
-    const byClass = {};
-    assets.forEach(a => { const k = assetClassOf(a); (byClass[k] = byClass[k] || []).push(a); });
-    const cats = ASSET_CLASS_ORDER.filter(k => byClass[k] && byClass[k].length);
+    // 横轴 = 资产类别（现金/货币基金/定期存款/股票基金）+ 负债 + 收益 + 净入金 + 小计对账
+    // 竖轴 = 账户管理里的每一个账户，一个账户一行，**不再分资产账户还是负债账户**
+    // —— 同一个账户本来就既可能有资产也可能有负债（支付宝里有余额也有花呗欠款），
+    // 所以「负债」只是横轴上的一列，不是账户的属性。
+    const rowsOf = state.accounts.slice().sort((a, b) =>
+        (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
+    const cells = balanceCellsAtMonth(month, member);
+    // 「其他」这一类平时没有，只有当历史里真有归不进前四类的数（房产、公积金…）才显示，
+    // 免得白占一列宽度
+    const otherUsed = state.balances.some(b => balanceCatOf(b) === 'other');
+    const cats = BAL_CATS.filter(k => k !== 'other' || otherUsed);
     const cols = cats.length + 3;      // 类别列 + 负债 + 收益 + 净入金（「小计/对账」单独给固定宽度）
     const earnsSet = new Set(returnEntryAccounts(month, member).map(a => a.id));
     const val = (key, id, saved) => {
@@ -7166,47 +7212,29 @@ function renderMonthlyEntry() {
         if (typed === undefined) return saved === undefined || saved === null ? '' : saved;
         return String(typed).trim() === '' ? '' : typed;
     };
-    const balCell = a => val('bal', a.id, balAt[a.id]);
-    const retCell = a => earnsSet.has(a.id) ? val('ret', a.id, retAt[a.id]) : undefined;
-    const flowCell = a => earnsSet.has(a.id) ? val('flow', a.id, flowAt[a.id]) : undefined;
+    const num = (v) => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
+    const cellVal = (a, cat) => val('bal', a.id + '__' + cat, (cells[a.id] || {})[cat]);
+    const retCell = a => val('ret', a.id, retAt[a.id]);
+    const flowCell = a => val('flow', a.id, flowAt[a.id]);
 
-    // 一个钱包里同类资产可能有好几个账户（两张储蓄卡、两只基金）：这时格子纵向叠起来，
-    // 每个前面带一个极小的账户名，不然填进去根本分不清是哪个账户的数
-    const tag = (a, many) => (many ? `<span class="mw-tag">${_esc(a.name)}</span>` : '');
-    const box = (list, extra, mk) => {
-        if (!list.length) return '<div class="mw-c mw-off"></div>';
-        const many = list.length > 1;
-        return `<div class="mw-c${many ? ' mw-stack multi' : ''}${extra || ''}">${list.map(a => mk(a, many)).join('')}</div>`;
-    };
+    const balInput = (a, cat, cls) => `<input type="number" step="0.01" min="0" class="text-input be-field${cls || ''}"
+             data-bal="${a.id}" data-cat="${cat}" data-cell="${a.id}__${cat}"
+             value="${_esc(cellVal(a, cat))}" placeholder="—" title="${_esc(a.name)} · ${balanceCatName(cat)}">`;
 
-    const rows = walletGroups().map(g => {
-        const mine = new Set(g.rows.map(a => a.id));
-        const name = g.name;
-        const catCell = k => box((byClass[k] || []).filter(a => mine.has(a.id)), '',
-            (a, many) => `${tag(a, many)}<input type="number" step="0.01" min="0" class="text-input be-field" data-bal="${a.id}"
-                 value="${_esc(balCell(a))}" placeholder="—" title="${_esc(a.name)} · ${assetClassName(k)}">`);
-        const liabCell = box(liabs.filter(a => mine.has(a.id)), ' mw-liabcell',
-            (a, many) => `${tag(a, many)}<input type="number" step="0.01" min="0" class="text-input be-field mw-liab" data-bal="${a.id}"
-                 value="${_esc(balCell(a))}" placeholder="0" title="${_esc(a.name)} · 负债">`);
-        const earnRows = assets.filter(a => mine.has(a.id) && earnsSet.has(a.id));
-        // 收益下面挂的收益率角标只在"这个钱包就一个生息账户"时出现：
-        // 多个账户各挂一个角标，行会被撑得老高，反而看不清
-        const retCellHtml = box(earnRows, '',
-            (a, many) => `${tag(a, many)}<input type="number" step="0.01" class="text-input be-field" data-ret="${a.id}"
-                 value="${_esc(retCell(a))}" placeholder="0" title="${_esc(a.name)} · 本月投资收益">
-                 ${many ? '' : `<span class="be-rate" data-rate-for="${a.id}"></span>`}`);
-        const flowCellHtml = box(earnRows, '',
-            (a, many) => `${tag(a, many)}<input type="number" step="0.01" class="text-input be-flow" data-flow-in="${a.id}"
-                 value="${_esc(flowCell(a))}" placeholder="0" title="${_esc(a.name)} · 本月净入金（买进的钱）">`);
-        const net = assets.filter(a => mine.has(a.id)).reduce((t, a) => t + (parseFloat(monthlyInput.bal[a.id] !== undefined ? monthlyInput.bal[a.id] : (balAt[a.id] === undefined ? 0 : balAt[a.id])) || 0), 0)
-            - liabs.filter(a => mine.has(a.id)).reduce((t, a) => t + (parseFloat(monthlyInput.bal[a.id] !== undefined ? monthlyInput.bal[a.id] : (balAt[a.id] === undefined ? 0 : balAt[a.id])) || 0), 0);
-        return `<div class="mw-tr" data-mw-wallet="${_esc(name)}">
-            <div class="mw-rowname"><span class="mw-name">${_esc(name)}</span></div>
-            ${cats.map(catCell).join('')}
-            ${liabCell}${retCellHtml}${flowCellHtml}
+    const rows = rowsOf.map(a => {
+        const net = cats.reduce((t, k) => t + num(cellVal(a, k)), 0) - num(cellVal(a, BAL_CAT_LIAB));
+        return `<div class="mw-tr" data-mw-account="${a.id}">
+            <div class="mw-rowname"><span class="mw-name">${_esc(a.name)}</span></div>
+            ${cats.map(k => `<div class="mw-c">${balInput(a, k)}</div>`).join('')}
+            <div class="mw-c">${balInput(a, BAL_CAT_LIAB, ' mw-liab')}</div>
+            <div class="mw-c"><input type="number" step="0.01" class="text-input be-field" data-ret="${a.id}"
+                 value="${_esc(retCell(a))}" placeholder="—" title="${_esc(a.name)} · 本月投资收益">
+                 ${earnsSet.has(a.id) ? `<span class="be-rate" data-rate-for="${a.id}"></span>` : ''}</div>
+            <div class="mw-c"><input type="number" step="0.01" class="text-input be-flow" data-flow-in="${a.id}"
+                 value="${_esc(flowCell(a))}" placeholder="—" title="${_esc(a.name)} · 本月净入金（买进的钱）"></div>
             <div class="mw-c mw-sumcol"><span class="mw-rownet">小计 <b data-wsum>${formatCurrency(Math.round(net * 100) / 100)}</b></span>
                 <input type="number" step="0.01" class="text-input mw-total" placeholder="对账单总额"
-                    data-wallet-total="${_esc(name)}" value="${_esc(monthlyInput.wt[name] || '')}">
+                    data-wallet-total="${a.id}" value="${_esc(monthlyInput.wt[a.id] || '')}">
                 <span class="mw-diff" data-wdiff></span></div>
         </div>`;
     }).join('');
@@ -7217,31 +7245,31 @@ function renderMonthlyEntry() {
     // 和下面那些输入框共用同一批"还没保存的草稿值"，保证两边永远一致。
     const tcell = (key, extra) => `<div class="mw-c mw-tcell${extra || ''}" data-tcol="${key}"><b data-tval>—</b></div>`;
     const pcell = (key, extra) => `<div class="mw-c mw-tcell${extra || ''}" data-pcol="${key}"><b data-pval>—</b></div>`;
-    const catKeys = cats.map(k => 'cat:' + k);
+    const catKeys = cats.map(k => 'cat:' + k).concat(['cat:' + BAL_CAT_LIAB]);
     const summaryRows = `
         <div class="mw-tr mw-total-row">
             <div class="mw-rowname"><span class="mw-name">合计</span></div>
             ${catKeys.map(k => tcell(k)).join('')}
-            ${tcell('__liab')}${tcell('__ret')}${tcell('__flow')}
+            ${tcell('__ret')}${tcell('__flow')}
             <div class="mw-c mw-tcell mw-sumcol" data-tcol="__net"><span class="mw-rownet">净资产 <b data-tval>—</b></span></div>
         </div>
         <div class="mw-tr mw-pct-row">
             <div class="mw-rowname"><span class="mw-name">占比</span></div>
             ${catKeys.map(k => pcell(k)).join('')}
-            ${pcell('__liab')}${pcell('__ret')}${pcell('__flow')}
+            ${pcell('__ret')}${pcell('__flow')}
             ${pcell('__net', ' mw-sumcol')}
         </div>`;
 
     list.innerHTML = `<div class="mw-scroll"><div class="mw-grid" style="--mw-cols:${cols}">
-        <div class="mw-h mw-corner">钱包</div>
-        ${cats.map(k => `<div class="mw-h mw-col" title="${_esc(assetClassName(k))}">${_esc(assetClassName(k))}</div>`).join('')}
+        <div class="mw-h mw-corner">账户</div>
+        ${cats.map(k => `<div class="mw-h mw-col">${_esc(balanceCatName(k))}</div>`).join('')}
         <div class="mw-h mw-col mw-col-liab">负债</div><div class="mw-h mw-col">收益</div>
         <div class="mw-h mw-col">净入金</div><div class="mw-h mw-col mw-col-sum">小计 / 对账</div>
         ${summaryRows}
         ${rows}
     </div></div>`
-        + (assets.some(a => !accountEarnsReturn(a))
-            ? `<div class="re-hidden-note"><span>「收益 / 净入金」两列只给会生收益的账户；改哪些账户生收益，去「口径」面板</span></div>` : '');
+        + `<div class="re-hidden-note"><span>一行就是你在「账户」里加的一个账户，横着填它这个月各类别的金额；
+            同一个账户既可以有资产也可以有负债（余额 + 花呗），不再分资产账户还是负债账户</span></div>`;
     bindMonthlyEntry();
 }
 
@@ -7275,14 +7303,16 @@ function monthlyDraftStats(month, member) {
         draft[id] = draft[id] || {};
         draft[id].flow = raw === '' ? '' : (parseFloat(raw) || 0);
     });
+    // 一个账户在好几列里都有数，收益率要拿它的净资产（各类资产 − 负债）去算
     list.querySelectorAll('[data-bal]').forEach(inp => {
         const raw = String(inp.value).trim();
         if (raw === '') return;
         const v = parseFloat(raw);
         if (!isFinite(v)) return;
         const id = inp.dataset.bal;
+        const isLiab = inp.dataset.cat === BAL_CAT_LIAB;
         draft[id] = draft[id] || {};
-        draft[id].balance = v;
+        draft[id].balance = (draft[id].balance || 0) + (isLiab ? -Math.abs(v) : Math.abs(v));
     });
     return draft;
 }
@@ -7305,10 +7335,9 @@ function updateMonthlyDerived() {
         badge.textContent = noRate;
         badge.className = 'be-rate' + (st.rate === null ? ' unknown' : (st.rate > 0 ? ' up' : (st.rate < 0 ? ' down' : '')));
     });
-    // 2) 每个钱包的小计与对账差额（一行一个钱包：资产 − 负债）
-    //    顺手把纵向合计收下来，给底部「合计」行和「占比」列用
+    // 2) 每行的小计与对账差额（一个账户一行：各类资产相加 − 负债那一格）
+    //    顺手把纵向合计收下来，给上面「合计」行和「占比」行用
     const catSum = {};
-    const colSum = {};
     let sumAsset = 0, sumLiab = 0, sumRet = 0, sumFlow = 0;
     const numOf = inp => {
         const raw = String(inp.value).trim();
@@ -7316,17 +7345,14 @@ function updateMonthlyDerived() {
         const v = parseFloat(raw);
         return isFinite(v) ? v : null;
     };
-    list.querySelectorAll('.mw-tr[data-mw-wallet]').forEach(tr => {
+    list.querySelectorAll('.mw-tr[data-mw-account]').forEach(tr => {
         let net = 0, filled = 0;
         tr.querySelectorAll('[data-bal]').forEach(inp => {
             const v = numOf(inp);
             if (v === null) return;
-            const acct = accountById(inp.dataset.bal);
-            const isLiab = !!(acct && acct.kind === 'liability');
-            net += isLiab ? -v : v;
-            if (isLiab) sumLiab += v; else sumAsset += v;
-            colSum[inp.dataset.bal] = (colSum[inp.dataset.bal] || 0) + v;
-            if (!isLiab) { const ck = assetClassOf(acct); catSum[ck] = (catSum[ck] || 0) + v; }
+            const cat = inp.dataset.cat || 'other';
+            catSum[cat] = (catSum[cat] || 0) + v;
+            if (cat === BAL_CAT_LIAB) { sumLiab += v; net -= v; } else { sumAsset += v; net += v; }
             filled++;
         });
         const sumEl = tr.querySelector('[data-wsum]');
@@ -7358,11 +7384,10 @@ function updateMonthlyDerived() {
             if (!b) return;
             const key = cell.dataset.tcol;
             if (key === '__net') { b.textContent = show(netTotal); return; }
-            if (key === '__liab') { b.textContent = show(sumLiab); return; }
             if (key === '__ret') { b.textContent = show(sumRet); return; }
             if (key === '__flow') { b.textContent = show(sumFlow); return; }
             if (key.indexOf('cat:') === 0) { b.textContent = show(catSum[key.slice(4)] || 0); return; }
-            b.textContent = show(colSum[key] || 0);
+            b.textContent = '—';
         });
     }
 
@@ -7378,8 +7403,7 @@ function updateMonthlyDerived() {
             if (key === '__net') { b.textContent = netTotal ? '100.0%' : '—'; return; }
             if (key === '__ret' || key === '__flow') { b.textContent = '—'; return; }
             if (!netTotal) { b.textContent = '—'; return; }
-            const v = (key === '__liab') ? sumLiab
-                : (key.indexOf('cat:') === 0 ? (catSum[key.slice(4)] || 0) : (colSum[key] || 0));
+            const v = (key.indexOf('cat:') === 0) ? (catSum[key.slice(4)] || 0) : 0;
             b.textContent = v ? (v / netTotal * 100).toFixed(1) + '%' : '—';
         });
     }
@@ -7401,18 +7425,18 @@ function copyLastMonthBalances() {
     const prev = previousMonthOf(month);
     if (!prev) { showToast('没有上个月的记录', 'info'); return; }
     const member = monthlyMember();
-    const prevMap = balancesAtMonth(prev, member);
+    const prevCells = balanceCellsAtMonth(prev, member);
     let filled = 0;
     document.querySelectorAll('#monthlyEntryList [data-bal]').forEach(inp => {
         if (String(inp.value).trim() !== '') return;
-        const v = prevMap[inp.dataset.bal];
+        const v = (prevCells[inp.dataset.bal] || {})[inp.dataset.cat];
         if (v === undefined) return;
         inp.value = v; filled++;
     });
     if (!filled) { showToast('上个月也没有记余额', 'info'); return; }
     monthlyDirty = true;
     updateMonthlyDerived();
-    showToast(`已带入 ${filled} 个账户的上期余额，改成这个月的数就行`, 'success');
+    showToast(`已带入上期 ${filled} 格的数，改成这个月的数就行`, 'success');
 }
 
 function saveMonthly() {
@@ -7421,22 +7445,40 @@ function saveMonthly() {
     const member = monthlyMember();
     const list = document.getElementById('monthlyEntryList');
     if (!list) return;
-    let savedBal = 0, savedRet = 0;
-    // 1) 余额：一条一个「成员+账户+月份」，重记就是覆盖
+    let savedBal = 0, savedRet = 0, removed = 0;
+    // 先把这个成员这个月、这些账户的旧余额整批清掉，再按格子写回去。
+    // 不清的话同一笔数会同时留着「老的一条（没有类别）」和「新的一条（有类别）」，
+    // 下一次读出来直接翻倍 —— 这是改口径时最容易踩的坑。
+    const touched = new Set();
+    const entries = [];
     list.querySelectorAll('[data-bal]').forEach(inp => {
+        const accountId = inp.dataset.bal;
+        const cat = inp.dataset.cat || 'other';
+        touched.add(accountId);
         const raw = String(inp.value).trim();
         if (raw === '') return;
         const amount = parseFloat(raw);
         if (!isFinite(amount) || amount < 0) return;
-        const accountId = inp.dataset.bal;
-        const id = `${member}__${accountId}__${month}`;
-        const existing = state.balances.find(b => b.id === id);
+        entries.push({ id: `${member}__${accountId}__${cat}__${month}`, accountId, cat, amount });
+    });
+    const willWrite = new Set(entries.map(e => e.id));
+    state.balances = state.balances.filter(b => {
+        if (b.month !== month || b.member !== member || !touched.has(b.accountId)) return true;
+        if (willWrite.has(b.id)) return true;      // 这条马上就被覆盖，先留着
+        addTombstone('balances', b.id);            // 留个删除标记，别处同步时这条才不会再被并回来
+        removed++;
+        return false;
+    });
+    // 1) 余额：一条一个「成员 + 账户 + 类别 + 月份」，重记就是覆盖。
+    //    清空一格 = 删掉这条记录，不然把数字擦了它还在，看着像改不动
+    entries.forEach(e => {
+        const existing = state.balances.find(b => b.id === e.id);
         if (existing) {
-            if (existing.amount === amount) return;
-            existing.amount = amount;
+            if (existing.amount === e.amount) { savedBal++; return; }
+            existing.amount = e.amount;
             existing.updatedAt = Date.now();
         } else {
-            state.balances.push({ id, member, accountId, month, amount, createdAt: Date.now(), updatedAt: Date.now() });
+            state.balances.push({ id: e.id, member, accountId: e.accountId, cat: e.cat, month, amount: e.amount, createdAt: Date.now(), updatedAt: Date.now() });
         }
         savedBal++;
     });
@@ -7467,7 +7509,9 @@ function saveMonthly() {
         }
         savedRet++;
     });
-    if (!savedBal && !savedRet) { showToast('没有需要保存的数', 'error'); return; }
+    if (!savedBal && !savedRet && !removed) { showToast('没有需要保存的数', 'error'); return; }
+    // 老数据（一个账户一个月只有一个数、没有类别）顺手升级成新口径，老的那条作废
+    normalizeBalanceCats();
     saveState();
     closeMonthlyModal();
     const [y, m] = month.split('-').map(Number);
@@ -7484,6 +7528,27 @@ function saveMonthly() {
     if (savedBal) parts.push(`${savedBal} 个账户的余额`);
     if (savedRet) parts.push(`${savedRet} 笔收益`);
     showToast('已保存' + parts.join('和'), 'success');
+}
+
+// 老口径的余额（一个账户一个月只有一个数、没有 cat 字段）升级成新口径：
+// 补上 cat、id 里带上类别。万一同一个类别已经有规范记录了，老的那条直接作废，
+// 免得一个数被算两遍。作废也要留墓碑，别的设备同步时才不会把它又并回来。
+function normalizeBalanceCats() {
+    if (!state.balances || !state.balances.length) return;
+    const seen = {};
+    state.balances.forEach(b => { if (b && b.id) seen[b.id] = true; });
+    const out = [];
+    state.balances.forEach(b => {
+        if (!b) return;
+        if (b.cat) { out.push(b); return; }
+        const cat = balanceCatOf(b);
+        const id = `${b.member}__${b.accountId}__${cat}__${b.month}`;
+        if (seen[id]) { addTombstone('balances', b.id); return; }
+        seen[id] = true;
+        b.id = id; b.cat = cat;
+        out.push(b);
+    });
+    state.balances = out;
 }
 
 // ---- 老入口全部指向同一个弹窗（结账清单、账户历史里的「修改」都还在调它们）----
