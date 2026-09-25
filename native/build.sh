@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 APP_NAME=Bookkeeping
-VERSION=1.35.2
+VERSION=1.35.3
 APP_DIR="dist/$APP_NAME.app"
 CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"

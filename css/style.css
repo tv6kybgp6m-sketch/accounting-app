@@ -3972,7 +3972,7 @@ table.bill-stats {
 .mw-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
 .mw-grid {
     display: grid;
-    grid-template-columns: 92px repeat(var(--mw-cols, 4), minmax(84px, 1fr)) 88px 84px 84px 124px 74px;
+    grid-template-columns: 92px repeat(var(--mw-cols, 4), minmax(84px, 1fr)) 88px 84px 84px 124px;
     gap: 4px 6px; align-items: center;
     min-width: max-content;
 }
@@ -4004,16 +4004,20 @@ table.bill-stats {
 .mw-c.be-editing { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 8px; }
 .mw-note { font-size: 11px; color: var(--text-tertiary); padding: 4px 2px 0; line-height: 1.5; }
 
-/* 底部「合计」行：逐列纵向汇总。最右「占比」列：这个钱包占全部钱包净资产的多少。
-   合计行只是在视觉上收口，输入框一个都不在这里，所以不会被误当成可填的格子。 */
-.mw-total-row .mw-rowname, .mw-total-row .mw-c {
+/* 表头正下方的两行汇总：合计（逐列纵向汇总）+ 占比（该列合计 ÷ 净资产合计）。
+   刻意放最上面而不是最底下：录账户的时候抬头就能看到总数，不用滚到表格末尾。
+   两行都是纯展示，输入框一个都不在这里，不会被误当成可填的格子。 */
+.mw-total-row .mw-rowname, .mw-total-row .mw-c,
+.mw-pct-row .mw-rowname, .mw-pct-row .mw-c {
     border-top: 1px solid var(--border-strong);
     padding-top: 6px; font-weight: 600;
 }
-.mw-total-row .mw-name { font-size: 12.5px; color: var(--text-secondary); }
+.mw-total-row .mw-name, .mw-pct-row .mw-name { font-size: 12.5px; color: var(--text-secondary); }
 .mw-tcell b { font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.mw-pctcol b { font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
-.mw-total-row .mw-pctcol b { color: var(--text-primary); }
+/* 占比行与下面的录入行之间收一条细线，视线分得清"上面是汇总、下面才是要填的" */
+.mw-pct-row .mw-rowname, .mw-pct-row .mw-c { border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.mw-pct-row .mw-tcell b { font-size: 11.5px; font-weight: 500; color: var(--text-secondary); }
+.mw-pct-row .mw-sumcol b { font-weight: 600; color: var(--text-primary); }
 
 /* ---- 资产负债：按钱包折叠的卡片 ---- */
 .bal-wallet { margin-bottom: 8px; border-radius: 12px; background: var(--bg-input); overflow: hidden; }
@@ -4030,7 +4034,7 @@ table.bill-stats {
 .bw-body .breakdown-item { background: var(--bg-card); border-radius: 10px; margin-bottom: 4px; }
 
 @media (max-width: 640px) {
-    .mw-grid { grid-template-columns: 78px repeat(var(--mw-cols, 4), minmax(76px, 1fr)) 76px 74px 74px 104px 66px; }
+    .mw-grid { grid-template-columns: 78px repeat(var(--mw-cols, 4), minmax(76px, 1fr)) 76px 74px 74px 104px; }
     .mw-rowname { min-height: 34px; }
     .mw-c { min-height: 34px; }
 }

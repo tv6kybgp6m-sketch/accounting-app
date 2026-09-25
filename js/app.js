@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.35.2';
+const APP_VERSION = '1.35.3';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7172,31 +7172,38 @@ function renderMonthlyEntry() {
                 <input type="number" step="0.01" class="text-input mw-total" placeholder="对账单总额"
                     data-wallet-total="${_esc(name)}" value="${_esc(monthlyInput.wt[name] || '')}">
                 <span class="mw-diff" data-wdiff></span></div>
-            <div class="mw-c mw-pctcol"><b data-pct>—</b></div>
         </div>`;
     }).join('');
 
-    // 底部「合计」行：逐列纵向汇总（每个账户列、负债、收益、净入金、净资产），最右是占比列。
-    // 这里只有静态骨架，数字全部由 updateMonthlyDerived() 实时填，
-    // 和上面那些输入框用同一批"还没保存的草稿值"，保证两边永远一致。
-    const totalRow = `<div class="mw-tr mw-total-row">
-        <div class="mw-rowname"><span class="mw-name">合计</span></div>
-        ${assets.map(a => `<div class="mw-c mw-tcell" data-tcol="${_esc(a.id)}"><b data-tval>—</b></div>`).join('')}
-        <div class="mw-c mw-tcell" data-tcol="__liab"><b data-tval>—</b></div>
-        <div class="mw-c mw-tcell" data-tcol="__ret"><b data-tval>—</b></div>
-        <div class="mw-c mw-tcell" data-tcol="__flow"><b data-tval>—</b></div>
-        <div class="mw-c mw-tcell mw-sumcol" data-tcol="__net"><span class="mw-rownet">净资产 <b data-tval>—</b></span></div>
-        <div class="mw-c mw-pctcol" data-tcol="__pct"><b data-tval>—</b></div>
-    </div>`;
+    // 表头正下方的两行汇总：合计（逐列纵向汇总）+ 占比（该列合计 ÷ 净资产合计）。
+    // 放在最上面而不是最底下 —— 录账户的时候抬头就能看到总数，不用滚到底。
+    // 两行都只有静态骨架，数字由 updateMonthlyDerived() 实时填，
+    // 和下面那些输入框共用同一批"还没保存的草稿值"，保证两边永远一致。
+    const summaryRows = `
+        <div class="mw-tr mw-total-row">
+            <div class="mw-rowname"><span class="mw-name">合计</span></div>
+            ${assets.map(a => `<div class="mw-c mw-tcell" data-tcol="${_esc(a.id)}"><b data-tval>—</b></div>`).join('')}
+            <div class="mw-c mw-tcell" data-tcol="__liab"><b data-tval>—</b></div>
+            <div class="mw-c mw-tcell" data-tcol="__ret"><b data-tval>—</b></div>
+            <div class="mw-c mw-tcell" data-tcol="__flow"><b data-tval>—</b></div>
+            <div class="mw-c mw-tcell mw-sumcol" data-tcol="__net"><span class="mw-rownet">净资产 <b data-tval>—</b></span></div>
+        </div>
+        <div class="mw-tr mw-pct-row">
+            <div class="mw-rowname"><span class="mw-name">占比</span></div>
+            ${assets.map(a => `<div class="mw-c mw-tcell" data-pcol="${_esc(a.id)}"><b data-pval>—</b></div>`).join('')}
+            <div class="mw-c mw-tcell" data-pcol="__liab"><b data-pval>—</b></div>
+            <div class="mw-c mw-tcell" data-pcol="__ret"><b data-pval>—</b></div>
+            <div class="mw-c mw-tcell" data-pcol="__flow"><b data-pval>—</b></div>
+            <div class="mw-c mw-tcell mw-sumcol" data-pcol="__net"><b data-pval>—</b></div>
+        </div>`;
 
     list.innerHTML = `<div class="mw-scroll"><div class="mw-grid" style="--mw-cols:${assets.length}">
         <div class="mw-h mw-corner">钱包</div>
         ${assets.map(a => `<div class="mw-h mw-col" title="${_esc(a.group || '')}">${_esc(a.name)}</div>`).join('')}
         <div class="mw-h mw-col mw-col-liab">负债</div><div class="mw-h mw-col">收益</div>
         <div class="mw-h mw-col">净入金</div><div class="mw-h mw-col mw-col-sum">小计 / 对账</div>
-        <div class="mw-h mw-col mw-col-pct">占比</div>
+        ${summaryRows}
         ${rows}
-        ${totalRow}
     </div></div>`
         + (assets.some(a => !accountEarnsReturn(a))
             ? `<div class="re-hidden-note"><span>「收益 / 净入金」两列只给会生收益的账户；改哪些账户生收益，去「口径」面板</span></div>` : '');
@@ -7265,7 +7272,7 @@ function updateMonthlyDerived() {
     });
     // 2) 每个钱包的小计与对账差额（一行一个钱包：资产 − 负债）
     //    顺手把纵向合计收下来，给底部「合计」行和「占比」列用
-    const rowNets = [], colSum = {};
+    const colSum = {};
     let sumAsset = 0, sumLiab = 0, sumRet = 0, sumFlow = 0;
     const numOf = inp => {
         const raw = String(inp.value).trim();
@@ -7287,7 +7294,6 @@ function updateMonthlyDerived() {
         });
         const sumEl = tr.querySelector('[data-wsum]');
         if (sumEl) sumEl.textContent = formatCurrency(Math.round(net * 100) / 100);
-        rowNets.push({ tr, net, filled });
         const totalEl = tr.querySelector('[data-wallet-total]');
         const diffEl = tr.querySelector('[data-wdiff]');
         if (!totalEl || !diffEl) return;
@@ -7305,16 +7311,8 @@ function updateMonthlyDerived() {
     list.querySelectorAll('[data-ret]').forEach(inp => { const v = numOf(inp); if (v !== null) sumRet += v; });
     list.querySelectorAll('[data-flow-in]').forEach(inp => { const v = numOf(inp); if (v !== null) sumFlow += v; });
 
-    // 3) 「占比」= 该钱包合计 ÷ 所有钱包合计（净资产口径）。
-    //    合计为 0（或这一行一格都没填）时不给百分比：分母是 0 的百分比看着就像错账。
-    const grand = rowNets.reduce((s, r) => s + r.net, 0);
-    rowNets.forEach(r => {
-        const el = r.tr.querySelector('[data-pct]');
-        if (!el) return;
-        el.textContent = (!r.filled || !grand) ? '—' : (r.net / grand * 100).toFixed(1) + '%';
-    });
-
-    // 4) 底部「合计」行：逐列纵向汇总
+    // 3) 「合计」行：逐列纵向汇总（放在表头正下方，抬头就能看到总数）
+    const netTotal = sumAsset - sumLiab;
     const trow = list.querySelector('.mw-total-row');
     if (trow) {
         const show = v => v ? formatCurrency(Math.round(v * 100) / 100) : '—';
@@ -7322,12 +7320,28 @@ function updateMonthlyDerived() {
             const b = cell.querySelector('[data-tval]');
             if (!b) return;
             const key = cell.dataset.tcol;
-            if (key === '__pct') { b.textContent = grand ? '100.0%' : '—'; return; }
-            if (key === '__net') { b.textContent = show(sumAsset - sumLiab); return; }
+            if (key === '__net') { b.textContent = show(netTotal); return; }
             if (key === '__liab') { b.textContent = show(sumLiab); return; }
             if (key === '__ret') { b.textContent = show(sumRet); return; }
             if (key === '__flow') { b.textContent = show(sumFlow); return; }
             b.textContent = show(colSum[key] || 0);
+        });
+    }
+
+    // 4) 「占比」行：每一列的合计 ÷ 净资产合计，一眼看出钱压在哪一类资产上。
+    //    净资产为 0 时不给百分比（分母为 0 的百分比看着就像错账）；
+    //    收益/净入金是流水项、参照系和余额不一样，留「—」，免得被误读成"占净资产的比重"。
+    const prow = list.querySelector('.mw-pct-row');
+    if (prow) {
+        prow.querySelectorAll('[data-pcol]').forEach(cell => {
+            const b = cell.querySelector('[data-pval]');
+            if (!b) return;
+            const key = cell.dataset.pcol;
+            if (key === '__net') { b.textContent = netTotal ? '100.0%' : '—'; return; }
+            if (key === '__ret' || key === '__flow') { b.textContent = '—'; return; }
+            if (!netTotal) { b.textContent = '—'; return; }
+            const v = (key === '__liab') ? sumLiab : (colSum[key] || 0);
+            b.textContent = v ? (v / netTotal * 100).toFixed(1) + '%' : '—';
         });
     }
 }
