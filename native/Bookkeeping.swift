@@ -94,8 +94,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         if #available(macOS 11.3, *) {
             config.preferences.isTextInteractionEnabled = true
         }
-        config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
-        config.preferences.setValue(true, forKey: "allowUniversalAccessFromFileURLs")
+        // 这里原来用 KVC 设了 allowFileAccessFromFileURLs / allowUniversalAccessFromFileURLs。
+        // 那两个是 WebKit 的私有设置，既是私有 API，又会在新系统上把主线程卡死；
+        // 而且页面现在走 http://127.0.0.1（正常 http 源）加载，本来就不需要 file:// 的放行。
         uc.add(self, name: "native")
         uc.addUserScript(WKUserScript(source: BRIDGE_JS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
 
@@ -103,7 +104,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.29.1"
+        webView.customUserAgent = "BookkeepingMacApp/1.35.2"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"
@@ -136,10 +137,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         if webView == nil { pendingImportPath = path; return }
         do {
             let content = try String(contentsOfFile: path, encoding: .utf8)
-            let literal = String(data: try JSONSerialization.data(withJSONObject: content), encoding: .utf8) ?? "null"
+            // 文件正文是一段 JSON 文本，这里要的是"把它当成字符串字面量"内联进 JS，
+            // 所以必须走 jsonLiteral（裸字符串直接喂 JSONSerialization 会抛异常崩掉进程）。
+            let literal = jsonLiteral(content)
             webView.evaluateJavaScript("window.__importJSON(\(literal));", completionHandler: nil)
         } catch {
-            let lit = (try? String(data: JSONSerialization.data(withJSONObject: "读取文件失败：\(error.localizedDescription)"), encoding: .utf8)) ?? "null"
+            let lit = jsonLiteral("读取文件失败：\(error.localizedDescription)")
             webView.evaluateJavaScript("window.__importJSON(\(lit));", completionHandler: nil)
         }
     }
@@ -153,9 +156,36 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         DispatchQueue.main.async { self.handle(method: method, args: args, id: id) }
     }
 
+    // 把任意值收敛成"一定能被 JSON 序列化"的形式。
+    // ⚠️ JSONSerialization 遇到裸字符串 / 裸 Bool / NSNull 这类非容器顶层值会抛 ObjC 异常，
+    // 而 try? 只抓 Swift 错误、抓不住异常 —— 异常会一路冒泡到顶层把进程 abort。
+    // 网页启动后第一次调 icloud.isAvailable()（返回裸 true）就会踩到，
+    // 表现成"图标一闪、窗口永远不出现"，所以这里一律带 .fragmentsAllowed 并降级未知类型。
+    func jsonLiteral(_ value: Any) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: jsonSafeValue(value), options: [.fragmentsAllowed]),
+              let str = String(data: data, encoding: .utf8) else { return "null" }
+        return str
+    }
+
+    func jsonSafeValue(_ v: Any) -> Any {
+        switch v {
+        case let s as String: return s
+        case let b as Bool: return b
+        case let n as NSNumber: return n
+        case is NSNull: return NSNull()
+        case let a as [Any]: return a.map { jsonSafeValue($0) }
+        case let d as [String: Any]:
+            var out: [String: Any] = [:]
+            for (k, val) in d { out[k] = jsonSafeValue(val) }
+            return out
+        default:
+            if JSONSerialization.isValidJSONObject(v) { return v }
+            return String(describing: v)
+        }
+    }
+
     func respond(id: Int, ok: Bool, result: Any) {
-        let payload: Any = result
-        let json = (try? JSONSerialization.data(withJSONObject: payload)).flatMap { String(data: $0, encoding: .utf8) } ?? "null"
+        let json = jsonLiteral(result)
         let js = "window.__resolveNative(\(id), \(ok ? "true" : "false"), \(json));"
         webView?.evaluateJavaScript(js, completionHandler: nil)
     }
@@ -296,7 +326,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
             if let str = obj as? String {
                 data = Data(str.utf8)
             } else {
-                data = try JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted])
+                data = try JSONSerialization.data(withJSONObject: jsonSafeValue(obj), options: [.prettyPrinted, .fragmentsAllowed])
             }
             try FileManager.default.createDirectory(at: icloudDirURL(), withIntermediateDirectories: true)
             try data.write(to: icloudFileURL(), options: [.atomic])
@@ -328,7 +358,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
             // 传解析后的对象给网页（与 readData 一致，resolveCloudPayload 需要对象）
             guard let data = str.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) else { return }
-            let literal = (try? String(data: JSONSerialization.data(withJSONObject: obj), encoding: .utf8)) ?? "null"
+            let literal = jsonLiteral(obj)
             DispatchQueue.main.async { [weak self] in
                 self?.webView?.evaluateJavaScript("window.__icloudFileChanged(\(literal));", completionHandler: nil)
             }
