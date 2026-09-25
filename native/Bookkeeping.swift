@@ -104,7 +104,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.35.5"
+        webView.customUserAgent = "BookkeepingMacApp/1.36.0"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"

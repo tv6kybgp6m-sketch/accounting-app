@@ -3978,7 +3978,7 @@ table.bill-stats {
    不管你开了多少个账户，表格就这么宽，永远一屏看完，不出现横向滚动条。 */
 .mw-grid {
     display: grid;
-    grid-template-columns: var(--mw-name-w, 84px) repeat(var(--mw-cols, 7), minmax(0, 1fr)) var(--mw-sum-w, 156px);
+    grid-template-columns: var(--mw-name-w, 112px) repeat(var(--mw-cols, 7), minmax(0, 1fr)) var(--mw-sum-w, 156px);
     gap: 4px 6px; align-items: center;
     width: 100%;
 }
@@ -3989,8 +3989,34 @@ table.bill-stats {
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .mw-corner { text-align: left; padding-left: 2px; }
-.mw-rowname { display: flex; align-items: center; min-height: 38px; padding: 0 10px 0 2px; }
-.mw-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mw-rowname { display: flex; align-items: center; gap: 4px; min-height: 38px; padding: 0 4px 0 2px; }
+.mw-name {
+    font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    cursor: text; border-bottom: 1px dashed transparent; padding-bottom: 1px;
+}
+.mw-name:hover { border-bottom-color: var(--border-strong); }
+/* 行名撞了资产类别名（现金/货币基金…）时标一下，提醒改成「放钱的地方」 */
+.mw-name-warn { color: var(--warning, #ff9500); }
+.mw-badge {
+    flex: none; font-size: 9px; line-height: 13px; padding: 0 4px; border-radius: 6px; cursor: text;
+    color: var(--warning, #ff9500); background: rgba(255, 149, 0, .12); white-space: nowrap;
+}
+.mw-del {
+    flex: none; margin-left: auto; width: 16px; height: 16px; line-height: 14px; padding: 0;
+    font-size: 13px; border: none; border-radius: 50%; cursor: pointer;
+    color: var(--text-tertiary); background: transparent; opacity: 0; transition: opacity .15s;
+}
+.mw-tr:hover .mw-del { opacity: .7; }
+.mw-del:hover { opacity: 1 !important; color: var(--expense); background: rgba(255, 59, 48, .1); }
+.mw-rename-input { font-size: 13px !important; font-weight: 600; padding: 3px 5px !important; text-align: left !important; }
+.mw-addrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.mw-new { flex: 1 1 190px; min-width: 150px; font-size: 12.5px; }
+.mw-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.mw-chip {
+    font-size: 11.5px; padding: 3px 8px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border); background: transparent; color: var(--text-secondary);
+}
+.mw-chip:hover { border-color: var(--border-strong); color: var(--text-primary); }
 .mw-c { display: flex; align-items: center; justify-content: center; min-height: 38px; min-width: 0; }
 .mw-c .text-input { width: 100%; min-width: 0; padding: 6px 6px; font-size: 13px; text-align: center; }
 /* 一个钱包里同类资产有好几个账户时，格子纵向叠，每个前面挂一个极小的账户名 */

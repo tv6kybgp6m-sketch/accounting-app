@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.35.5';
+const APP_VERSION = '1.36.0';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7178,7 +7178,9 @@ function renderMonthlyEntry() {
     }
     const member = monthlyMember();
     const sub = document.getElementById('monthlyModalSub');
-    if (sub) sub.textContent = month ? `${member} · ${month.replace('-', '年')}月：一行一个账户，横着填它的各类资产、负债、收益、净入金；填完这一屏资产负债和投资收益就都记好了` : '请先选择月份';
+    if (sub) sub.textContent = month
+        ? `${member} · ${month.replace('-', '年')}月：一行 = 一个放钱的地方（支付宝 / 微信 / 工商银行 / 摩根…），一列 = 一类资产；横着填完，资产负债和投资收益就都记好了`
+        : '请先选择月份';
     if (!state.accounts.length) {
         list.innerHTML = '<div class="breakdown-empty">还没有账户，先到「账户」里添加</div>';
         return;
@@ -7223,8 +7225,16 @@ function renderMonthlyEntry() {
 
     const rows = rowsOf.map(a => {
         const net = cats.reduce((t, k) => t + num(cellVal(a, k)), 0) - num(cellVal(a, BAL_CAT_LIAB));
+        // 行上如果挂着「现金 / 货币基金 / 定期存款 / 股票基金」这种名字，跟横轴撞词，
+        // 两轴看起来就变成一样的了 —— 这里标出来，点一下就能改成「放钱的地方」
+        const like = mwNameLooksLikeCat(a.name);
         return `<div class="mw-tr" data-mw-account="${a.id}">
-            <div class="mw-rowname"><span class="mw-name">${_esc(a.name)}</span></div>
+            <div class="mw-rowname">
+                <span class="mw-name${like ? ' mw-name-warn' : ''}" data-rename="${a.id}"
+                    title="点一下改名（这里放的是「放钱的地方」：支付宝 / 微信 / 工商银行 / 摩根…）">${_esc(a.name)}</span>
+                ${like ? `<span class="mw-badge" data-rename="${a.id}" title="这个名字是资产类别，建议改成放钱的地方">类别名</span>` : ''}
+                <button class="mw-del" data-del-account="${a.id}" title="删除这个账户">×</button>
+            </div>
             ${cats.map(k => `<div class="mw-c">${balInput(a, k)}</div>`).join('')}
             <div class="mw-c">${balInput(a, BAL_CAT_LIAB, ' mw-liab')}</div>
             <div class="mw-c"><input type="number" step="0.01" class="text-input be-field" data-ret="${a.id}"
@@ -7260,17 +7270,53 @@ function renderMonthlyEntry() {
             ${pcell('__net', ' mw-sumcol')}
         </div>`;
 
+    // 常用的「放钱的地方」做成快捷键，一点就多一行，不用跑去账户管理加完再回来
+    const quick = ['支付宝', '微信', '工商银行', '招商银行', '平安银行', '摩根'];
     list.innerHTML = `<div class="mw-scroll"><div class="mw-grid" style="--mw-cols:${cols}">
-        <div class="mw-h mw-corner">账户</div>
+        <div class="mw-h mw-corner">账户 / 渠道</div>
         ${cats.map(k => `<div class="mw-h mw-col">${_esc(balanceCatName(k))}</div>`).join('')}
         <div class="mw-h mw-col mw-col-liab">负债</div><div class="mw-h mw-col">收益</div>
         <div class="mw-h mw-col">净入金</div><div class="mw-h mw-col mw-col-sum">小计 / 对账</div>
         ${summaryRows}
         ${rows}
     </div></div>`
-        + `<div class="re-hidden-note"><span>一行就是你在「账户」里加的一个账户，横着填它这个月各类别的金额；
-            同一个账户既可以有资产也可以有负债（余额 + 花呗），不再分资产账户还是负债账户</span></div>`;
+        + `<div class="mw-addrow">
+            <input type="text" id="mwNewAccount" class="text-input mw-new" maxlength="20"
+                placeholder="加一行：放钱的地方（支付宝 / 微信 / 工商银行 / 摩根…）">
+            <button class="btn-mini primary" id="mwAddAccountBtn">加一行</button>
+            <span class="mw-chips">${quick.map(q =>
+                `<button class="mw-chip" data-quick-add="${_esc(q)}">+ ${_esc(q)}</button>`).join('')}</span>
+        </div>`
+        + `<div class="re-hidden-note"><span>竖着一行 = 一个「放钱的地方」（支付宝、微信、工商银行、摩根…）；
+            横着一列 = 一类资产（现金、货币基金、定期存款、股票基金、负债…）。同一个账户既可以有资产也可以有负债，
+            所以「负债」只是一列，不是账户的属性。行名点一下就能改。这里加的账户会同步进「账户」页。</span></div>`;
     bindMonthlyEntry();
+}
+
+// 行名正好等于某个资产类别名时，横竖两轴会撞成同一批词，看不出谁是谁 —— 这种情况标出来提醒改
+function mwNameLooksLikeCat(name) {
+    const n = String(name || '').trim();
+    return Object.keys(BAL_CAT_NAMES).some(k => BAL_CAT_NAMES[k] === n);
+}
+
+// 在月度账单里直接加一行（= 加一个账户），加完立刻出现在表格和「账户」页
+function mwAddAccount(raw) {
+    const name = String(raw || '').trim();
+    if (!name) { showToast('先填个名字，比如「支付宝」', 'error'); return; }
+    if (state.accounts.some(a => a.name === name)) { showToast(`已经有「${name}」这一行了`, 'error'); return; }
+    const palette = ['#007aff', '#34c759', '#ff9500', '#af52de', '#5ac8fa', '#ff3b30', '#a2845e', '#30b0c7'];
+    state.accounts.push({
+        id: 'acc_' + uid(),
+        name, kind: 'asset', group: '流动资金',
+        icon: 'fa-wallet',
+        color: palette[state.accounts.length % palette.length],
+        order: state.accounts.reduce((m, a) => Math.max(m, a.order || 0), 0) + 1,
+        createdAt: Date.now(), updatedAt: Date.now(),
+    });
+    saveState();
+    renderMonthlyEntry();
+    renderAccountManageList();
+    showToast(`已加一行：${name}`, 'success');
 }
 
 function bindMonthlyEntry() {
@@ -7280,7 +7326,66 @@ function bindMonthlyEntry() {
         inp.addEventListener('input', () => { monthlyDirty = true; updateMonthlyDerived(); }));
     list.querySelectorAll('[data-wallet-total]').forEach(inp =>
         inp.addEventListener('input', () => { monthlyDirty = true; updateMonthlyDerived(); }));
+    bindMonthlyRowOps(list);
     updateMonthlyDerived();
+}
+
+// 行头的就地改名 / 删除，和表格下方的「加一行」
+function bindMonthlyRowOps(list) {
+    list.querySelectorAll('[data-rename]').forEach(el => {
+        el.addEventListener('click', () => {
+            const id = el.dataset.rename;
+            const a = accountById(id);
+            if (!a) return;
+            const nameEl = list.querySelector(`.mw-tr[data-mw-account="${id}"] .mw-name`);
+            if (!nameEl || nameEl.parentNode.querySelector('input')) return;
+            const inp = document.createElement('input');
+            inp.type = 'text';
+            inp.className = 'text-input mw-rename-input';
+            inp.value = a.name;
+            inp.placeholder = '放钱的地方，如 支付宝';
+            nameEl.style.display = 'none';
+            nameEl.parentNode.insertBefore(inp, nameEl);
+            inp.focus(); inp.select();
+            let done = false;
+            const commit = () => {
+                if (done) return;
+                done = true;
+                const v = inp.value.trim();
+                if (v && v !== a.name) {
+                    a.name = v;
+                    a.updatedAt = Date.now();
+                    saveState();
+                    showToast(`已改名为「${v}」`, 'success');
+                }
+                renderMonthlyEntry();
+                renderAccountManageList();
+            };
+            inp.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { e.preventDefault(); commit(); }
+                else if (e.key === 'Escape') { done = true; renderMonthlyEntry(); }
+            });
+            inp.addEventListener('blur', commit);
+        });
+    });
+
+    list.querySelectorAll('[data-del-account]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            deleteAccountFromList(btn.dataset.delAccount);
+        });
+    });
+
+    const addBtn = document.getElementById('mwAddAccountBtn');
+    const addInp = document.getElementById('mwNewAccount');
+    if (addBtn && addInp) {
+        const go = () => { mwAddAccount(addInp.value); addInp.value = ''; };
+        addBtn.addEventListener('click', go);
+        addInp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+    }
+    list.querySelectorAll('[data-quick-add]').forEach(btn => {
+        btn.addEventListener('click', () => mwAddAccount(btn.dataset.quickAdd));
+    });
 }
 
 // 小计、差额、以及每行的实时收益率角标 —— 全部拿"还没保存的输入值"算
