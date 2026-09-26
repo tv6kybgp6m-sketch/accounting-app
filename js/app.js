@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.38.7';
+const APP_VERSION = '1.38.8';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -6464,55 +6464,53 @@ function renderBalanceBreakdown() {
     if (!container) return;
     const info = balancePeriodInfo();
     const metric = state.balanceMetric;
-    document.getElementById('balBreakdownTitle').textContent = '资产归类明细';
+    const titleEl = document.getElementById('balBreakdownTitle');
+    if (titleEl) titleEl.textContent = '资产构成（按类别）';
 
     const cat = monthHasRecords(info.month) ? balancesByCat(info.month) : {};
-    // 分组：固定资产 / 流动资产 / 长期投资 / 其他投资 + 负债
-    const groups = [];
-    BAL_CLASS_TAGS.forEach(tag => groups.push({ name: tag, isLiab: false, cats: [] }));
-    groups.push({ name: '负债', isLiab: true, cats: [] });
-    const catList = BAL_CATS.concat([BAL_CAT_LIAB]);
-    catList.forEach(k => {
-        const tag = k === BAL_CAT_LIAB ? '负债' : (state.balClassTags[k] || '其他投资');
-        const g = groups.find(x => x.name === tag);
-        if (g) g.cats.push(k);
-    });
-    const shownGroups = groups.filter(g => g.isLiab || g.cats.some(k => (cat[k] || 0) > 0));
-
+    // 直接按用户指定的 6 类资产统计：现金 / 货币基金 / 定期存款 / 股票基金 / 黄金 / 其他
     const grandAsset = BAL_CATS.reduce((s, k) => s + (cat[k] || 0), 0);
     const grandLiab = cat[BAL_CAT_LIAB] || 0;
     const grand = metric === 'liability' ? grandLiab : (metric === 'asset' ? grandAsset : grandAsset + grandLiab);
     const top = Math.max(grand, 1);
 
-    container.innerHTML = shownGroups.map(g => {
-        const rows = g.cats.filter(k => (cat[k] || 0) > 0).map(k => {
-            const v = cat[k] || 0;
-            const pct = grand ? (v / grand) * 100 : 0;
-            return `
-            <div class="breakdown-item" title="${_esc(balanceCatName(k))}">
-                <div class="breakdown-icon" style="background:rgba(10,132,255,.12);color:var(--accent)">
-                    <i class="fa-solid ${g.isLiab ? 'fa-credit-card' : 'fa-chart-pie'}"></i>
-                </div>
-                <div class="breakdown-main">
-                    <div class="breakdown-head">
-                        <span class="breakdown-name">${_esc(balanceCatName(k))}</span>
-                        <span class="breakdown-amount">${formatCurrency(v)}<em>${pct.toFixed(1)}%</em></span>
-                    </div>
-                    <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (v / top) * 100)}%;${g.isLiab ? 'background:var(--expense)' : ''}"></div></div>
-                </div>
-            </div>`;
-        }).join('');
-        const sum = g.cats.reduce((s, k) => s + (cat[k] || 0), 0);
-        if (!rows) return '';
-        return `
-        <div class="bal-wallet open">
-            <div class="bw-head">
-                <span class="bw-name">${_esc(g.name)}<em>${g.cats.filter(k => (cat[k] || 0) > 0).length} 类</em></span>
-                <span class="bw-net${g.isLiab ? ' liab' : ''}">${formatCurrency(sum)}</span>
+    let html = '';
+    BAL_CATS.forEach(k => {
+        const v = cat[k] || 0;
+        if (v <= 0) return;
+        const pct = grand ? (v / grand) * 100 : 0;
+        html += `
+        <div class="breakdown-item" onclick="openAccountHistoryForPeriod('${info.month}','${_esc(BAL_CAT_NAMES[k])}')">
+            <div class="breakdown-icon" style="background:rgba(10,132,255,.12);color:var(--accent)">
+                <i class="fa-solid ${BAL_CAT_ICONS[k] || 'fa-chart-pie'}"></i>
             </div>
-            <div class="bw-body">${rows}</div>
+            <div class="breakdown-main">
+                <div class="breakdown-head">
+                    <span class="breakdown-name">${_esc(BAL_CAT_NAMES[k])}</span>
+                    <span class="breakdown-amount">${formatCurrency(v)}<em>${pct.toFixed(1)}%</em></span>
+                </div>
+                <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (v / top) * 100)}%"></div></div>
+            </div>
         </div>`;
-    }).join('') || '<div class="breakdown-empty">该期还没有余额记录</div>';
+    });
+    // 负债单列一项
+    if (grandLiab > 0) {
+        const pct = grand ? (grandLiab / grand) * 100 : 0;
+        html += `
+        <div class="breakdown-item" onclick="openAccountHistoryForPeriod('${info.month}','负债')">
+            <div class="breakdown-icon" style="background:rgba(255,59,48,.12);color:var(--expense)">
+                <i class="fa-solid fa-credit-card"></i>
+            </div>
+            <div class="breakdown-main">
+                <div class="breakdown-head">
+                    <span class="breakdown-name">负债</span>
+                    <span class="breakdown-amount">${formatCurrency(grandLiab)}<em>${pct.toFixed(1)}%</em></span>
+                </div>
+                <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (grandLiab / top) * 100)}%;background:var(--expense)"></div></div>
+            </div>
+        </div>`;
+    }
+    container.innerHTML = html || '<div class="breakdown-empty">该期还没有余额记录</div>';
 }
 
 // ==================== 资产归类（用户自定每类归到 固定资产/流动资产/长期投资/其他投资）====================
@@ -7176,6 +7174,7 @@ function assetClassName(key) {
 const BAL_CATS = ['cash', 'mmf', 'fixed', 'stock', 'gold', 'other'];
 const BAL_CAT_LIAB = 'liab';
 const BAL_CAT_NAMES = { cash: '现金', mmf: '货币基金', fixed: '定期存款', stock: '股票基金', gold: '黄金', other: '其他', liab: '负债' };
+const BAL_CAT_ICONS = { cash: 'fa-wallet', mmf: 'fa-piggy-bank', fixed: 'fa-vault', stock: 'fa-chart-line', gold: 'fa-coins', other: 'fa-box-open', liab: 'fa-credit-card' };
 function balanceCatName(k) { return BAL_CAT_NAMES[k] || assetClassName(k); }
 
 // 老数据（还没有类别这一说的时候）一条账户一个月只有一个数，没有 cat 字段：

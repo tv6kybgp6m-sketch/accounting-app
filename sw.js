@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bookkeeping-v1.38.7';
+const CACHE_NAME = 'bookkeeping-v1.38.8';
 const PRECACHE = [
   './',
   './index.html',

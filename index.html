@@ -1289,7 +1289,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.38.7').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.38.8').catch(() => {});
             });
         }
     </script>
@@ -1300,7 +1300,7 @@
                 <button class="modal-close" onclick="closeClassTagModal()"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="modal-body">
-                <p class="modal-tip">每个资产类别归到哪一类由你自己定：固定资产 / 流动资产 / 长期投资 / 其他投资。改完立刻影响「资产归类明细」和导出。<b>负债永远是负债</b>，不参与归类。</p>
+                <p class="modal-tip">每个资产类别归到哪一类由你自己定：固定资产 / 流动资产 / 长期投资 / 其他投资。改完立刻影响<b>净资产桥</b>里的「固定资产」拆分与导出。<b>负债永远是负债</b>，不参与归类。</p>
                 <div id="classTagRows"></div>
             </div>
             <div class="modal-footer">
