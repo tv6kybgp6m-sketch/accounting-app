@@ -4021,7 +4021,7 @@ table.bill-stats {
 }
 .mw-tr { display: contents; }
 .mw-h {
-    font-size: 10.5px; font-weight: 500; color: var(--text-tertiary);
+    font-size: 13px; font-weight: 600; color: var(--text-primary);
     text-align: center; padding: 0 2px 2px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
