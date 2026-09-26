@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.38.0';
+const APP_VERSION = '1.38.1';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7670,6 +7670,20 @@ function saveMonthly() {
         savedBal++;
     });
     // 2) 收益 + 净入金
+    // 收益也支持「清空 = 删除」：先把这次所有账户里清空了收益格、但库里还存在的旧记录删掉，
+    // 否则把数字擦掉它还在，跟余额一样改不动。
+    const retInputs = [...list.querySelectorAll('[data-ret]')];
+    const willWriteRet = new Set(retInputs
+        .filter(inp => String(inp.value).trim() !== '')
+        .map(inp => _rebalanceId(member, inp.dataset.ret, month)));
+    let removedRet = 0;
+    state.returns = state.returns.filter(r => {
+        if (r.month !== month || r.member !== member || !touched.has(r.accountId)) return true;
+        if (willWriteRet.has(r.id)) return true;
+        addTombstone('returns', r.id);
+        removedRet++;
+        return false;
+    });
     list.querySelectorAll('[data-ret]').forEach(inp => {
         const raw = String(inp.value).trim();
         if (raw === '') return;
@@ -7696,7 +7710,7 @@ function saveMonthly() {
         }
         savedRet++;
     });
-    if (!savedBal && !savedRet && !removed) { showToast('没有需要保存的数', 'error'); return; }
+    if (!savedBal && !savedRet && !removed && !removedRet) { showToast('没有需要保存的数', 'error'); return; }
     // 老数据（一个账户一个月只有一个数、没有类别）顺手升级成新口径，老的那条作废
     normalizeBalanceCats();
     saveState();
@@ -7714,7 +7728,8 @@ function saveMonthly() {
     const parts = [];
     if (savedBal) parts.push(`${savedBal} 个账户的余额`);
     if (savedRet) parts.push(`${savedRet} 笔收益`);
-    showToast('已保存' + parts.join('和'), 'success');
+    if (removedRet) parts.push(`删除 ${removedRet} 笔收益`);
+    showToast('已保存' + parts.join('、'), 'success');
 }
 
 // 老口径的余额（一个账户一个月只有一个数、没有 cat 字段）升级成新口径：
