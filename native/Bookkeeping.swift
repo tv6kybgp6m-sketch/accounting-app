@@ -104,7 +104,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.38.6"
+        webView.customUserAgent = "BookkeepingMacApp/1.38.7"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"
@@ -122,6 +122,47 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if let p = pendingImportPath { pendingImportPath = nil; importFile(at: p) }
+    }
+
+    // MARK: JS 对话框（prompt / confirm / alert）
+    // AppDelegate 虽声明了 WKUIDelegate，若不实现下面三个方法，原生 App 里
+    // window.prompt / confirm / alert 会静默失败（prompt 直接返回 null），
+    // 表现成「添加成员点了没反应」。这里用 NSAlert 把网页的对话框搬成原生弹窗。
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "记账本"
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "好")
+        alert.runModal()
+        completionHandler()
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "记账本"
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: "取消")
+        let ok = alert.runModal() == .alertFirstButtonReturn
+        completionHandler(ok)
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "记账本"
+        alert.informativeText = prompt
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: "取消")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = defaultText ?? ""
+        field.placeholderString = defaultText
+        field.bezelStyle = .roundedBezel
+        alert.accessoryView = field
+        let ok = alert.runModal() == .alertFirstButtonReturn
+        completionHandler(ok ? field.stringValue : nil)
     }
 
     // MARK: 文件关联（双击 .json 导入）

@@ -3450,8 +3450,8 @@ table.bill-stats {
 .ins-member-wrap i[data-insact="del"]:hover { color: var(--expense); }
 
 /* ---- 记余额/记收益：成员+月份同行；余额分资产/负债两段 ---- */
-.bal-entry-head { display: flex; gap: 10px; align-items: flex-start; }
-.bal-entry-head .form-group { flex: 1 1 0; min-width: 0; }
+.bal-entry-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 8px; }
+.bal-entry-head .form-group { flex: 1 1 0; min-width: 0; margin-bottom: 0; }
 /* 控件自身 min-width:auto 会让两栏分不匀；高度也要显式统一，
    否则成员下拉和月份下拉在不同内核下会一高一低 */
 .bal-entry-head .form-group select,
@@ -3463,7 +3463,7 @@ table.bill-stats {
 .ym-pair .ym-year { text-align: center; }
 .be-section-title {
     display: flex; align-items: center; gap: 6px;
-    margin: 12px 0 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary);
+    margin: 8px 0 4px; font-size: 12px; font-weight: 600; color: var(--text-secondary);
 }
 .be-section-title:first-child { margin-top: 0; }
 .be-section-title::before {
@@ -4028,7 +4028,7 @@ table.bill-stats {
 .mw-grid {
     display: grid;
     grid-template-columns: var(--mw-name-w, 112px) repeat(var(--mw-cols, 7), minmax(0, 1fr)) var(--mw-sum-w, 156px);
-    gap: 2px 6px; align-items: center;
+    gap: 1px 4px; align-items: center;
     width: 100%;
 }
 .mw-tr { display: contents; }
@@ -4046,7 +4046,7 @@ table.bill-stats {
 .mw-grid input[type="number"] {
     -moz-appearance: textfield; appearance: textfield;
 }
-.mw-rowname { display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 0 4px 0 2px; }
+.mw-rowname { display: flex; align-items: center; gap: 4px; min-height: 27px; padding: 0 4px 0 2px; }
 .mw-name {
     font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     cursor: text; border-bottom: 1px dashed transparent; padding-bottom: 1px;
@@ -4074,7 +4074,7 @@ table.bill-stats {
     border: 1px solid var(--border); background: transparent; color: var(--text-secondary);
 }
 .mw-chip:hover { border-color: var(--border-strong); color: var(--text-primary); }
-.mw-c { display: flex; align-items: center; justify-content: center; min-height: 30px; min-width: 0; }
+.mw-c { display: flex; align-items: center; justify-content: center; min-height: 27px; min-width: 0; }
 .mw-c .text-input { width: 100%; min-width: 0; padding: 4px 6px; font-size: 13px; text-align: center; }
 /* 一个钱包里同类资产有好几个账户时，格子纵向叠，每个前面挂一个极小的账户名 */
 .mw-tag {
@@ -4108,12 +4108,12 @@ table.bill-stats {
 .mw-total-row .mw-rowname, .mw-total-row .mw-c,
 .mw-pct-row .mw-rowname, .mw-pct-row .mw-c {
     border-top: 1px solid var(--border-strong);
-    padding-top: 6px; font-weight: 600;
+    padding-top: 4px; font-weight: 600;
 }
 .mw-total-row .mw-name, .mw-pct-row .mw-name { font-size: 12.5px; color: var(--text-secondary); }
 .mw-tcell b { font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* 占比行与下面的录入行之间收一条细线，视线分得清"上面是汇总、下面才是要填的" */
-.mw-pct-row .mw-rowname, .mw-pct-row .mw-c { border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.mw-pct-row .mw-rowname, .mw-pct-row .mw-c { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
 .mw-pct-row .mw-tcell b { font-size: 11.5px; font-weight: 500; color: var(--text-secondary); }
 .mw-pct-row .mw-sumcol b { font-weight: 600; color: var(--text-primary); }
 
