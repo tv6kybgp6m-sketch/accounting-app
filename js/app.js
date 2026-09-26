@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.38.4';
+const APP_VERSION = '1.38.5';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -3099,6 +3099,9 @@ function transactionItemHTML(t) {
     const paymentIcon = paymentIconFor(payment);
     // 没填备注就留空，不再重复显示分类名
     const noteHtml = t.note ? `<span class="txn-note-text">${escapeHtml(t.note)}</span> ` : '';
+    // 多成员家庭：在列表里标注这笔归谁，方便核对（单人家庭不显示，保持极简）
+    const memberBadge = (state.balanceMembers.length > 1 && t.member && t.member !== '全家')
+        ? `<span class="txn-member"><i class="fa-solid fa-user"></i> ${escapeHtml(t.member)}</span>` : '';
 
     return `
         <div class="transaction-item" onclick="editTransaction('${t.id}')">
@@ -3107,7 +3110,7 @@ function transactionItemHTML(t) {
             </div>
             <div class="transaction-info">
                 <div class="transaction-category">${name}</div>
-                <div class="transaction-note">${noteHtml}<span class="txn-payment"><i class="${paymentIcon}"></i> ${payment}</span></div>
+                <div class="transaction-note">${noteHtml}<span class="txn-payment"><i class="${paymentIcon}"></i> ${payment}</span>${memberBadge}</div>
             </div>
             <div class="transaction-amount ${t.type}">${sign}${formatCurrency(t.amount)}</div>
         </div>
@@ -3306,6 +3309,14 @@ function openTransactionModal(id) {
     // Render category picker
     renderCategoryPicker();
 
+    // 归属成员选择器：编辑时回填该笔原成员；新增时默认归当前筛选成员（全家视图则首要成员）
+    {
+        const ed = id ? state.transactions.find(x => x.id === id) : null;
+        const def = ed ? (ed.member || state.balanceMembers[0])
+                       : (state.balanceOwner !== 'all' && state.balanceMembers.includes(state.balanceOwner) ? state.balanceOwner : state.balanceMembers[0]);
+        renderMemberSelector(def);
+    }
+
     modal.classList.remove('hidden');
     raiseOverlay(modal);
     // Amount is now entered via the custom number pad below; no system keyboard needed
@@ -3471,6 +3482,18 @@ function renderPaymentOptions(selected) {
     sel.innerHTML = methods.map(p => `<option value="${p}" ${p === value ? 'selected' : ''}>${p}</option>`).join('');
 }
 
+// 交易归属成员选择器：只有家庭有多个成员时才显示，单人家庭保持极简（不显示）。
+// def 为默认选中成员；多成员时记一笔默认归到「当前筛选的成员」，全家视图则归首要成员。
+function renderMemberSelector(def) {
+    const group = document.getElementById('memberFormGroup');
+    const sel = document.getElementById('memberInput');
+    if (!group || !sel) return;
+    if (state.balanceMembers.length <= 1) { group.style.display = 'none'; return; }
+    group.style.display = '';
+    const val = (def && state.balanceMembers.includes(def)) ? def : state.balanceMembers[0];
+    sel.innerHTML = state.balanceMembers.map(m => `<option value="${m}" ${m === val ? 'selected' : ''}>${m}</option>`).join('');
+}
+
 function paymentIconFor(name) {
     return {
         '现金': 'fa-solid fa-money-bill-wave',
@@ -3596,6 +3619,8 @@ function saveTransaction(opts = {}) {
     const date = document.getElementById('dateInput').value;
     const note = document.getElementById('noteInput').value.trim();
     const paymentMethod = document.getElementById('paymentInput').value;
+    // 归属成员：选择器值优先；单人家庭或空值时回退首要成员（loadState 已给旧交易补过 member）
+    const memberVal = document.getElementById('memberInput').value || (state.balanceMembers[0] || '本人');
 
     if (!amount || amount <= 0) {
         showToast('请输入有效金额', 'error');
@@ -3620,6 +3645,7 @@ function saveTransaction(opts = {}) {
             t.time = document.getElementById('timeInput').value || nowTimeStr();
             t.note = note;
             t.paymentMethod = paymentMethod;
+            t.member = memberVal;
             t.updatedAt = Date.now();
         }
         showToast('交易已更新', 'success');
@@ -3633,7 +3659,7 @@ function saveTransaction(opts = {}) {
             time: document.getElementById('timeInput').value || nowTimeStr(),
             note,
             paymentMethod,
-            member: state.balanceOwner === 'all' ? (state.balanceMembers[0] || '本人') : state.balanceOwner,
+            member: memberVal,
             createdAt: Date.now(),
         });
         showToast(opts.reopen ? '已保存，继续记下一笔' : '交易已添加', 'success');

@@ -1661,6 +1661,18 @@ body.cat-dragging {
 [data-theme="dark"] .txn-payment {
     background: rgba(255,255,255,0.08);
 }
+.txn-member {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    color: var(--accent, #ff6b6b);
+    background: color-mix(in srgb, var(--accent, #ff6b6b) 12%, transparent);
+    border-radius: 4px;
+    padding: 1px 5px;
+    margin-left: 4px;
+    vertical-align: middle;
+}
 
 /* iCloud Sync */
 .icloud-status {
