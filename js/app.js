@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.38.5';
+const APP_VERSION = '1.38.6';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7327,7 +7327,6 @@ function renderMonthlyEntry() {
     const otherUsed = state.balances.some(b => balanceCatOf(b) === 'other');
     const cats = BAL_CATS.filter(k => k !== 'other' || otherUsed);
     const cols = cats.length + 3;      // 类别列 + 负债 + 收益 + 净入金（「小计/对账」单独给固定宽度）
-    const earnsSet = new Set(returnEntryAccounts(month, member).map(a => a.id));
     const val = (key, id, saved) => {
         const typed = monthlyInput[key][id];
         if (typed === undefined) return saved === undefined || saved === null ? '' : saved;
@@ -7356,9 +7355,8 @@ function renderMonthlyEntry() {
             </div>
             ${cats.map(k => `<div class="mw-c">${balInput(a, k)}</div>`).join('')}
             <div class="mw-c">${balInput(a, BAL_CAT_LIAB, ' mw-liab')}</div>
-            <div class="mw-c"><input type="number" step="0.01" class="text-input be-field" data-ret="${a.id}"
-                 value="${_esc(retCell(a))}" placeholder="—" title="${_esc(a.name)} · 本月投资收益">
-                 ${earnsSet.has(a.id) ? `<span class="be-rate" data-rate-for="${a.id}"></span>` : ''}</div>
+            <div class="mw-c mw-ret"><span class="be-rate" data-rate-for="${a.id}"></span><input type="number" step="0.01" class="text-input be-field" data-ret="${a.id}"
+                 value="${_esc(retCell(a))}" placeholder="—" title="${_esc(a.name)} · 本月投资收益"></div>
             <div class="mw-c"><input type="number" step="0.01" class="text-input be-flow" data-flow-in="${a.id}"
                  value="${_esc(flowCell(a))}" placeholder="—" title="${_esc(a.name)} · 本月净入金（买进的钱）"></div>
             <div class="mw-c mw-sumcol"><span class="mw-rownet">小计 <b data-wsum>${formatCurrency(Math.round(net * 100) / 100)}</b></span>
@@ -7548,7 +7546,8 @@ function updateMonthlyDerived() {
     const member = monthlyMember();
     const list = document.getElementById('monthlyEntryList');
     const draft = monthlyDraftStats(month, member);
-    // 1) 每行的收益率角标
+    // 1) 每行的收益率角标（先清空所有角标，再只填「有收益记录」的账户，避免清空收益后旧角标残留）
+    list.querySelectorAll('[data-rate-for]').forEach(b => { b.textContent = ''; b.className = 'be-rate'; });
     Object.keys(draft).forEach(id => {
         const badge = list.querySelector(`[data-rate-for="${id}"]`);
         if (!badge) return;
@@ -10221,5 +10220,14 @@ async function init() {
     // 网页版不需要：刷新就是最新，白跑一次网络请求反而拖慢首屏。
     if (isElectron()) setTimeout(() => { checkAppUpdate('startup').catch(() => {}); }, 4000);
 }
+
+// Mac 浏览器上，鼠标悬停在数字输入框上滚动滚轮会改值，录入时极易误触改了金额。
+// 原生 app（WKWebView）没有这个行为，这里统一在网页里关掉：滚轮打到数字框时阻止默认改值。
+document.addEventListener('wheel', function (e) {
+    const t = e.target;
+    if (t && t.tagName === 'INPUT' && t.type === 'number') {
+        e.preventDefault();
+    }
+}, { passive: false });
 
 document.addEventListener('DOMContentLoaded', init);

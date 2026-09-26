@@ -4028,7 +4028,7 @@ table.bill-stats {
 .mw-grid {
     display: grid;
     grid-template-columns: var(--mw-name-w, 112px) repeat(var(--mw-cols, 7), minmax(0, 1fr)) var(--mw-sum-w, 156px);
-    gap: 4px 6px; align-items: center;
+    gap: 2px 6px; align-items: center;
     width: 100%;
 }
 .mw-tr { display: contents; }
@@ -4046,7 +4046,7 @@ table.bill-stats {
 .mw-grid input[type="number"] {
     -moz-appearance: textfield; appearance: textfield;
 }
-.mw-rowname { display: flex; align-items: center; gap: 4px; min-height: 38px; padding: 0 4px 0 2px; }
+.mw-rowname { display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 0 4px 0 2px; }
 .mw-name {
     font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     cursor: text; border-bottom: 1px dashed transparent; padding-bottom: 1px;
@@ -4074,8 +4074,8 @@ table.bill-stats {
     border: 1px solid var(--border); background: transparent; color: var(--text-secondary);
 }
 .mw-chip:hover { border-color: var(--border-strong); color: var(--text-primary); }
-.mw-c { display: flex; align-items: center; justify-content: center; min-height: 38px; min-width: 0; }
-.mw-c .text-input { width: 100%; min-width: 0; padding: 6px 6px; font-size: 13px; text-align: center; }
+.mw-c { display: flex; align-items: center; justify-content: center; min-height: 30px; min-width: 0; }
+.mw-c .text-input { width: 100%; min-width: 0; padding: 4px 6px; font-size: 13px; text-align: center; }
 /* 一个钱包里同类资产有好几个账户时，格子纵向叠，每个前面挂一个极小的账户名 */
 .mw-tag {
     font-size: 9px; line-height: 11px; color: var(--text-tertiary);
@@ -4086,6 +4086,11 @@ table.bill-stats {
 .mw-stack { flex-direction: column; gap: 3px; align-items: stretch; padding: 3px 0; }
 .mw-stack .be-rate { display: block; font-size: 9.5px; text-align: center; min-height: 11px; line-height: 11px; }
 .mw-liab { color: var(--expense); }
+/* 收益格：收益率角标移到输入框上方，避免它出现时挤窄输入框；空角标自动隐藏不占位 */
+.mw-c.mw-ret { flex-direction: column; gap: 1px; justify-content: center; padding: 2px 0; }
+.mw-c.mw-ret .be-rate { display: block; width: 100%; margin: 0; padding: 0 4px; line-height: 12px; font-size: 9.5px; text-align: center; min-height: 0; }
+.mw-c.mw-ret .be-rate:empty { display: none; }
+.mw-c.mw-ret input { width: 100%; }
 .mw-sumcol { flex-direction: column; gap: 2px; align-items: stretch; text-align: left; }
 .mw-sumcol .mw-rownet { font-size: 10.5px; color: var(--text-secondary); white-space: nowrap; }
 .mw-sumcol .mw-rownet b { font-variant-numeric: tabular-nums; }
@@ -4135,6 +4140,6 @@ table.bill-stats {
         grid-template-columns: 72px repeat(var(--mw-cols, 7), minmax(78px, 1fr)) 124px;
     }
     .mw-corner, .mw-rowname { position: sticky; left: 0; z-index: 2; background: var(--bg-modal); }
-    .mw-rowname { min-height: 34px; }
-    .mw-c { min-height: 34px; }
+    .mw-rowname { min-height: 28px; }
+    .mw-c { min-height: 28px; }
 }
