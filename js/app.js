@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.38.1';
+const APP_VERSION = '1.38.2';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -151,6 +151,13 @@ const COLOR_OPTIONS = [
     '#55a3ff', '#ff7a45', '#9b59b6', '#26de81', '#fc5c65',
 ];
 
+// 用户自己决定每个资产类别归到哪一类（固定资产 / 流动资产 / 长期投资 / 其他投资）
+const BAL_CLASS_TAGS = ['流动资产', '长期投资', '固定资产', '其他投资'];
+const BAL_CLASS_TAG_DEFAULT = {
+    cash: '流动资产', mmf: '其他投资', fixed: '流动资产',
+    stock: '长期投资', gold: '长期投资', other: '其他投资',
+};
+
 // ---- State ----
 let state = {
     transactions: [],
@@ -199,6 +206,7 @@ let state = {
     balanceMembers: ['本人'],   // 家庭资产负债表的成员名单
     memberAddedAt: {},        // 成员名 -> 添加时间（名字就是身份，同支付方式的做法）
     balanceOwner: 'all',       // 当前筛选：'all' 或某成员
+    balClassTags: Object.assign({}, BAL_CLASS_TAG_DEFAULT),  // 每个资产类别归到哪一类（固定资产/流动资产/长期投资/其他投资）
     reportMetric: 'expense',
     breakdownExpanded: false,
     reportChartType: 'line',
@@ -5673,13 +5681,6 @@ function balanceCellsAtMonth(month, member = state.balanceOwner) {
         });
     return cells;
 }
-
-// 用户自己决定每个资产类别归到哪一类（固定资产 / 流动资产 / 长期投资 / 其他投资）
-const BAL_CLASS_TAGS = ['流动资产', '长期投资', '固定资产', '其他投资'];
-const BAL_CLASS_TAG_DEFAULT = {
-    cash: '流动资产', mmf: '其他投资', fixed: '流动资产',
-    stock: '长期投资', gold: '长期投资', other: '其他投资',
-};
 
 // 按类别汇总某月的余额：每个类别一个数（负债也是正数），跨账户直接相加。
 // 这样才能把「中国银行信用卡」这一格正确算进负债，而不是跟现金净额冲掉。
