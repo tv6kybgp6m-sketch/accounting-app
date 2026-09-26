@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.38.3';
+const APP_VERSION = '1.38.4';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -641,6 +641,7 @@ function confirmPendingRecurring(id, amount) {
             id: p.id, type: p.type, amount: amt, categoryId: p.categoryId, date: p.date,
             time: p.time || '', note: p.note || '', paymentMethod: p.paymentMethod || '现金',
             recurringRuleId: p.ruleId, createdAt: Date.now(), updatedAt: Date.now(),
+            member: state.balanceOwner === 'all' ? (state.balanceMembers[0] || '本人') : state.balanceOwner,
         };
         state.transactions.push(created);
     }
@@ -2780,6 +2781,13 @@ function loadState() {
                 state.accounts.forEach(a => { if (a.owner !== undefined) delete a.owner; });
             })();
 
+            // 交易记录补 member 字段：旧数据/导入未带成员，统一归到首要成员，
+            // 否则净资产桥在「按成员筛选」时无法把流水正确归属到具体成员。
+            if (Array.isArray(state.transactions)) {
+                const prim = state.balanceMembers[0] || '本人';
+                state.transactions.forEach(t => { if (!t.member) t.member = prim; });
+            }
+
             // 分类体系 v2 迁移：替换旧默认分类为新的，交易/预算的旧分类ID同步映射
             if (!data.categoryVersion || data.categoryVersion < 2) {
                 const customCats = state.categories.filter(c => c.id.startsWith('c_'));
@@ -3625,6 +3633,7 @@ function saveTransaction(opts = {}) {
             time: document.getElementById('timeInput').value || nowTimeStr(),
             note,
             paymentMethod,
+            member: state.balanceOwner === 'all' ? (state.balanceMembers[0] || '本人') : state.balanceOwner,
             createdAt: Date.now(),
         });
         showToast(opts.reopen ? '已保存，继续记下一笔' : '交易已添加', 'success');
@@ -5341,6 +5350,7 @@ function applyWorkbook(wb) {
                         time: row['时间'] || '',
                         note: row['备注'] || '',
                         paymentMethod: row['支付方式'] || '现金',
+                        member: state.balanceMembers[0] || '本人',
                     };
                     const sheetId = String(row['ID'] || '').trim();
                     const existing = (sheetId && byId.get(sheetId)) || byKey.get(keyOf(rec));
@@ -5923,7 +5933,8 @@ function netWorthBridge(month) {
     const curCat = balancesByCat(month, member);
     const openT = totalsFromCat(prevCat);
     const closeT = totalsFromCat(curCat);
-    const txns = state.transactions.filter(t => getMonthKey(t.date) === month);
+    const txns = state.transactions.filter(t => getMonthKey(t.date) === month
+        && (member === 'all' || t.member === member));
     const income = txns.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const expense = txns.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const retMap = returnsAtMonth(month, member);
@@ -7516,9 +7527,11 @@ function updateMonthlyDerived() {
         const badge = list.querySelector(`[data-rate-for="${id}"]`);
         if (!badge) return;
         const st = portfolioMonthStats(month, [id], draft[id] ? { [id]: draft[id] } : null, member);
-        // 算不出率时必须说清是"本金未知"，不能干脆不显示 —— 那是最容易让人以为没收益的错觉
+        // 算不出率时必须说清原因，不能干脆不显示 —— 那是最容易让人以为没收益的错觉
         const noRate = st.rate === null
-            ? ((st.unknown && st.unknown.length) || st.reason === 'no-capital' ? '本金未知' : '')
+            ? (st.reason === 'no-capital' || (st.unknown && st.unknown.length)
+                ? '本金未知'
+                : st.reason === 'zero-opening' ? '期初0' : '')
             : pctText(st.rate);
         badge.textContent = noRate;
         badge.className = 'be-rate' + (st.rate === null ? ' unknown' : (st.rate > 0 ? ' up' : (st.rate < 0 ? ' down' : '')));
@@ -8027,10 +8040,14 @@ function fundLatestMonth() {
 
 function fundActualByBucket() {
     const month = fundLatestMonth();
-    const map = month ? balancesAtMonth(month) : {};
+    // 只累加「资产类」金额（各资产类别之和），不再用账户净值（资产−该账户负债）。
+    // 否则支付宝同时有余额和花呗时，负债会被扣两次，和资产负债表总资产对不上。
+    const cells = month ? balanceCellsAtMonth(month) : {};
     const out = { cash: 0, steady: 0, growth: 0, unassigned: 0 };
     state.accounts.filter(a => a.kind === 'asset').forEach(a => {
-        const v = map[a.id] || 0;
+        const per = cells[a.id] || {};
+        let v = 0;
+        BAL_CATS.forEach(k => { v += (per[k] || 0); });
         if (a.bucket && out[a.bucket] !== undefined) out[a.bucket] += v;
         else out.unassigned += v;
     });
@@ -8040,11 +8057,14 @@ function fundActualByBucket() {
 // 按指定成员口径算三桶实际金额。页面跟随当前筛选，导出固定用家庭口径。
 function fundActualByBucketFor(member) {
     const month = fundLatestMonth();
-    const map = month ? balancesAtMonth(month, member) : {};
+    const cells = month ? balanceCellsAtMonth(month, member) : {};
     const out = { cash: 0, steady: 0, growth: 0 };
     state.accounts.filter(a => a.kind === 'asset').forEach(a => {
-        if (map[a.id] === undefined || out[a.bucket] === undefined) return;
-        out[a.bucket] += map[a.id];
+        if (out[a.bucket] === undefined) return;
+        const per = cells[a.id] || {};
+        let v = 0;
+        BAL_CATS.forEach(k => { v += (per[k] || 0); });
+        out[a.bucket] += v;
     });
     return out;
 }
