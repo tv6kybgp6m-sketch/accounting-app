@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.38.8';
+const APP_VERSION = '1.38.9';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -6422,8 +6422,13 @@ function renderBalancePie(ctx, info) {
         return;
     }
     balanceHideEmpty();
-    const labels = entries.map(e => e.name || accountById(e.id)?.name || '未知');
-    const colors = entries.map(e => e.id === '__others__' ? PIE_OTHERS_COLOR : (accountById(e.id)?.color || '#8e8e8e'));
+    // label 与 color 按口径区分：资产按 6 类，负债/净资产按账户
+    const labels = entries.map(e => e.label || e.name || accountById(e.id)?.name || '未知');
+    const colors = entries.map(e => {
+        if (e.id === '__others__') return PIE_OTHERS_COLOR;
+        if (metric === 'asset') return BAL_CAT_COLORS[e.id] || '#8e8e8e';
+        return accountById(e.id)?.color || '#8e8e8e';
+    });
 
     charts.balance = new Chart(ctx, {
         type: 'doughnut',
@@ -6437,7 +6442,16 @@ function renderBalancePie(ctx, info) {
             onClick: (evt, elements) => {
                 if (!elements || !elements.length) return;
                 const e = entries[elements[0].index];
-                if (e) openAccountHistoryForAccount(e.ids && e.ids.length === 1 ? e.ids[0] : null, e.name);
+                if (!e) return;
+                if (metric === 'asset') {
+                    // 资产口径的切片是 6 类之一，点它看该月该类别的账户明细
+                    openAccountHistoryForPeriod(info.month, e.label || e.name || BAL_CAT_NAMES[e.id] || '资产');
+                } else if (metric === 'liability') {
+                    // 负债按账户拆，多点聚合时看该月全部负债
+                    openAccountHistoryForAccount(e.ids && e.ids.length === 1 ? e.ids[0] : null, e.label || e.name);
+                } else {
+                    openAccountHistoryForAccount(e.ids && e.ids.length === 1 ? e.ids[0] : null, e.label || e.name);
+                }
             },
             onHover: (evt, elements) => {
                 const target = evt.native && evt.native.target;
@@ -7175,6 +7189,7 @@ const BAL_CATS = ['cash', 'mmf', 'fixed', 'stock', 'gold', 'other'];
 const BAL_CAT_LIAB = 'liab';
 const BAL_CAT_NAMES = { cash: '现金', mmf: '货币基金', fixed: '定期存款', stock: '股票基金', gold: '黄金', other: '其他', liab: '负债' };
 const BAL_CAT_ICONS = { cash: 'fa-wallet', mmf: 'fa-piggy-bank', fixed: 'fa-vault', stock: 'fa-chart-line', gold: 'fa-coins', other: 'fa-box-open', liab: 'fa-credit-card' };
+const BAL_CAT_COLORS = { cash: '#34c759', mmf: '#007aff', fixed: '#5856d6', stock: '#ff9500', gold: '#ffcc00', other: '#8e8e93', liab: '#ff3b30' };
 function balanceCatName(k) { return BAL_CAT_NAMES[k] || assetClassName(k); }
 
 // 老数据（还没有类别这一说的时候）一条账户一个月只有一个数，没有 cat 字段：
