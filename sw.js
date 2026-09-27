@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bookkeeping-v1.38.10';
+const CACHE_NAME = 'bookkeeping-v1.38.11';
 const PRECACHE = [
   './',
   './index.html',
@@ -52,23 +52,33 @@ function cacheAndReturn(request, response) {
   return response;
 }
 
-// cache-first for static files: answer from the worker cache, network only on a miss
+// network-first for static files: the local server is always available, so we
+// answer from the network and only fall back to cache when it is unreachable.
+// This keeps every asset current after an update; cache is just offline cover.
 async function cacheFirst(request) {
-  const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(request, { ignoreSearch: true });
-  if (cached) return cached;
-  const response = await fetch(request, NET);
-  return cacheAndReturn(request, response);
+  try {
+    const response = await fetch(request, NET);
+    return cacheAndReturn(request, response);
+  } catch (e) {
+    const cache = await caches.open(CACHE_NAME);
+    return (await cache.match(request, { ignoreSearch: true })) || null;
+  }
 }
 
-// Serve a navigation from cache when possible, else fall back to the network.
+// Serve a navigation from the network first (the local server is always up),
+// falling back to cache only if the server is unreachable. This guarantees a
+// freshly built release is shown the moment the app is relaunched — no stale
+// cache can shadow a new version. The cache is purely an offline safety net.
 async function serveNavigation(request) {
-  const cache = await caches.open(CACHE_NAME);
-  const cached = (await cache.match(request, { ignoreSearch: true }))
-    || (await cache.match('./index.html'));
-  if (cached) return cached;
-  const response = await fetch(request, NET);
-  return cacheAndReturn(request, response);
+  try {
+    const response = await fetch(request, NET);
+    return cacheAndReturn(request, response);
+  } catch (e) {
+    const cache = await caches.open(CACHE_NAME);
+    return (await cache.match(request, { ignoreSearch: true }))
+      || (await cache.match('./index.html'))
+      || Response.error();
+  }
 }
 
 // Background refresh for the page (bypasses the browser HTTP cache).
