@@ -19,12 +19,33 @@ final class MiniHTTPServer {
     init(root: URL) { self.root = root }
 
     func start() throws -> UInt16 {
+        // 固定端口，保证每次启动的网页 origin (http://127.0.0.1:PORT) 一致，
+        // 否则 WKWebView 的 localStorage 会因端口变化而失效、数据丢失。
+        // 优先 8731，被占用（如已有实例）时依次尝试 8732/8733，最后才让系统分配（极少见）。
+        let candidates: [UInt16] = [8731, 8732, 8733, 0]
+        for want in candidates {
+            if let bound = tryBind(wantPort: want) {
+                listenSock = bound.sock
+                port = bound.port
+                let src = DispatchSource.makeReadSource(fileDescriptor: bound.sock, queue: .global())
+                src.setEventHandler { [weak self] in self?.acceptLoop(sock: bound.sock) }
+                src.resume()
+                acceptSource = src
+                fputs("MiniHTTP listening on 127.0.0.1:\(port)\n", stderr)
+                return port
+            }
+        }
+        throw NSError(domain: "MiniHTTP", code: 2, userInfo: [NSLocalizedDescriptionKey: "bind(127.0.0.1) 失败"])
+    }
+
+    // 尝试绑定指定端口（0 = 系统分配）；成功返回 (socket, 实际端口)，失败返回 nil
+    private func tryBind(wantPort: UInt16) -> (sock: Int32, port: UInt16)? {
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = 0 // 系统分配空闲端口
+        addr.sin_port = wantPort.bigEndian // 关键：固定端口
         addr.sin_addr.s_addr = inet_addr("127.0.0.1")
         let sock = socket(AF_INET, SOCK_STREAM, 0)
-        guard sock >= 0 else { throw NSError(domain: "MiniHTTP", code: 1, userInfo: [NSLocalizedDescriptionKey: "socket() 失败"]) }
+        guard sock >= 0 else { return nil }
         var yes: Int32 = 1
         setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout.size(ofValue: yes)))
         var bound = addr
@@ -33,7 +54,7 @@ final class MiniHTTPServer {
                 bind(sock, p, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        guard bindOK == 0 else { close(sock); throw NSError(domain: "MiniHTTP", code: 2, userInfo: [NSLocalizedDescriptionKey: "bind(127.0.0.1) 失败"]) }
+        guard bindOK == 0 else { close(sock); return nil }
         listen(sock, 32)
         var got = sockaddr_in()
         var len = socklen_t(MemoryLayout<sockaddr_in>.size)
@@ -42,16 +63,9 @@ final class MiniHTTPServer {
                 getsockname(sock, p, &len)
             }
         }
-        guard nameOK == 0 else { close(sock); throw NSError(domain: "MiniHTTP", code: 3, userInfo: [NSLocalizedDescriptionKey: "getsockname 失败"]) }
-        port = UInt16(bigEndian: got.sin_port)
-        listenSock = sock
-
-        let src = DispatchSource.makeReadSource(fileDescriptor: sock, queue: .global())
-        src.setEventHandler { [weak self] in self?.acceptLoop(sock: sock) }
-        src.resume()
-        acceptSource = src
-        fputs("MiniHTTP listening on 127.0.0.1:\(port)\n", stderr)
-        return port
+        guard nameOK == 0 else { close(sock); return nil }
+        let actual = UInt16(bigEndian: got.sin_port)
+        return (sock, actual)
     }
 
     private func acceptLoop(sock: Int32) {
