@@ -2763,7 +2763,7 @@ body.cat-dragging {
 .bal-entry-actions {
     display: flex;
     gap: 8px;
-    margin: 4px 0 10px;
+    margin: 2px 0 6px;
 }
 .bal-entry-actions .secondary-btn { font-size: 12px; padding: 6px 10px; }
 .balance-entry-list { display: flex; flex-direction: column; gap: 2px; }
@@ -3450,12 +3450,12 @@ table.bill-stats {
 .ins-member-wrap i[data-insact="del"]:hover { color: var(--expense); }
 
 /* ---- 记余额/记收益：成员+月份同行；余额分资产/负债两段 ---- */
-.bal-entry-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 8px; }
+.bal-entry-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 4px; }
 .bal-entry-head .form-group { flex: 1 1 0; min-width: 0; margin-bottom: 0; }
 /* 控件自身 min-width:auto 会让两栏分不匀；高度也要显式统一，
    否则成员下拉和月份下拉在不同内核下会一高一低 */
 .bal-entry-head .form-group select,
-.bal-entry-head .form-group input { width: 100%; min-width: 0; height: 40px; box-sizing: border-box; }
+.bal-entry-head .form-group input { width: 100%; min-width: 0; height: 32px; font-size: 13px; padding: 0 8px; box-sizing: border-box; }
 /* 归属月份 = 「年（手输）+ 月（下拉）」，等分等高的规则要同时覆盖两种控件 */
 .bal-entry-head .form-group.be-ym-group { flex: 1.5 1 0; }
 .ym-pair { display: flex; gap: 6px; }
@@ -4036,6 +4036,7 @@ table.bill-stats {
     font-size: 13px; font-weight: 600; color: var(--text-primary);
     text-align: center; padding: 0 2px 2px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    position: sticky; top: 0; z-index: 6; background: var(--bg-modal);
 }
 .mw-corner { text-align: left; padding-left: 2px; font-size: 13px; font-weight: 600; }
 /* 月度格子里的金额输入框：去掉原生的上下三角箭头（不需要用） */
@@ -4063,8 +4064,14 @@ table.bill-stats {
     font-size: 13px; border: none; border-radius: 50%; cursor: pointer;
     color: var(--text-tertiary); background: transparent; opacity: 0; transition: opacity .15s;
 }
-.mw-tr:hover .mw-del { opacity: .7; }
+.mw-edit {
+    flex: none; width: 16px; height: 16px; line-height: 14px; padding: 0;
+    font-size: 11px; border: none; border-radius: 50%; cursor: pointer;
+    color: var(--text-tertiary); background: transparent; opacity: 0; transition: opacity .15s;
+}
+.mw-tr:hover .mw-del, .mw-tr:hover .mw-edit { opacity: .7; }
 .mw-del:hover { opacity: 1 !important; color: var(--expense); background: rgba(255, 59, 48, .1); }
+.mw-edit:hover { opacity: 1 !important; color: var(--accent); background: rgba(10, 132, 255, .1); }
 .mw-rename-input { font-size: 13px !important; font-weight: 600; padding: 3px 5px !important; text-align: left !important; }
 .mw-addrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .mw-new { flex: 1 1 190px; min-width: 150px; font-size: 12.5px; }
@@ -4112,8 +4119,13 @@ table.bill-stats {
 }
 .mw-total-row .mw-name, .mw-pct-row .mw-name { font-size: 12.5px; color: var(--text-secondary); }
 .mw-tcell b { font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* 占比行与下面的录入行之间收一条细线，视线分得清"上面是汇总、下面才是要填的" */
-.mw-pct-row .mw-rowname, .mw-pct-row .mw-c { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+/* 占比行冻结：滚动录入行时这一行吸在表头下方，始终看得到每列对应的占比 */
+.mw-pct-row .mw-rowname, .mw-pct-row .mw-c {
+    position: sticky; top: 22px; z-index: 5;
+    background: var(--bg-modal);
+    border-bottom: 1px solid var(--border); padding-bottom: 4px;
+    box-shadow: 0 1px 0 var(--bg-modal);
+}
 .mw-pct-row .mw-tcell b { font-size: 11.5px; font-weight: 500; color: var(--text-secondary); }
 .mw-pct-row .mw-sumcol b { font-weight: 600; color: var(--text-primary); }
 

@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.38.11';
+const APP_VERSION = '1.38.12';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7360,11 +7360,12 @@ function renderMonthlyEntry() {
         // 行上如果挂着「现金 / 货币基金 / 定期存款 / 股票基金」这种名字，跟横轴撞词，
         // 两轴看起来就变成一样的了 —— 这里标出来，点一下就能改成「放钱的地方」
         const like = mwNameLooksLikeCat(a.name);
-        return `<div class="mw-tr" data-mw-account="${a.id}">
+        return `        <div class="mw-tr" data-mw-account="${a.id}">
             <div class="mw-rowname">
                 <span class="mw-name${like ? ' mw-name-warn' : ''}" data-rename="${a.id}"
                     title="点一下改名（这里放的是「放钱的地方」：支付宝 / 微信 / 工商银行 / 摩根…）">${_esc(a.name)}</span>
                 ${like ? `<span class="mw-badge" data-rename="${a.id}" title="这个名字是资产类别，建议改成放钱的地方">类别名</span>` : ''}
+                <button class="mw-edit" data-edit-account="${a.id}" title="修改这个账户（名称 / 分类 / 图标）"><i class="fa-solid fa-pen"></i></button>
                 <button class="mw-del" data-del-account="${a.id}" title="删除这个账户">×</button>
             </div>
             ${cats.map(k => `<div class="mw-c">${balInput(a, k)}</div>`).join('')}
@@ -7414,7 +7415,7 @@ function renderMonthlyEntry() {
         + `<div class="mw-addrow">
             <input type="text" id="mwNewAccount" class="text-input mw-new" maxlength="20"
                 placeholder="加一行：放钱的地方（支付宝 / 微信 / 工商银行 / 摩根…）">
-            <button class="btn-mini primary" id="mwAddAccountBtn">加一行</button>
+            <button class="btn-mini primary" id="mwAddAccountBtn">＋ 增加账户</button>
             <span class="mw-chips">${quick.map(q =>
                 `<button class="mw-chip" data-quick-add="${_esc(q)}">+ ${_esc(q)}</button>`).join('')}</span>
         </div>`
@@ -7448,6 +7449,7 @@ function mwAddAccount(raw) {
     saveState();
     renderMonthlyEntry();
     renderAccountManageList();
+    if (state.currentView === 'balance') renderBalance();
     showToast(`已加一行：${name}`, 'success');
 }
 
@@ -7492,6 +7494,7 @@ function bindMonthlyRowOps(list) {
                 }
                 renderMonthlyEntry();
                 renderAccountManageList();
+                if (state.currentView === 'balance') renderBalance();
             };
             inp.addEventListener('keydown', e => {
                 if (e.key === 'Enter') { e.preventDefault(); commit(); }
@@ -7505,6 +7508,13 @@ function bindMonthlyRowOps(list) {
         btn.addEventListener('click', e => {
             e.stopPropagation();
             deleteAccountFromList(btn.dataset.delAccount);
+        });
+    });
+
+    list.querySelectorAll('[data-edit-account]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            openAccountEdit(btn.dataset.editAccount);
         });
     });
 
@@ -7936,6 +7946,7 @@ function deleteAccountFromList(id) {
     if (guardAccountWithRecords(a)) return;
     if (!confirm(`确定删除「${a.name}」吗？它名下没有余额和收益记录，删掉不影响别的地方。`)) return;
     removeAccount(id);
+    refreshAccountLists();
 }
 
 function refreshAccountLists() {
