@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.1';
+const APP_VERSION = '1.39.2';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7421,13 +7421,10 @@ function renderMonthlyEntry() {
         const like = mwNameLooksLikeCat(a.name);
         return `        <div class="mw-tr" data-mw-account="${a.id}">
             <div class="mw-rowname">
-                <span class="mw-name${like ? ' mw-name-warn' : ''}" data-rename="${a.id}"
-                    title="点一下改名（这里放的是「放钱的地方」：支付宝 / 微信 / 工商银行 / 摩根…）">${_esc(a.name)}</span>
+                <span class="mw-name${like ? ' mw-name-warn' : ''}" data-rename="${a.id}" draggable="true"
+                    title="点一下改名；按住上下拖动可调整这一行（账户）的顺序">${_esc(a.name)}</span>
                 ${like ? `<span class="mw-badge" data-rename="${a.id}" title="这个名字是资产类别，建议改成放钱的地方">类别名</span>` : ''}
-                <button class="mw-move mw-up" data-move-account="${a.id}" data-dir="-1" title="上移这一行"${i === 0 ? ' disabled' : ''}><i class="fa-solid fa-arrow-up"></i></button>
-                <button class="mw-move mw-down" data-move-account="${a.id}" data-dir="1" title="下移这一行"${i === rowsOf.length - 1 ? ' disabled' : ''}><i class="fa-solid fa-arrow-down"></i></button>
-                <button class="mw-edit" data-edit-account="${a.id}" title="修改这个账户（名称 / 分类 / 图标）"><i class="fa-solid fa-pen"></i></button>
-                <button class="mw-del" data-del-account="${a.id}" title="删除这个账户">×</button>
+                <button class="mw-more" data-row-more="${a.id}" title="更多操作（上移 / 下移 / 修改 / 删除）"><i class="fa-solid fa-ellipsis"></i></button>
             </div>
             ${assetCats.map(c => `<div class="mw-c">${balInput(a, c.key)}</div>`).join('')}
             ${liabCats.map(c => `<div class="mw-c">${balInput(a, c.key, ' mw-liab')}</div>`).join('')}
@@ -7492,12 +7489,8 @@ function renderMonthlyEntry() {
 // ---- 月度账单「列」管理：改名 / 删除 / 新增 / 拖拽排序 ----
 function colHeadHTML(c, extraCls) {
     return `<div class="mw-h mw-col mw-manc${extraCls || ''}" draggable="true" data-col-key="${_esc(c.key)}" data-col-kind="${_esc(c.kind)}">
-        <span class="mw-col-label" data-col-label="${_esc(c.key)}">${_esc(c.label)}</span>
-        <span class="mw-col-tools">
-            <button class="mw-col-edit" data-col-edit="${_esc(c.key)}" title="改这一列的名字"><i class="fa-solid fa-pen"></i></button>
-            <button class="mw-col-del" data-col-del="${_esc(c.key)}" title="${c.kind === 'ret' ? '隐藏这一列' : '删除这一列（同时删掉该列所有已记的数）'}">×</button>
-        </span>
-        <span class="mw-col-grip" title="拖动调整列顺序"><i class="fa-solid fa-grip-vertical"></i></span>
+        <span class="mw-col-label" data-col-label="${_esc(c.key)}" title="点一下改名；按住拖动可调整列顺序">${_esc(c.label)}</span>
+        <button class="mw-col-more" data-col-more="${_esc(c.key)}" title="更多操作（改名 / 删除）"><i class="fa-solid fa-ellipsis"></i></button>
     </div>`;
 }
 
@@ -7514,11 +7507,24 @@ function bindMonthlyColOps(list) {
             if (from && to && from !== to) moveSheetColumn(from, to);
         });
     });
-    list.querySelectorAll('[data-col-edit]').forEach(btn => {
-        btn.addEventListener('click', e => { e.stopPropagation(); renameSheetColumn(btn.dataset.colEdit); });
-    });
-    list.querySelectorAll('[data-col-del]').forEach(btn => {
-        btn.addEventListener('click', e => { e.stopPropagation(); deleteSheetColumn(btn.dataset.colDel); });
+    // 「⋯ 更多」浮层菜单：改名 / 删除（或隐藏收益列）
+    list.querySelectorAll('[data-col-more]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            const key = btn.dataset.colMore;
+            const c = sheetColByKey(key);
+            if (!c) return;
+            const r = btn.getBoundingClientRect();
+            const items = [
+                { label: '改名', icon: 'fa-pen', onClick: () => renameSheetColumn(key) },
+            ];
+            if (c.kind === 'ret') {
+                items.push({ label: '隐藏此列', icon: 'fa-eye-slash', onClick: () => deleteSheetColumn(key) });
+            } else {
+                items.push({ label: '删除此列', icon: 'fa-trash', danger: true, onClick: () => deleteSheetColumn(key) });
+            }
+            openMwMenu(r.left, r.bottom + 4, items);
+        });
     });
     const addBtn = document.getElementById('mwAddColBtn');
     if (addBtn) addBtn.addEventListener('click', addSheetColumn);
@@ -7678,18 +7684,45 @@ function bindMonthlyRowOps(list) {
         });
     });
 
-    list.querySelectorAll('[data-edit-account]').forEach(btn => {
-        btn.addEventListener('click', e => {
-            e.stopPropagation();
-            openAccountEdit(btn.dataset.editAccount);
+    // 整行拖拽重排：账户名是拖动手柄（draggable），落到另一行即交换顺序
+    list.querySelectorAll('.mw-name[data-rename]').forEach(n => {
+        n.addEventListener('dragstart', e => {
+            const tr = n.closest('.mw-tr');
+            if (tr) tr.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            try { e.dataTransfer.setData('text/plain', n.dataset.rename); } catch (_) {}
+        });
+        n.addEventListener('dragend', () => {
+            const tr = n.closest('.mw-tr');
+            if (tr) tr.classList.remove('dragging');
+            list.querySelectorAll('.mw-tr.drag-over').forEach(x => x.classList.remove('drag-over'));
+        });
+    });
+    list.querySelectorAll('.mw-tr').forEach(tr => {
+        tr.addEventListener('dragover', e => { e.preventDefault(); tr.classList.add('drag-over'); });
+        tr.addEventListener('dragleave', e => { if (e.target === tr) tr.classList.remove('drag-over'); });
+        tr.addEventListener('drop', e => {
+            e.preventDefault(); tr.classList.remove('drag-over');
+            const from = e.dataTransfer.getData('text/plain');
+            const toId = tr.dataset.mwAccount;
+            if (from && toId && from !== toId) reorderMonthlyAccount(from, toId);
         });
     });
 
-    list.querySelectorAll('[data-move-account]').forEach(btn => {
+    // 「⋯ 更多」浮层菜单：上移 / 下移 / 修改 / 删除
+    list.querySelectorAll('[data-row-more]').forEach(btn => {
         btn.addEventListener('click', e => {
             e.stopPropagation();
-            if (btn.disabled) return;
-            moveMonthlyAccountRow(btn.dataset.moveAccount, parseInt(btn.dataset.dir, 10) || 1);
+            const id = btn.dataset.rowMore;
+            const a = accountById(id);
+            if (!a) return;
+            const r = btn.getBoundingClientRect();
+            openMwMenu(r.left, r.bottom + 4, [
+                { label: '上移一行', icon: 'fa-arrow-up', onClick: () => moveMonthlyAccountRow(id, -1) },
+                { label: '下移一行', icon: 'fa-arrow-down', onClick: () => moveMonthlyAccountRow(id, 1) },
+                { label: '修改', icon: 'fa-pen', onClick: () => openAccountEdit(id) },
+                { label: '删除', icon: 'fa-trash', danger: true, onClick: () => deleteAccountFromList(id) },
+            ]);
         });
     });
 
@@ -8256,6 +8289,60 @@ function moveMonthlyAccountRow(id, dir) {
     renderAccountManageList();
     if (state.currentView === 'balance') renderBalance();
     showToast(dir < 0 ? '已上移一行' : '已下移一行', 'success');
+}
+
+// 月度账单：拖拽整行（账户）重排——把 from 插到 to 之前（按全局 order）
+function reorderMonthlyAccount(fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return;
+    ensureAccountOrder();
+    const ordered = state.accounts.slice().sort((a, b) =>
+        (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
+    const fi = ordered.findIndex(a => a.id === fromId);
+    if (fi < 0) return;
+    const [moved] = ordered.splice(fi, 1);
+    const ti = ordered.findIndex(a => a.id === toId);
+    if (ti < 0) ordered.push(moved); else ordered.splice(ti, 0, moved);
+    ordered.forEach((a, i) => { a.order = i + 1; a.updatedAt = Date.now(); });
+    saveState();
+    renderMonthlyEntry();
+    renderAccountManageList();
+    if (state.currentView === 'balance') renderBalance();
+}
+
+// 月度账单里行/列的「⋯ 更多」浮层菜单
+let _mwMenuEl = null;
+function openMwMenu(x, y, items) {
+    closeMwMenu();
+    const el = document.createElement('div');
+    el.className = 'mw-ctx-menu';
+    items.forEach(it => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'mw-ctx-item' + (it.danger ? ' danger' : '');
+        b.innerHTML = (it.icon ? `<i class="fa-solid ${it.icon}"></i>` : '') + `<span>${_esc(it.label)}</span>`;
+        b.addEventListener('click', () => { closeMwMenu(); if (it.onClick) it.onClick(); });
+        el.appendChild(b);
+    });
+    document.body.appendChild(el);
+    _mwMenuEl = el;
+    const w = el.offsetWidth, h = el.offsetHeight;
+    let px = x, py = y;
+    if (px + w > window.innerWidth - 8) px = window.innerWidth - w - 8;
+    if (py + h > window.innerHeight - 8) py = window.innerHeight - h - 8;
+    if (px < 8) px = 8; if (py < 8) py = 8;
+    el.style.left = px + 'px'; el.style.top = py + 'px';
+    // 等本次 click 结束后再挂关闭监听，避免立刻把自己关掉
+    setTimeout(() => {
+        document.addEventListener('mousedown', _mwMenuOutside, true);
+        document.addEventListener('keydown', _mwMenuEsc, true);
+    }, 0);
+}
+function _mwMenuOutside(e) { if (_mwMenuEl && !_mwMenuEl.contains(e.target)) closeMwMenu(); }
+function _mwMenuEsc(e) { if (e.key === 'Escape') closeMwMenu(); }
+function closeMwMenu() {
+    if (_mwMenuEl) { _mwMenuEl.remove(); _mwMenuEl = null; }
+    document.removeEventListener('mousedown', _mwMenuOutside, true);
+    document.removeEventListener('keydown', _mwMenuEsc, true);
 }
 
 // 修改账户类型：资产 <-> 负债（余额/收益记录不动，统计口径自动变）

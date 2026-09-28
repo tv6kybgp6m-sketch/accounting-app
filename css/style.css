@@ -4027,7 +4027,7 @@ table.bill-stats {
    不管你开了多少个账户，表格就这么宽，永远一屏看完，不出现横向滚动条。 */
 .mw-grid {
     display: grid;
-    grid-template-columns: var(--mw-name-w, 112px) repeat(var(--mw-cols, 7), minmax(0, 1fr)) var(--mw-sum-w, 156px);
+    grid-template-columns: var(--mw-name-w, 132px) repeat(var(--mw-cols, 7), minmax(72px, 1fr)) var(--mw-sum-w, 156px);
     gap: 1px 4px; align-items: center;
     width: 100%;
 }
@@ -4059,27 +4059,18 @@ table.bill-stats {
     flex: none; font-size: 9px; line-height: 13px; padding: 0 4px; border-radius: 6px; cursor: text;
     color: var(--warning, #ff9500); background: rgba(255, 149, 0, .12); white-space: nowrap;
 }
-.mw-del {
-    flex: none; margin-left: auto; width: 16px; height: 16px; line-height: 14px; padding: 0;
-    font-size: 13px; border: none; border-radius: 50%; cursor: pointer;
+/* 账户行的 修改/删除 已改为悬停显示「⋯」菜单（见 .mw-more），这里不再放常驻按钮 */
+/* 月度账单：行 / 列的「⋯ 更多」浮层按钮——平时隐藏，悬停该行/列才淡显 */
+.mw-more, .mw-col-more {
+    flex: none; width: 18px; height: 18px; line-height: 16px; padding: 0; margin-left: 2px;
+    font-size: 12px; border: none; border-radius: 5px; cursor: pointer;
     color: var(--text-tertiary); background: transparent; opacity: 0; transition: opacity .15s;
 }
-.mw-edit {
-    flex: none; width: 16px; height: 16px; line-height: 14px; padding: 0;
-    font-size: 11px; border: none; border-radius: 50%; cursor: pointer;
-    color: var(--text-tertiary); background: transparent; opacity: 0; transition: opacity .15s;
-}
-.mw-tr:hover .mw-del, .mw-tr:hover .mw-edit { opacity: .7; }
-.mw-del:hover { opacity: 1 !important; color: var(--expense); background: rgba(255, 59, 48, .1); }
-.mw-edit:hover { opacity: 1 !important; color: var(--accent); background: rgba(10, 132, 255, .1); }
-/* 月度账单：账户行上移 / 下移 */
-.mw-move {
-    flex: none; width: 17px; height: 17px; line-height: 15px; padding: 0;
-    font-size: 10px; border: none; border-radius: 5px; cursor: pointer;
-    color: var(--text-tertiary); background: rgba(127, 127, 127, .12); opacity: .85; transition: all .15s;
-}
-.mw-move:hover { opacity: 1; color: var(--accent); background: rgba(10, 132, 255, .12); }
-.mw-move:disabled { opacity: .3; cursor: default; color: var(--text-tertiary); background: rgba(127, 127, 127, .08); }
+.mw-tr:hover .mw-more, .mw-manc:hover .mw-col-more { opacity: .65; }
+.mw-more:hover, .mw-col-more:hover { opacity: 1 !important; color: var(--accent); background: rgba(10, 132, 255, .12); }
+/* 行拖拽重排的视觉反馈 */
+.mw-tr.dragging { opacity: .4; }
+.mw-tr.drag-over { box-shadow: inset 3px 0 0 var(--accent); }
 /* 月度账单：可管理的列头（改名 / 删除 / 拖拽排序） */
 .mw-manc { display: flex; align-items: center; justify-content: center; gap: 3px; overflow: visible; cursor: grab; user-select: none; }
 .mw-manc:active { cursor: grabbing; }
@@ -4090,15 +4081,7 @@ table.bill-stats {
     cursor: text; border-bottom: 1px dashed transparent; padding-bottom: 1px;
 }
 .mw-col-label:hover { border-bottom-color: var(--border-strong); }
-.mw-col-tools { display: flex; gap: 1px; }
-.mw-col-edit, .mw-col-del {
-    flex: none; width: 15px; height: 15px; line-height: 13px; padding: 0; border: none; border-radius: 50%;
-    cursor: pointer; color: var(--text-tertiary); background: transparent; opacity: 0; transition: opacity .15s; font-size: 11px;
-}
-.mw-manc:hover .mw-col-edit, .mw-manc:hover .mw-col-del { opacity: .7; }
-.mw-col-edit:hover { opacity: 1 !important; color: var(--accent); background: rgba(10, 132, 255, .1); }
-.mw-col-del:hover { opacity: 1 !important; color: var(--expense); background: rgba(255, 59, 48, .1); }
-.mw-col-grip { flex: none; color: var(--text-tertiary); opacity: .35; cursor: grab; font-size: 10px; }
+/* 列头里的 改名/删除 已改为悬停「⋯」菜单（见 .mw-col-more），旧的内联按钮样式弃用 */
 .mw-col-input { font-size: 13px !important; font-weight: 600; padding: 1px 4px !important; width: 72px; text-align: center !important; }
 .mw-rename-input { font-size: 13px !important; font-weight: 600; padding: 3px 5px !important; text-align: left !important; }
 .mw-addrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
@@ -4136,6 +4119,23 @@ table.bill-stats {
 .mw-tr.be-editing .mw-rowname, .mw-tr.be-editing .mw-c { background: rgba(10, 132, 255, .08); }
 .mw-c.be-editing { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 8px; }
 .mw-note { font-size: 11px; color: var(--text-tertiary); padding: 4px 2px 0; line-height: 1.5; }
+
+/* 月度账单行/列「⋯ 更多」浮层菜单 */
+.mw-ctx-menu {
+    position: fixed; z-index: 9999; min-width: 132px; padding: 4px;
+    background: var(--bg-pop, #fff); border: 1px solid var(--border-strong, #d0d0d5);
+    border-radius: 10px; box-shadow: 0 8px 28px rgba(0, 0, 0, .18);
+}
+.mw-ctx-item {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px;
+    font-size: 13px; text-align: left; border: none; border-radius: 7px; cursor: pointer;
+    color: var(--text-primary); background: transparent;
+}
+.mw-ctx-item i { width: 14px; text-align: center; color: var(--text-tertiary); }
+.mw-ctx-item:hover { background: var(--bg-card-hover, rgba(0, 0, 0, .05)); }
+.mw-ctx-item.danger { color: var(--expense, #ff3b30); }
+.mw-ctx-item.danger i { color: var(--expense, #ff3b30); }
+.mw-ctx-item.danger:hover { background: rgba(255, 59, 48, .1); }
 
 /* 表头正下方的两行汇总：合计（逐列纵向汇总）+ 占比（该列合计 ÷ 净资产合计）。
    刻意放最上面而不是最底下：录账户的时候抬头就能看到总数，不用滚到表格末尾。
