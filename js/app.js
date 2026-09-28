@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.0';
+const APP_VERSION = '1.39.1';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7409,11 +7409,11 @@ function renderMonthlyEntry() {
     const retCell = a => val('ret', a.id, retAt[a.id]);
     const flowCell = a => val('flow', a.id, flowAt[a.id]);
 
-    const balInput = (a, cat, cls) => `<input type="number" step="0.01" min="0" class="text-input be-field${cls || ''}"
+    const balInput = (a, cat, cls) => `<input type="text" inputmode="decimal" class="text-input be-field${cls || ''}"
              data-bal="${a.id}" data-cat="${cat}" data-cell="${a.id}__${cat}"
              value="${_esc(cellVal(a, cat))}" placeholder="—" title="${_esc(a.name)} · ${balanceCatName(cat)}">`;
 
-    const rows = rowsOf.map(a => {
+    const rows = rowsOf.map((a, i) => {
         const net = assetCats.reduce((t, c) => t + num(cellVal(a, c.key)), 0)
             - liabCats.reduce((t, c) => t + num(cellVal(a, c.key)), 0);
         // 行上如果挂着「现金 / 货币基金 / 定期存款 / 股票基金」这种名字，跟横轴撞词，
@@ -7424,17 +7424,19 @@ function renderMonthlyEntry() {
                 <span class="mw-name${like ? ' mw-name-warn' : ''}" data-rename="${a.id}"
                     title="点一下改名（这里放的是「放钱的地方」：支付宝 / 微信 / 工商银行 / 摩根…）">${_esc(a.name)}</span>
                 ${like ? `<span class="mw-badge" data-rename="${a.id}" title="这个名字是资产类别，建议改成放钱的地方">类别名</span>` : ''}
+                <button class="mw-move mw-up" data-move-account="${a.id}" data-dir="-1" title="上移这一行"${i === 0 ? ' disabled' : ''}><i class="fa-solid fa-arrow-up"></i></button>
+                <button class="mw-move mw-down" data-move-account="${a.id}" data-dir="1" title="下移这一行"${i === rowsOf.length - 1 ? ' disabled' : ''}><i class="fa-solid fa-arrow-down"></i></button>
                 <button class="mw-edit" data-edit-account="${a.id}" title="修改这个账户（名称 / 分类 / 图标）"><i class="fa-solid fa-pen"></i></button>
                 <button class="mw-del" data-del-account="${a.id}" title="删除这个账户">×</button>
             </div>
             ${assetCats.map(c => `<div class="mw-c">${balInput(a, c.key)}</div>`).join('')}
             ${liabCats.map(c => `<div class="mw-c">${balInput(a, c.key, ' mw-liab')}</div>`).join('')}
-            ${retCol ? `<div class="mw-c mw-ret"><span class="be-rate" data-rate-for="${a.id}"></span><input type="number" step="0.01" class="text-input be-field" data-ret="${a.id}"
+            ${retCol ? `<div class="mw-c mw-ret"><span class="be-rate" data-rate-for="${a.id}"></span><input type="text" inputmode="decimal" class="text-input be-field" data-ret="${a.id}"
                  value="${_esc(retCell(a))}" placeholder="—" title="${_esc(a.name)} · ${_esc(retCol.label)}"></div>` : ''}
-            <div class="mw-c"><input type="number" step="0.01" class="text-input be-flow" data-flow-in="${a.id}"
+            <div class="mw-c"><input type="text" inputmode="decimal" class="text-input be-flow" data-flow-in="${a.id}"
                  value="${_esc(flowCell(a))}" placeholder="—" title="${_esc(a.name)} · 本月净入金（买进的钱）"></div>
             <div class="mw-c mw-sumcol"><span class="mw-rownet">小计 <b data-wsum>${formatCurrency(Math.round(net * 100) / 100)}</b></span>
-                <input type="number" step="0.01" class="text-input mw-total" placeholder="对账单总额"
+                <input type="text" inputmode="decimal" class="text-input mw-total" placeholder="对账单总额"
                     data-wallet-total="${a.id}" value="${_esc(monthlyInput.wt[a.id] || '')}">
                 <span class="mw-diff" data-wdiff></span></div>
         </div>`;
@@ -7680,6 +7682,14 @@ function bindMonthlyRowOps(list) {
         btn.addEventListener('click', e => {
             e.stopPropagation();
             openAccountEdit(btn.dataset.editAccount);
+        });
+    });
+
+    list.querySelectorAll('[data-move-account]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if (btn.disabled) return;
+            moveMonthlyAccountRow(btn.dataset.moveAccount, parseInt(btn.dataset.dir, 10) || 1);
         });
     });
 
@@ -8228,6 +8238,24 @@ function moveAccount(id, dir) {
     renderAccountManageList();
     refreshAccountsModalIfOpen();
     showToast('已调整顺序', 'success');
+}
+
+// 月度账单里整行（= 一整个账户）上移 / 下移：按全局 order 和相邻账户交换，不限于同类型
+function moveMonthlyAccountRow(id, dir) {
+    ensureAccountOrder();
+    const ordered = state.accounts.slice().sort((a, b) =>
+        (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
+    const idx = ordered.findIndex(a => a.id === id);
+    const other = ordered[idx + dir];
+    if (!other) return;
+    const a = accountById(id), b = other;
+    const tmp = a.order; a.order = b.order; b.order = tmp;
+    a.updatedAt = b.updatedAt = Date.now();
+    saveState();
+    renderMonthlyEntry();
+    renderAccountManageList();
+    if (state.currentView === 'balance') renderBalance();
+    showToast(dir < 0 ? '已上移一行' : '已下移一行', 'success');
 }
 
 // 修改账户类型：资产 <-> 负债（余额/收益记录不动，统计口径自动变）
