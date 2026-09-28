@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.38.13';
+const APP_VERSION = '1.39.0';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -158,6 +158,20 @@ const BAL_CLASS_TAG_DEFAULT = {
     stock: '长期投资', gold: '长期投资', other: '其他投资',
 };
 
+// 月度账单 / 资产负债页共用的「自定义列」数据源（有序）。
+// kind: asset=资产类别(存进 state.balances 的 cat) / liab=负债列 / ret=收益列(存进 state.returns)。
+// 改名 / 删除 / 新增 / 拖拽排序都只改这一个数组，两处页面都从它渲染。
+const DEFAULT_SHEET_COLS = [
+    { key: 'cash', kind: 'asset', label: '现金', icon: 'fa-wallet', color: '#34c759' },
+    { key: 'mmf', kind: 'asset', label: '货币基金', icon: 'fa-piggy-bank', color: '#007aff' },
+    { key: 'fixed', kind: 'asset', label: '定期存款', icon: 'fa-vault', color: '#5856d6' },
+    { key: 'stock', kind: 'asset', label: '股票基金', icon: 'fa-chart-line', color: '#ff9500' },
+    { key: 'gold', kind: 'asset', label: '黄金', icon: 'fa-coins', color: '#ffcc00' },
+    { key: 'other', kind: 'asset', label: '其他', icon: 'fa-box-open', color: '#8e8e93' },
+    { key: 'liab', kind: 'liab', label: '负债', icon: 'fa-credit-card', color: '#ff3b30' },
+    { key: 'ret', kind: 'ret', label: '收益', icon: 'fa-sack-dollar', color: '#30b0c7' },
+];
+
 // ---- State ----
 let state = {
     transactions: [],
@@ -207,6 +221,7 @@ let state = {
     memberAddedAt: {},        // 成员名 -> 添加时间（名字就是身份，同支付方式的做法）
     balanceOwner: 'all',       // 当前筛选：'all' 或某成员
     balClassTags: Object.assign({}, BAL_CLASS_TAG_DEFAULT),  // 每个资产类别归到哪一类（固定资产/流动资产/长期投资/其他投资）
+    sheetCols: DEFAULT_SHEET_COLS.map(c => ({ ...c })),       // 月度账单/资产负债页共用的自定义列（见下方 helper）
     reportMetric: 'expense',
     breakdownExpanded: false,
     reportChartType: 'line',
@@ -2740,6 +2755,10 @@ function loadState() {
             // 资产归类：现金/货币基金/定期存款/股票基金/黄金/其他 各自归到
             // 固定资产 / 流动资产 / 长期投资 / 其他投资，由用户自己定；负债单独算
             state.balClassTags = Object.assign({}, BAL_CLASS_TAG_DEFAULT, data.balClassTags || {});
+            // 自定义列（月度账单 + 资产负债页共用）：旧账本没有就种默认 6 类 + 负债 + 收益
+            state.sheetCols = Array.isArray(data.sheetCols) && data.sheetCols.length
+                ? data.sheetCols.map(c => ({ ...c }))
+                : DEFAULT_SHEET_COLS.map(c => ({ ...c }));
             state.recurring = Array.isArray(data.recurring) ? data.recurring : [];
             state.pendingRecurring = Array.isArray(data.pendingRecurring) ? data.pendingRecurring : [];
             state.recurringSkipped = (data.recurringSkipped && typeof data.recurringSkipped === 'object')
@@ -5698,7 +5717,7 @@ function balancesAtMonth(month, member = state.balanceOwner) {
         .filter(b => b.month === month && (member === 'all' || b.member === member))
         .forEach(b => {
             const v = Math.abs(Number(b.amount) || 0);
-            const neg = balanceCatOf(b) === BAL_CAT_LIAB;
+            const neg = isLiabCat(balanceCatOf(b));
             map[b.accountId] = (map[b.accountId] || 0) + (neg ? -v : v);
         });
     return map;
@@ -5735,8 +5754,8 @@ function balancesByCat(month, member = state.balanceOwner) {
 // 三桶：资产 = 所有资产类别之和；负债 = 负债列之和；净资产 = 资产 − 负债
 function totalsFromCat(cat) {
     let asset = 0, liability = 0;
-    BAL_CATS.forEach(k => { asset += (cat[k] || 0); });
-    liability = cat[BAL_CAT_LIAB] || 0;
+    sheetAssetCats().forEach(c => { asset += (cat[c.key] || 0); });
+    sheetLiabCats().forEach(c => { liability += (cat[c.key] || 0); });
     return { asset, liability, net: asset - liability, ratio: asset > 0 ? liability / asset : 0 };
 }
 
@@ -5968,11 +5987,11 @@ function netWorthBridge(month) {
     // 固定资产（按用户归类：房产 / 车辆 / 长期持有物）升值没人录收益，但确实改变净资产，
     // 单独拆出来才不会全砸进「待核对」
     let fixedMove = 0, fixedTouched = false;
-    BAL_CATS.forEach(k => {
-        if ((state.balClassTags[k] || '') !== '固定资产') return;
-        if (prevCat[k] === undefined || curCat[k] === undefined) return;
+    sheetAssetCats().forEach(c => {
+        if ((state.balClassTags[c.key] || '') !== '固定资产') return;
+        if (prevCat[c.key] === undefined || curCat[c.key] === undefined) return;
         fixedTouched = true;
-        fixedMove += (Number(curCat[k]) || 0) - (Number(prevCat[k]) || 0);
+        fixedMove += (Number(curCat[c.key]) || 0) - (Number(prevCat[c.key]) || 0);
     });
     const delta = closeT.net - openT.net;
     const saved = income - expense;
@@ -6385,14 +6404,14 @@ function balancePieEntries(info, metric) {
     const rows = [];
     if (metric === 'asset') {
         const cat = balancesByCat(info.month);
-        BAL_CATS.forEach(k => {
-            const v = cat[k] || 0;
-            if (v > 0) rows.push({ id: k, label: BAL_CAT_NAMES[k], amount: v, signed: v });
+        sheetAssetCats().forEach(c => {
+            const v = cat[c.key] || 0;
+            if (v > 0) rows.push({ id: c.key, label: c.label, amount: v, signed: v });
         });
     } else if (metric === 'liability') {
         const liabByAcct = {};
         state.balances
-            .filter(b => b.month === info.month && balanceCatOf(b) === BAL_CAT_LIAB)
+            .filter(b => b.month === info.month && isLiabCat(balanceCatOf(b)))
             .forEach(b => { liabByAcct[b.accountId] = (liabByAcct[b.accountId] || 0) + Math.abs(Number(b.amount) || 0); });
         Object.keys(liabByAcct).forEach(id => {
             const a = accountById(id);
@@ -6426,7 +6445,7 @@ function renderBalancePie(ctx, info) {
     const labels = entries.map(e => e.label || e.name || accountById(e.id)?.name || '未知');
     const colors = entries.map(e => {
         if (e.id === '__others__') return PIE_OTHERS_COLOR;
-        if (metric === 'asset') return BAL_CAT_COLORS[e.id] || '#8e8e8e';
+        if (metric === 'asset') return catColor(e.id) || '#8e8e8e';
         return accountById(e.id)?.color || '#8e8e8e';
     });
 
@@ -6445,7 +6464,7 @@ function renderBalancePie(ctx, info) {
                 if (!e) return;
                 if (metric === 'asset') {
                     // 资产口径的切片是 6 类之一，点它看该月该类别的账户明细
-                    openAccountHistoryForPeriod(info.month, e.label || e.name || BAL_CAT_NAMES[e.id] || '资产');
+                    openAccountHistoryForPeriod(info.month, e.label || e.name || catLabel(e.id) || '资产');
                 } else if (metric === 'liability') {
                     // 负债按账户拆，多点聚合时看该月全部负债
                     openAccountHistoryForAccount(e.ids && e.ids.length === 1 ? e.ids[0] : null, e.label || e.name);
@@ -6483,47 +6502,49 @@ function renderBalanceBreakdown() {
 
     const cat = monthHasRecords(info.month) ? balancesByCat(info.month) : {};
     // 直接按用户指定的 6 类资产统计：现金 / 货币基金 / 定期存款 / 股票基金 / 黄金 / 其他
-    const grandAsset = BAL_CATS.reduce((s, k) => s + (cat[k] || 0), 0);
-    const grandLiab = cat[BAL_CAT_LIAB] || 0;
+    const grandAsset = sheetAssetCats().reduce((s, c) => s + (cat[c.key] || 0), 0);
+    const grandLiab = sheetLiabCats().reduce((s, c) => s + (cat[c.key] || 0), 0);
     const grand = metric === 'liability' ? grandLiab : (metric === 'asset' ? grandAsset : grandAsset + grandLiab);
     const top = Math.max(grand, 1);
 
     let html = '';
-    BAL_CATS.forEach(k => {
-        const v = cat[k] || 0;
+    sheetAssetCats().forEach(c => {
+        const v = cat[c.key] || 0;
         if (v <= 0) return;
         const pct = grand ? (v / grand) * 100 : 0;
         html += `
-        <div class="breakdown-item" onclick="openAccountHistoryForPeriod('${info.month}','${_esc(BAL_CAT_NAMES[k])}')">
-            <div class="breakdown-icon" style="background:rgba(10,132,255,.12);color:var(--accent)">
-                <i class="fa-solid ${BAL_CAT_ICONS[k] || 'fa-chart-pie'}"></i>
+        <div class="breakdown-item" onclick="openAccountHistoryForPeriod('${info.month}','${_esc(c.label)}')">
+            <div class="breakdown-icon" style="background:${c.color}22;color:${c.color}">
+                <i class="fa-solid ${c.icon || 'fa-chart-pie'}"></i>
             </div>
             <div class="breakdown-main">
                 <div class="breakdown-head">
-                    <span class="breakdown-name">${_esc(BAL_CAT_NAMES[k])}</span>
+                    <span class="breakdown-name">${_esc(c.label)}</span>
                     <span class="breakdown-amount">${formatCurrency(v)}<em>${pct.toFixed(1)}%</em></span>
                 </div>
-                <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (v / top) * 100)}%"></div></div>
+                <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (v / top) * 100)}%;background:${c.color}"></div></div>
             </div>
         </div>`;
     });
-    // 负债单列一项
-    if (grandLiab > 0) {
-        const pct = grand ? (grandLiab / grand) * 100 : 0;
+    // 负债单列一项（按用户自定义的负债列，可能不止一列）
+    sheetLiabCats().forEach(c => {
+        const v = cat[c.key] || 0;
+        if (v <= 0) return;
+        const pct = grand ? (v / grand) * 100 : 0;
         html += `
-        <div class="breakdown-item" onclick="openAccountHistoryForPeriod('${info.month}','负债')">
-            <div class="breakdown-icon" style="background:rgba(255,59,48,.12);color:var(--expense)">
-                <i class="fa-solid fa-credit-card"></i>
+        <div class="breakdown-item" onclick="openAccountHistoryForPeriod('${info.month}','${_esc(c.label)}')">
+            <div class="breakdown-icon" style="background:${c.color}22;color:${c.color}">
+                <i class="fa-solid ${c.icon || 'fa-credit-card'}"></i>
             </div>
             <div class="breakdown-main">
                 <div class="breakdown-head">
-                    <span class="breakdown-name">负债</span>
-                    <span class="breakdown-amount">${formatCurrency(grandLiab)}<em>${pct.toFixed(1)}%</em></span>
+                    <span class="breakdown-name">${_esc(c.label)}</span>
+                    <span class="breakdown-amount">${formatCurrency(v)}<em>${pct.toFixed(1)}%</em></span>
                 </div>
-                <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (grandLiab / top) * 100)}%;background:var(--expense)"></div></div>
+                <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (v / top) * 100)}%;background:${c.color}"></div></div>
             </div>
         </div>`;
-    }
+    });
     container.innerHTML = html || '<div class="breakdown-empty">该期还没有余额记录</div>';
 }
 
@@ -6532,13 +6553,13 @@ function renderBalanceBreakdown() {
 function openClassTagModal() {
     const rows = document.getElementById('classTagRows');
     if (!rows) return;
-    rows.innerHTML = BAL_CATS.map(k => {
-        const cur = state.balClassTags[k] || BAL_CLASS_TAG_DEFAULT[k] || '其他投资';
+    rows.innerHTML = sheetAssetCats().map(c => {
+        const cur = state.balClassTags[c.key] || BAL_CLASS_TAG_DEFAULT[c.key] || '其他投资';
         const opts = BAL_CLASS_TAGS.map(t => `<option value="${_esc(t)}"${t === cur ? ' selected' : ''}>${_esc(t)}</option>`).join('');
         return `
         <div class="class-tag-row">
-            <span class="class-tag-name">${_esc(BAL_CAT_NAMES[k])}</span>
-            <select class="text-input class-tag-select" data-cat="${_esc(k)}">${opts}</select>
+            <span class="class-tag-name">${_esc(c.label)}</span>
+            <select class="text-input class-tag-select" data-cat="${_esc(c.key)}">${opts}</select>
         </div>`;
     }).join('');
     document.getElementById('classTagModal').classList.remove('hidden');
@@ -7190,7 +7211,43 @@ const BAL_CAT_LIAB = 'liab';
 const BAL_CAT_NAMES = { cash: '现金', mmf: '货币基金', fixed: '定期存款', stock: '股票基金', gold: '黄金', other: '其他', liab: '负债' };
 const BAL_CAT_ICONS = { cash: 'fa-wallet', mmf: 'fa-piggy-bank', fixed: 'fa-vault', stock: 'fa-chart-line', gold: 'fa-coins', other: 'fa-box-open', liab: 'fa-credit-card' };
 const BAL_CAT_COLORS = { cash: '#34c759', mmf: '#007aff', fixed: '#5856d6', stock: '#ff9500', gold: '#ffcc00', other: '#8e8e93', liab: '#ff3b30' };
-function balanceCatName(k) { return BAL_CAT_NAMES[k] || assetClassName(k); }
+function balanceCatName(k) { return catLabel(k); }
+
+// ---- 自定义列（sheetCols）统一数据源与辅助函数 ----
+// 月度账单和资产负债页都从 state.sheetCols 读列，改名/删除/新增/拖拽只改这一个数组。
+function getSheetCols() {
+    return (state.sheetCols && state.sheetCols.length) ? state.sheetCols : DEFAULT_SHEET_COLS;
+}
+function sheetAssetCats() { return getSheetCols().filter(c => c.kind === 'asset'); }
+function sheetLiabCats() { return getSheetCols().filter(c => c.kind === 'liab'); }
+function sheetRetCol() { return getSheetCols().find(c => c.kind === 'ret') || null; }
+function sheetColByKey(k) { return getSheetCols().find(c => c.key === k) || null; }
+function catLabel(k) {
+    const c = sheetColByKey(k);
+    if (c) return c.label;
+    return BAL_CAT_NAMES[k] || assetClassName(k);
+}
+function catColor(k) {
+    const c = sheetColByKey(k);
+    if (c && c.color) return c.color;
+    return BAL_CAT_COLORS[k] || '#8e8e93';
+}
+function catIcon(k) {
+    const c = sheetColByKey(k);
+    if (c && c.icon) return c.icon;
+    return BAL_CAT_ICONS[k] || 'fa-chart-pie';
+}
+// 资产列里「其他」这一类平时没有就隐藏，免得白占一列宽度
+function sheetVisibleAssetCats() {
+    const otherUsed = state.balances.some(b => (b.cat || balanceCatOf(b)) === 'other');
+    return sheetAssetCats().filter(c => c.key !== 'other' || otherUsed);
+}
+// 判断某个 cat key 是否「负债」——自定义负债列的 key 不是 'liab'，必须按 sheetCols 的 kind 判
+function isLiabCat(k) {
+    const c = sheetColByKey(k);
+    if (c) return c.kind === 'liab';
+    return k === BAL_CAT_LIAB;   // 老数据兜底
+}
 
 // 老数据（还没有类别这一说的时候）一条账户一个月只有一个数，没有 cat 字段：
 // 按账户名推断它属于哪一类，负债账户直接归到负债类 —— 历史记录一条不丢，也不用手工迁移
@@ -7336,11 +7393,12 @@ function renderMonthlyEntry() {
     const rowsOf = state.accounts.slice().sort((a, b) =>
         (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
     const cells = balanceCellsAtMonth(month, member);
-    // 「其他」这一类平时没有，只有当历史里真有归不进前四类的数（房产、公积金…）才显示，
-    // 免得白占一列宽度
-    const otherUsed = state.balances.some(b => balanceCatOf(b) === 'other');
-    const cats = BAL_CATS.filter(k => k !== 'other' || otherUsed);
-    const cols = cats.length + 3;      // 类别列 + 负债 + 收益 + 净入金（「小计/对账」单独给固定宽度）
+    // 列由 state.sheetCols 驱动：资产列 + 负债列 + (收益列) + 净入金；「其他」这一类没数据就隐藏
+    const assetCats = sheetVisibleAssetCats();
+    const liabCats = sheetLiabCats();
+    const retCol = sheetRetCol();
+    const cats = assetCats.map(c => c.key);
+    const cols = assetCats.length + liabCats.length + (retCol ? 1 : 0) + 1; // 资产+负债+(收益)+净入金；小计是固定末列
     const val = (key, id, saved) => {
         const typed = monthlyInput[key][id];
         if (typed === undefined) return saved === undefined || saved === null ? '' : saved;
@@ -7356,7 +7414,8 @@ function renderMonthlyEntry() {
              value="${_esc(cellVal(a, cat))}" placeholder="—" title="${_esc(a.name)} · ${balanceCatName(cat)}">`;
 
     const rows = rowsOf.map(a => {
-        const net = cats.reduce((t, k) => t + num(cellVal(a, k)), 0) - num(cellVal(a, BAL_CAT_LIAB));
+        const net = assetCats.reduce((t, c) => t + num(cellVal(a, c.key)), 0)
+            - liabCats.reduce((t, c) => t + num(cellVal(a, c.key)), 0);
         // 行上如果挂着「现金 / 货币基金 / 定期存款 / 股票基金」这种名字，跟横轴撞词，
         // 两轴看起来就变成一样的了 —— 这里标出来，点一下就能改成「放钱的地方」
         const like = mwNameLooksLikeCat(a.name);
@@ -7368,10 +7427,10 @@ function renderMonthlyEntry() {
                 <button class="mw-edit" data-edit-account="${a.id}" title="修改这个账户（名称 / 分类 / 图标）"><i class="fa-solid fa-pen"></i></button>
                 <button class="mw-del" data-del-account="${a.id}" title="删除这个账户">×</button>
             </div>
-            ${cats.map(k => `<div class="mw-c">${balInput(a, k)}</div>`).join('')}
-            <div class="mw-c">${balInput(a, BAL_CAT_LIAB, ' mw-liab')}</div>
-            <div class="mw-c mw-ret"><span class="be-rate" data-rate-for="${a.id}"></span><input type="number" step="0.01" class="text-input be-field" data-ret="${a.id}"
-                 value="${_esc(retCell(a))}" placeholder="—" title="${_esc(a.name)} · 本月投资收益"></div>
+            ${assetCats.map(c => `<div class="mw-c">${balInput(a, c.key)}</div>`).join('')}
+            ${liabCats.map(c => `<div class="mw-c">${balInput(a, c.key, ' mw-liab')}</div>`).join('')}
+            ${retCol ? `<div class="mw-c mw-ret"><span class="be-rate" data-rate-for="${a.id}"></span><input type="number" step="0.01" class="text-input be-field" data-ret="${a.id}"
+                 value="${_esc(retCell(a))}" placeholder="—" title="${_esc(a.name)} · ${_esc(retCol.label)}"></div>` : ''}
             <div class="mw-c"><input type="number" step="0.01" class="text-input be-flow" data-flow-in="${a.id}"
                  value="${_esc(flowCell(a))}" placeholder="—" title="${_esc(a.name)} · 本月净入金（买进的钱）"></div>
             <div class="mw-c mw-sumcol"><span class="mw-rownet">小计 <b data-wsum>${formatCurrency(Math.round(net * 100) / 100)}</b></span>
@@ -7387,18 +7446,18 @@ function renderMonthlyEntry() {
     // 和下面那些输入框共用同一批"还没保存的草稿值"，保证两边永远一致。
     const tcell = (key, extra) => `<div class="mw-c mw-tcell${extra || ''}" data-tcol="${key}"><b data-tval>—</b></div>`;
     const pcell = (key, extra) => `<div class="mw-c mw-tcell${extra || ''}" data-pcol="${key}"><b data-pval>—</b></div>`;
-    const catKeys = cats.map(k => 'cat:' + k).concat(['cat:' + BAL_CAT_LIAB]);
+    const catKeys = [...assetCats, ...liabCats].map(c => 'cat:' + c.key);
     const summaryRows = `
         <div class="mw-tr mw-total-row">
             <div class="mw-rowname"><span class="mw-name">合计</span></div>
             ${catKeys.map(k => tcell(k)).join('')}
-            ${tcell('__ret')}${tcell('__flow')}
+            ${retCol ? tcell('__ret') : ''}${tcell('__flow')}
             <div class="mw-c mw-tcell mw-sumcol" data-tcol="__net"><span class="mw-rownet">净资产 <b data-tval>—</b></span></div>
         </div>
         <div class="mw-tr mw-pct-row">
             <div class="mw-rowname"><span class="mw-name">占比</span></div>
             ${catKeys.map(k => pcell(k)).join('')}
-            ${pcell('__ret')}${pcell('__flow')}
+            ${retCol ? pcell('__ret') : ''}${pcell('__flow')}
             ${pcell('__net', ' mw-sumcol')}
         </div>`;
 
@@ -7406,8 +7465,9 @@ function renderMonthlyEntry() {
     const quick = ['支付宝', '微信', '工商银行', '招商银行', '平安银行', '摩根'];
     list.innerHTML = `<div class="mw-scroll"><div class="mw-grid" style="--mw-cols:${cols}">
         <div class="mw-h mw-corner">账户 / 渠道</div>
-        ${cats.map(k => `<div class="mw-h mw-col">${_esc(balanceCatName(k))}</div>`).join('')}
-        <div class="mw-h mw-col mw-col-liab" title="信用卡欠款、花呗、房贷、车贷…都填这一列">负债</div><div class="mw-h mw-col">收益</div>
+        ${assetCats.map(c => colHeadHTML(c, '')).join('')}
+        ${liabCats.map(c => colHeadHTML(c, ' mw-col-liab')).join('')}
+        ${retCol ? colHeadHTML(retCol, ' mw-col-ret') : ''}
         <div class="mw-h mw-col">净入金</div><div class="mw-h mw-col mw-col-sum">小计 / 对账</div>
         ${summaryRows}
         ${rows}
@@ -7416,6 +7476,7 @@ function renderMonthlyEntry() {
             <input type="text" id="mwNewAccount" class="text-input mw-new" maxlength="20"
                 placeholder="加一行：放钱的地方（支付宝 / 微信 / 工商银行 / 摩根…）">
             <button class="btn-mini primary" id="mwAddAccountBtn">＋ 增加账户</button>
+            <button class="btn-mini" id="mwAddColBtn" title="新增资产列或负债列">＋ 增加列</button>
             <span class="mw-chips">${quick.map(q =>
                 `<button class="mw-chip" data-quick-add="${_esc(q)}">+ ${_esc(q)}</button>`).join('')}</span>
         </div>`
@@ -7424,6 +7485,109 @@ function renderMonthlyEntry() {
             资产填对应的类别列，欠款（信用卡、花呗、房贷）填「负债」列 —— 账户本身不再分资产还是负债。
             像「信用卡」「花呗」这种单独的行，可以直接把数填进所属银行那一行的负债列，再用行尾的 × 删掉它。</span></div>`;
     bindMonthlyEntry();
+}
+
+// ---- 月度账单「列」管理：改名 / 删除 / 新增 / 拖拽排序 ----
+function colHeadHTML(c, extraCls) {
+    return `<div class="mw-h mw-col mw-manc${extraCls || ''}" draggable="true" data-col-key="${_esc(c.key)}" data-col-kind="${_esc(c.kind)}">
+        <span class="mw-col-label" data-col-label="${_esc(c.key)}">${_esc(c.label)}</span>
+        <span class="mw-col-tools">
+            <button class="mw-col-edit" data-col-edit="${_esc(c.key)}" title="改这一列的名字"><i class="fa-solid fa-pen"></i></button>
+            <button class="mw-col-del" data-col-del="${_esc(c.key)}" title="${c.kind === 'ret' ? '隐藏这一列' : '删除这一列（同时删掉该列所有已记的数）'}">×</button>
+        </span>
+        <span class="mw-col-grip" title="拖动调整列顺序"><i class="fa-solid fa-grip-vertical"></i></span>
+    </div>`;
+}
+
+function bindMonthlyColOps(list) {
+    list.querySelectorAll('.mw-h.mw-manc').forEach(h => {
+        h.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', h.dataset.colKey); h.classList.add('dragging'); });
+        h.addEventListener('dragend', () => h.classList.remove('dragging'));
+        h.addEventListener('dragover', e => { e.preventDefault(); h.classList.add('drag-over'); });
+        h.addEventListener('dragleave', () => h.classList.remove('drag-over'));
+        h.addEventListener('drop', e => {
+            e.preventDefault(); h.classList.remove('drag-over');
+            const from = e.dataTransfer.getData('text/plain');
+            const to = h.dataset.colKey;
+            if (from && to && from !== to) moveSheetColumn(from, to);
+        });
+    });
+    list.querySelectorAll('[data-col-edit]').forEach(btn => {
+        btn.addEventListener('click', e => { e.stopPropagation(); renameSheetColumn(btn.dataset.colEdit); });
+    });
+    list.querySelectorAll('[data-col-del]').forEach(btn => {
+        btn.addEventListener('click', e => { e.stopPropagation(); deleteSheetColumn(btn.dataset.colDel); });
+    });
+    const addBtn = document.getElementById('mwAddColBtn');
+    if (addBtn) addBtn.addEventListener('click', addSheetColumn);
+}
+
+function renameSheetColumn(key) {
+    const c = sheetColByKey(key);
+    if (!c) return;
+    const labelEl = document.querySelector(`.mw-col-label[data-col-label="${key}"]`);
+    if (!labelEl || labelEl.parentNode.querySelector('input')) return;
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.className = 'text-input mw-col-input'; inp.value = c.label; inp.maxLength = 12;
+    labelEl.style.display = 'none';
+    labelEl.parentNode.insertBefore(inp, labelEl);
+    inp.focus(); inp.select();
+    let done = false;
+    const commit = () => {
+        if (done) return; done = true;
+        const v = inp.value.trim();
+        if (v && v !== c.label) { c.label = v; saveState(); showToast(`已改名为「${v}」`, 'success'); }
+        renderMonthlyEntry();
+        if (state.currentView === 'balance') renderBalance();
+    };
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } else if (e.key === 'Escape') { done = true; renderMonthlyEntry(); } });
+    inp.addEventListener('blur', commit);
+}
+
+function deleteSheetColumn(key) {
+    const c = sheetColByKey(key);
+    if (!c) return;
+    if (c.kind === 'ret') {
+        if (!confirm('隐藏「收益」列？已记的收益数据仍保留，只是这一页不再显示。')) return;
+        state.sheetCols = state.sheetCols.filter(x => x.key !== key);
+        saveState(); renderMonthlyEntry(); showToast('已隐藏收益列', 'success'); return;
+    }
+    if (!confirm(`删除「${c.label}」这一列？该列所有已记账的历史数据（全部月份、全部成员）会一起删掉，且无法恢复。确定？`)) return;
+    state.sheetCols = state.sheetCols.filter(x => x.key !== key);
+    state.balances = state.balances.filter(b => {
+        if (b.cat !== key) return true;
+        addTombstone('balances', b.id); return false;
+    });
+    if (state.balClassTags) delete state.balClassTags[key];
+    saveState();
+    renderMonthlyEntry();
+    if (state.currentView === 'balance') renderBalance();
+    showToast(`已删除列「${c.label}」`, 'success');
+}
+
+function addSheetColumn() {
+    const name = (window.prompt('新列的名字（如「数字货币」「网贷」「公积金」）') || '').trim();
+    if (!name) return;
+    const t = (window.prompt('这一列是「资产」还是「负债」？（收益列不能新增，只能恢复）', '资产') || '').trim();
+    const kind = (t === '负债' || t === 'liab') ? 'liab' : 'asset';
+    const key = 'c_' + uid();
+    const palette = { asset: '#30b0c7', liab: '#ff3b30' };
+    state.sheetCols.push({ key, kind, label: name, icon: kind === 'liab' ? 'fa-credit-card' : 'fa-layer-group', color: palette[kind] });
+    saveState();
+    renderMonthlyEntry();
+    if (state.currentView === 'balance') renderBalance();
+    showToast(`已增加列「${name}」`, 'success');
+}
+
+function moveSheetColumn(from, to) {
+    const arr = state.sheetCols;
+    const fi = arr.findIndex(c => c.key === from);
+    if (fi < 0) return;
+    const [item] = arr.splice(fi, 1);
+    const ti = arr.findIndex(c => c.key === to);
+    if (ti < 0) arr.push(item); else arr.splice(ti, 0, item);
+    saveState();
+    renderMonthlyEntry();
 }
 
 // 行名正好等于某个资产类别名时，横竖两轴会撞成同一批词，看不出谁是谁 —— 这种情况标出来提醒改
@@ -7461,6 +7625,7 @@ function bindMonthlyEntry() {
     list.querySelectorAll('[data-wallet-total]').forEach(inp =>
         inp.addEventListener('input', () => { monthlyDirty = true; updateMonthlyDerived(); }));
     bindMonthlyRowOps(list);
+    bindMonthlyColOps(list);
     updateMonthlyDerived();
 }
 
@@ -7557,7 +7722,7 @@ function monthlyDraftStats(month, member) {
         const v = parseFloat(raw);
         if (!isFinite(v)) return;
         const id = inp.dataset.bal;
-        const isLiab = inp.dataset.cat === BAL_CAT_LIAB;
+        const isLiab = isLiabCat(inp.dataset.cat);
         draft[id] = draft[id] || {};
         draft[id].balance = (draft[id].balance || 0) + (isLiab ? -Math.abs(v) : Math.abs(v));
     });
@@ -7602,7 +7767,7 @@ function updateMonthlyDerived() {
             if (v === null) return;
             const cat = inp.dataset.cat || 'other';
             catSum[cat] = (catSum[cat] || 0) + v;
-            if (cat === BAL_CAT_LIAB) { sumLiab += v; net -= v; } else { sumAsset += v; net += v; }
+            if (isLiabCat(cat)) { sumLiab += v; net -= v; } else { sumAsset += v; net += v; }
             filled++;
         });
         const sumEl = tr.querySelector('[data-wsum]');
@@ -8094,13 +8259,13 @@ function fundActualByBucket() {
     // 否则支付宝同时有余额和花呗时，负债会被扣两次，和资产负债表总资产对不上。
     const cells = month ? balanceCellsAtMonth(month) : {};
     const out = { cash: 0, steady: 0, growth: 0, unassigned: 0 };
-    state.accounts.filter(a => a.kind === 'asset').forEach(a => {
-        const per = cells[a.id] || {};
-        let v = 0;
-        BAL_CATS.forEach(k => { v += (per[k] || 0); });
-        if (a.bucket && out[a.bucket] !== undefined) out[a.bucket] += v;
-        else out.unassigned += v;
-    });
+        state.accounts.filter(a => a.kind === 'asset').forEach(a => {
+            const per = cells[a.id] || {};
+            let v = 0;
+            sheetAssetCats().forEach(c => { v += (per[c.key] || 0); });
+            if (a.bucket && out[a.bucket] !== undefined) out[a.bucket] += v;
+            else out.unassigned += v;
+        });
     return out;
 }
 
@@ -8113,7 +8278,7 @@ function fundActualByBucketFor(member) {
         if (out[a.bucket] === undefined) return;
         const per = cells[a.id] || {};
         let v = 0;
-        BAL_CATS.forEach(k => { v += (per[k] || 0); });
+        sheetAssetCats().forEach(c => { v += (per[c.key] || 0); });
         out[a.bucket] += v;
     });
     return out;
@@ -8127,7 +8292,7 @@ function fundTotalAssets() {
 function fundLiabilities() {
     const month = fundLatestMonth();
     const cat = month ? balancesByCat(month) : {};
-    return cat[BAL_CAT_LIAB] || 0;
+    return sheetLiabCats().reduce((s, c) => s + (cat[c.key] || 0), 0);
 }
 
 // 某类型（可含成员）是否已配置

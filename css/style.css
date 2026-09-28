@@ -4067,12 +4067,31 @@ table.bill-stats {
 .mw-edit {
     flex: none; width: 16px; height: 16px; line-height: 14px; padding: 0;
     font-size: 11px; border: none; border-radius: 50%; cursor: pointer;
-    color: var(--text-tertiary); background: transparent; opacity: .5; transition: opacity .15s;
+    color: var(--text-tertiary); background: transparent; opacity: 0; transition: opacity .15s;
 }
-.mw-tr:hover .mw-del { opacity: .7; }
-.mw-tr:hover .mw-edit { opacity: .85; }
+.mw-tr:hover .mw-del, .mw-tr:hover .mw-edit { opacity: .7; }
 .mw-del:hover { opacity: 1 !important; color: var(--expense); background: rgba(255, 59, 48, .1); }
 .mw-edit:hover { opacity: 1 !important; color: var(--accent); background: rgba(10, 132, 255, .1); }
+/* 月度账单：可管理的列头（改名 / 删除 / 拖拽排序） */
+.mw-manc { display: flex; align-items: center; justify-content: center; gap: 3px; overflow: visible; cursor: grab; user-select: none; }
+.mw-manc:active { cursor: grabbing; }
+.mw-manc.dragging { opacity: .4; }
+.mw-manc.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
+.mw-col-label {
+    font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    cursor: text; border-bottom: 1px dashed transparent; padding-bottom: 1px;
+}
+.mw-col-label:hover { border-bottom-color: var(--border-strong); }
+.mw-col-tools { display: flex; gap: 1px; }
+.mw-col-edit, .mw-col-del {
+    flex: none; width: 15px; height: 15px; line-height: 13px; padding: 0; border: none; border-radius: 50%;
+    cursor: pointer; color: var(--text-tertiary); background: transparent; opacity: 0; transition: opacity .15s; font-size: 11px;
+}
+.mw-manc:hover .mw-col-edit, .mw-manc:hover .mw-col-del { opacity: .7; }
+.mw-col-edit:hover { opacity: 1 !important; color: var(--accent); background: rgba(10, 132, 255, .1); }
+.mw-col-del:hover { opacity: 1 !important; color: var(--expense); background: rgba(255, 59, 48, .1); }
+.mw-col-grip { flex: none; color: var(--text-tertiary); opacity: .35; cursor: grab; font-size: 10px; }
+.mw-col-input { font-size: 13px !important; font-weight: 600; padding: 1px 4px !important; width: 72px; text-align: center !important; }
 .mw-rename-input { font-size: 13px !important; font-weight: 600; padding: 3px 5px !important; text-align: left !important; }
 .mw-addrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .mw-new { flex: 1 1 190px; min-width: 150px; font-size: 12.5px; }
