@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.4';
+const APP_VERSION = '1.39.5';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7434,10 +7434,10 @@ function renderMonthlyEntry() {
         return `        <div class="mw-tr" data-mw-account="${a.id}" style="--rowc:${_esc(a.color)}">
             <div class="mw-rowname">
                 <span class="mw-acct-dot" style="background:${_esc(a.color)}"></span>
-                <span class="mw-name${like ? ' mw-name-warn' : ''}" data-rename="${a.id}" draggable="true"
-                    title="点一下改名；按住上下拖动可调整这一行（账户）的顺序">${_esc(a.name)}</span>
+                <span class="mw-name${like ? ' mw-name-warn' : ''}" data-rename="${a.id}"
+                    title="点一下改名；长按 0.3 秒后再上下拖动可调整这一行（账户）的顺序">${_esc(a.name)}</span>
                 ${like ? `<span class="mw-badge" data-rename="${a.id}" title="这个名字是资产类别，建议改成放钱的地方">类别名</span>` : ''}
-                <button class="mw-more" data-row-more="${a.id}" title="更多操作（上移 / 下移 / 修改 / 删除）"><i class="fa-solid fa-ellipsis"></i></button>
+                <button class="mw-more" data-row-more="${a.id}" title="更多操作（修改 / 删除）"><i class="fa-solid fa-ellipsis"></i></button>
             </div>
             ${assetCats.map(c => `<div class="mw-c">${balInput(a, c.key)}</div>`).join('')}
             ${liabCats.map(c => `<div class="mw-c">${balInput(a, c.key, ' mw-liab')}</div>`).join('')}
@@ -7497,19 +7497,60 @@ function renderMonthlyEntry() {
             资产填对应的类别列，欠款（信用卡、花呗、房贷）填「负债」列 —— 账户本身不再分资产还是负债。
             像「信用卡」「花呗」这种单独的行，可以直接把数填进所属银行那一行的负债列，再用行尾的 × 删掉它。</span></div>`;
     bindMonthlyEntry();
+    syncMwSticky(list);
 }
 
 // ---- 月度账单「列」管理：改名 / 删除 / 新增 / 拖拽排序 ----
 function colHeadHTML(c, extraCls) {
-    return `<div class="mw-h mw-col mw-manc${extraCls || ''}" draggable="true" data-col-key="${_esc(c.key)}" data-col-kind="${_esc(c.kind)}">
+    return `<div class="mw-h mw-col mw-manc${extraCls || ''}" data-col-key="${_esc(c.key)}" data-col-kind="${_esc(c.kind)}">
         <span class="mw-col-dot" style="background:${_esc(c.color)}"></span>
-        <span class="mw-col-label" data-col-label="${_esc(c.key)}" title="点一下改名；按住拖动可调整列顺序">${_esc(c.label)}</span>
+        <span class="mw-col-label" data-col-label="${_esc(c.key)}" title="点一下改名；长按 0.3 秒后再拖动可调整列顺序">${_esc(c.label)}</span>
         <button class="mw-col-more" data-col-more="${_esc(c.key)}" title="更多操作（改名 / 删除）"><i class="fa-solid fa-ellipsis"></i></button>
     </div>`;
 }
 
+// 「严格长按 0.x 秒后再拖」：元素默认 draggable=false，按住满 300ms 才真正可拖。
+// 这样「点一下改名」不会被误判成拖动，也不会一按住就拖；长按期间松手则自动取消。
+function armLongPressDrag(el, delay) {
+    delay = delay || 300;
+    let timer = null, winUp = null;
+    const disarm = () => {
+        if (timer) { clearTimeout(timer); timer = null; }
+        if (winUp) { window.removeEventListener('pointerup', winUp); winUp = null; }
+        if (el.getAttribute('draggable') === 'true') el.setAttribute('draggable', 'false');
+        el.classList.remove('mw-armed');
+    };
+    el.addEventListener('pointerdown', e => {
+        if (e.button !== undefined && e.button !== 0) return; // 仅主键 / 触摸
+        if (timer) return;
+        timer = setTimeout(() => {
+            timer = null;
+            el.setAttribute('draggable', 'true');
+            el.classList.add('mw-armed');
+        }, delay);
+        winUp = () => disarm();
+        window.addEventListener('pointerup', winUp, { once: true });
+    });
+    el.addEventListener('dragend', disarm);
+    el.addEventListener('pointercancel', disarm);
+}
+
+// 计算表头 / 合计两行的真实像素高度，写进 CSS 变量，
+// 给「合计」「占比」两行设吸顶偏移 —— 只保留 modal-body 一条滚动条时，
+// 占比行以上的内容（表头 + 合计）滚动时始终冻结不动。
+function syncMwSticky(list) {
+    if (!list) return;
+    const head = list.querySelector('.mw-h.mw-corner');
+    const total = list.querySelector('.mw-total-row .mw-rowname');
+    const hh = head ? head.offsetHeight : 22;
+    const th = total ? total.offsetHeight : 21;
+    list.style.setProperty('--mw-head-h', hh + 'px');
+    list.style.setProperty('--mw-sum-h', th + 'px');
+}
+
 function bindMonthlyColOps(list) {
     list.querySelectorAll('.mw-h.mw-manc').forEach(h => {
+        armLongPressDrag(h);
         h.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', h.dataset.colKey); h.classList.add('dragging'); });
         h.addEventListener('dragend', () => h.classList.remove('dragging'));
         h.addEventListener('dragover', e => { e.preventDefault(); h.classList.add('drag-over'); });
@@ -7716,6 +7757,7 @@ function bindMonthlyRowOps(list) {
 
     // 整行拖拽重排：账户名是拖动手柄（draggable），落到另一行即交换顺序
     list.querySelectorAll('.mw-name[data-rename]').forEach(n => {
+        armLongPressDrag(n);
         n.addEventListener('dragstart', e => {
             const tr = n.closest('.mw-tr');
             if (tr) tr.classList.add('dragging');
@@ -7739,7 +7781,7 @@ function bindMonthlyRowOps(list) {
         });
     });
 
-    // 「⋯ 更多」浮层菜单：上移 / 下移 / 修改 / 删除
+    // 「⋯ 更多」浮层菜单：修改 / 删除（上移 / 下移已移到「长按后拖拽行名」完成，避免菜单太深）
     list.querySelectorAll('[data-row-more]').forEach(btn => {
         btn.addEventListener('click', e => {
             e.stopPropagation();
@@ -7748,8 +7790,6 @@ function bindMonthlyRowOps(list) {
             if (!a) return;
             const r = btn.getBoundingClientRect();
             openMwMenu(r.left, r.bottom + 4, [
-                { label: '上移一行', icon: 'fa-arrow-up', onClick: () => moveMonthlyAccountRow(id, -1) },
-                { label: '下移一行', icon: 'fa-arrow-down', onClick: () => moveMonthlyAccountRow(id, 1) },
                 { label: '修改', icon: 'fa-pen', onClick: () => openAccountEdit(id) },
                 { label: '删除', icon: 'fa-trash', danger: true, onClick: () => deleteAccountFromList(id) },
             ]);

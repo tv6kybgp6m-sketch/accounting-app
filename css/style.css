@@ -4047,7 +4047,7 @@ table.bill-stats {
 .mw-grid input[type="number"] {
     -moz-appearance: textfield; appearance: textfield;
 }
-.mw-rowname { display: flex; align-items: center; gap: 4px; min-height: 27px; padding: 0 4px 0 2px; }
+.mw-rowname { display: flex; align-items: center; gap: 4px; min-height: 27px; padding: 0 4px 0 2px; position: relative; }
 .mw-name {
     font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     cursor: text; border-bottom: 1px dashed transparent; padding-bottom: 1px;
@@ -4061,16 +4061,23 @@ table.bill-stats {
 }
 /* 账户行的 修改/删除 已改为悬停显示「⋯」菜单（见 .mw-more），这里不再放常驻按钮 */
 /* 月度账单：行 / 列的「⋯ 更多」浮层按钮——平时隐藏，悬停该行/列才淡显 */
+/* 行 / 列的「⋯ 更多」浮层按钮——平时隐藏，悬停该行/列才淡显；
+   用绝对定位浮在文字上方，不占布局宽度，避免挤窄账户名 / 列名 */
 .mw-more, .mw-col-more {
-    flex: none; width: 18px; height: 18px; line-height: 16px; padding: 0; margin-left: 2px;
+    position: absolute; right: 1px; top: 50%; transform: translateY(-50%);
+    width: 18px; height: 18px; line-height: 16px; padding: 0;
     font-size: 12px; border: none; border-radius: 5px; cursor: pointer;
-    color: var(--text-tertiary); background: transparent; opacity: 0; transition: opacity .15s;
+    color: var(--text-tertiary); background: var(--bg-card-hover); opacity: 0; transition: opacity .15s;
+    z-index: 3;
 }
 .mw-tr:hover .mw-more, .mw-manc:hover .mw-col-more { opacity: .65; }
 .mw-more:hover, .mw-col-more:hover { opacity: 1 !important; color: var(--accent); background: rgba(10, 132, 255, .12); }
 /* 行拖拽重排的视觉反馈 */
 .mw-tr.dragging { opacity: .4; }
 .mw-tr.drag-over { box-shadow: inset 3px 0 0 var(--accent); }
+/* 长按 0.3 秒后才可拖：长按期间给个视觉反馈，提示「现在能拖了」 */
+.mw-armed { cursor: grabbing; user-select: none; }
+.mw-name.mw-armed { background: color-mix(in srgb, var(--accent) 12%, var(--bg-modal)); border-radius: 4px; }
 /* 月度账单：可管理的列头（改名 / 删除 / 拖拽排序） */
 .mw-manc { display: flex; align-items: center; justify-content: center; gap: 3px; overflow: visible; cursor: grab; user-select: none; }
 .mw-manc:active { cursor: grabbing; }
@@ -4145,11 +4152,15 @@ table.bill-stats {
     border-top: 1px solid var(--border-strong);
     padding-top: 4px; font-weight: 600;
 }
+/* 合计行同样吸顶：紧贴表头下方，滚录入行时这行不动 */
+.mw-total-row .mw-rowname, .mw-total-row .mw-c {
+    position: sticky; top: var(--mw-head-h, 22px); z-index: 5;
+}
 .mw-total-row .mw-name, .mw-pct-row .mw-name { font-size: 12.5px; color: var(--text-secondary); }
 .mw-tcell b { font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* 占比行冻结：滚动录入行时这一行吸在表头下方，始终看得到每列对应的占比 */
 .mw-pct-row .mw-rowname, .mw-pct-row .mw-c {
-    position: sticky; top: 22px; z-index: 5;
+    position: sticky; top: calc(var(--mw-head-h, 22px) + var(--mw-sum-h, 21px)); z-index: 5;
     background: rgba(10, 122, 255, .07);
     background: color-mix(in srgb, var(--accent) 7%, var(--bg-modal));
     border-bottom: 1px solid var(--border); padding-bottom: 4px;
@@ -4163,9 +4174,10 @@ table.bill-stats {
 .mw-acct-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(0, 0, 0, .04); }
 .mw-col-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
 
-/* 网格整体做成卡片：圆角 + 细边 + 轻阴影，不再是裸的白底方块；自带滚动、表头吸顶 */
+/* 网格整体做成卡片：圆角 + 细边 + 轻阴影，不再是裸的白底方块。
+   滚动交给外层 .modal-body（只保留最右边一条滚动条），这里不再自己滚。 */
 .mw-scroll {
-    overflow: auto; max-height: 56vh; padding: 0;
+    overflow: visible; max-height: none; padding: 0;
     border: 1px solid var(--border); border-radius: 12px;
     background: var(--bg-modal);
     box-shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 8px 24px rgba(0, 0, 0, .05);
