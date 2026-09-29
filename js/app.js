@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.6';
+const APP_VERSION = '1.39.7';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7344,6 +7344,20 @@ function monthlyMember() {
     return (ms && ms.value) || state.balanceMembers[0] || '本人';
 }
 
+// 「记月度账单」默认打开的月份 = 当前页面正在看的那个月。
+// 以前统一取「最后一个有余额的月份」，导致用户在资产负债页明明看的是 8 月、
+// 点开弹窗却是 9 月，填的收益被存到了 9 月 —— 回到投资收益页点 8 月怎么点都找不到。
+function balanceViewMonth() {
+    const y = state.balanceYear, m = state.balanceMonth;
+    if (y && m) return `${y}-${String(m).padStart(2, '0')}`;
+    return monthlyDefaultMonth();
+}
+function returnViewMonth() {
+    const y = state.returnYear, m = state.returnMonth;
+    if (y && m) return `${y}-${String(m).padStart(2, '0')}`;
+    return monthlyDefaultMonth();
+}
+
 function openMonthlyModal(month, focus) {
     const modal = document.getElementById('monthlyModal');
     if (!modal) return;
@@ -8095,12 +8109,12 @@ function normalizeBalanceCats() {
 }
 
 // ---- 老入口全部指向同一个弹窗（结账清单、账户历史里的「修改」都还在调它们）----
-function openBalanceModal(month) { return openMonthlyModal(month, 'bal'); }
+function openBalanceModal(month) { return openMonthlyModal(month || balanceViewMonth(), 'bal'); }
 function closeBalanceModal() { return closeMonthlyModal(); }
 function renderBalanceEntry() { return renderMonthlyEntry(); }
 function saveBalances() { return saveMonthly(); }
 function clearBalanceInputs() { return clearMonthlyInputs(); }
-function openReturnModal(month) { return openMonthlyModal(month, 'ret'); }
+function openReturnModal(month) { return openMonthlyModal(month || returnViewMonth(), 'ret'); }
 function closeReturnModal() { return closeMonthlyModal(); }
 function renderReturnEntry() { return renderMonthlyEntry(); }
 function saveReturns() { return saveMonthly(); }
@@ -9352,6 +9366,21 @@ function returnCandidateAccounts() {
     return picked.length ? picked : assets;
 }
 
+// 期间内真正有收益的账户，一个都不能漏。
+// returnCandidateAccounts() 只列 kind==='asset'，所以从「资产负债」页给非资产账户
+// （如「借款」）记的收益会算进总额、却从饼图/排行/期间明细里整条消失，点哪都查不到。
+// 这里把"在这一期里有收益、但不在候选名单里"的账户补上，保证记过的数一定能点到。
+function returnAccountsWith(byAccount) {
+    const list = returnCandidateAccounts().slice();
+    const seen = new Set(list.map(a => a.id));
+    Object.keys(byAccount || {}).forEach(id => {
+        if (seen.has(id) || !byAccount[id]) return;
+        const a = accountById(id);
+        if (a) { list.push(a); seen.add(id); }
+    });
+    return list;
+}
+
 // 一段月份的合计 + 分账户明细
 function returnSummary(months, member = state.balanceOwner) {
     const byAccount = {};
@@ -9937,7 +9966,7 @@ function renderReturnPie(ctx, info) {
     if (typeof Chart === 'undefined') { loadChartLib().then(() => renderReturnPie(ctx, info)).catch(() => {}); return; }
     if (charts.returns) { charts.returns.destroy(); charts.returns = null; }
     const { byAccount } = returnSummary(info.months);
-    const rows = returnCandidateAccounts().map(a => ({
+    const rows = returnAccountsWith(byAccount).map(a => ({
         id: a.id, name: a.name, color: a.color, amount: byAccount[a.id] || 0,
     })).filter(r => r.amount !== 0).map(r => ({ ...r, signed: Math.abs(r.amount) }));
     if (!rows.length) { returnShowEmpty('该期没有可统计的收益数据'); return; }
@@ -9968,7 +9997,11 @@ function renderReturnPie(ctx, info) {
             onClick: (evt, elements) => {
                 if (!elements || !elements.length) return;
                 const e = entries[elements[0].index];
-                if (e) openReturnHistoryForAccount(e.ids && e.ids.length === 1 ? e.ids[0] : null, e.name);
+                if (!e) return;
+                // 被合并进「其他」的那几账户没有单一账户可开，退回到这一期的明细，
+                // 否则点上去什么反应都没有，看着就像"记了但查不到"。
+                if (e.ids && e.ids.length === 1) openReturnHistoryForAccount(e.ids[0], e.name);
+                else openReturnDetailForPeriod(info.months, info.title);
             },
             onHover: (evt, elements) => {
                 const target = evt.native && evt.native.target;
@@ -9997,7 +10030,7 @@ function renderReturnBreakdown(info) {
     const title = document.getElementById('retBreakdownTitle');
     if (title) title.textContent = `账户收益排行 · ${info.title}`;
     const { byAccount } = returnSummary(info.months);
-    const rows = returnCandidateAccounts().map(a => ({
+    const rows = returnAccountsWith(byAccount).map(a => ({
         id: a.id, name: a.name, color: a.color, icon: a.icon, amount: byAccount[a.id] || 0,
     })).filter(r => r.amount !== 0).sort((x, y) => Math.abs(y.amount) - Math.abs(x.amount));
     const total = rows.reduce((s, r) => s + r.amount, 0);
@@ -10206,7 +10239,7 @@ function openReturnDetailForPeriod(months, label) {
     markHistoryModalReturnsTone(true);
     // 期间汇总也列出【全部成员】的收益，避免从资产负债页记的、归到默认成员的收益在这里消失
     const { byAccount } = returnSummary(months, 'all');
-    const rows = returnCandidateAccounts().map(a => ({
+    const rows = returnAccountsWith(byAccount).map(a => ({
         id: a.id, name: a.name, color: a.color, icon: a.icon, amount: byAccount[a.id] || 0,
     })).filter(r => r.amount !== 0).sort((x, y) => Math.abs(y.amount) - Math.abs(x.amount));
     const total = rows.reduce((s, r) => s + r.amount, 0);
