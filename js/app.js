@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.5';
+const APP_VERSION = '1.39.6';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -9264,11 +9264,11 @@ function portfolioMonthStats(month, ids, draft, memberOverride) {
 
 // 时间加权累计收益率：逐月 (1+r) 连乘。剔掉"什么时候加钱/取钱"的影响，
 // 只留投资本身的表现，所以不同投入规模的账户可以横向比。
-function portfolioCumulative(months) {
+function portfolioCumulative(months, member) {
     const list = (months || returnMonths()).filter(m => m);
     let acc = 1, n = 0, best = null;
     const series = list.map(m => {
-        const st = portfolioMonthStats(m);
+        const st = portfolioMonthStats(m, null, null, member);
         if (st.rate !== null && isFinite(st.rate)) { acc *= (1 + st.rate); n += 1; }
         return { month: m, ...st };
     });
@@ -9285,13 +9285,13 @@ function pctText(r, digits) {
 
 // 单账户收益率：把组合算法按 accountId 切一刀，再逐月连乘（时间加权）。
 // 本金未知的月份（没记上月余额、也没录净入金）跳过并计数，绝不当成 0% 拖低结果。
-function accountReturnRate(accountId, months) {
+function accountReturnRate(accountId, months, member) {
     const list = (months || []).filter(Boolean).slice().sort();
     const res = { rate: null, months: 0, skipped: 0, series: [], latest: null };
     if (!accountId || !list.length) return res;
     let acc = 1;
     list.forEach(m => {
-        const st = portfolioMonthStats(m, [accountId]);
+        const st = portfolioMonthStats(m, [accountId], null, member);
         if (st.rate !== null && isFinite(st.rate)) {
             acc *= (1 + st.rate); res.months += 1;
             res.series.push({ month: m, rate: st.rate });
@@ -10204,7 +10204,8 @@ function openReturnDetailForPeriod(months, label) {
     if (!months || !months.length) return;
     returnHistoryAccountId = null;
     markHistoryModalReturnsTone(true);
-    const { byAccount } = returnSummary(months);
+    // 期间汇总也列出【全部成员】的收益，避免从资产负债页记的、归到默认成员的收益在这里消失
+    const { byAccount } = returnSummary(months, 'all');
     const rows = returnCandidateAccounts().map(a => ({
         id: a.id, name: a.name, color: a.color, icon: a.icon, amount: byAccount[a.id] || 0,
     })).filter(r => r.amount !== 0).sort((x, y) => Math.abs(y.amount) - Math.abs(x.amount));
@@ -10219,20 +10220,20 @@ function openReturnDetailForPeriod(months, label) {
     const t = document.getElementById('acctHistTitle');
     if (t) t.textContent = `${label} 收益明细`;
     const s = document.getElementById('acctHistSub');
-    if (s) s.textContent = state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner;
+    if (s) s.textContent = '全家合计';
     const del = document.getElementById('acctHistDelete');
     if (del) del.style.display = 'none';
     // 这是"多个账户的期间汇总"，没有单一账户可编辑
     const editBtn = document.getElementById('acctHistEdit');
     if (editBtn) editBtn.style.display = 'none';
     const sum = document.getElementById('acctHistSummary');
-    const portCum = portfolioCumulative(months);
+    const portCum = portfolioCumulative(months, 'all');
     if (sum) sum.innerHTML = `<span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">净收益 <b>${formatCurrency(total)}</b></span>
         <span class="cat-txn-summary-item">组合收益率 <b>${pctText(portCum.cumulative)}</b></span>
         <span class="cat-txn-summary-item">涉及 <b>${rows.length}</b> 个账户</span>`;
     const list = document.getElementById('acctHistList');
     if (list) list.innerHTML = rows.length ? rows.map(r => {
-        const rr = accountReturnRate(r.id, months);
+        const rr = accountReturnRate(r.id, months, 'all');
         const rateTxt = rr.rate !== null ? pctText(rr.rate) : (rr.skipped ? '本金未知' : '');
         const rateCls = rr.rate === null ? 'breakdown-rate-unknown' : (rr.rate > 0 ? 'income' : (rr.rate < 0 ? 'expense' : ''));
         return `
@@ -10282,8 +10283,10 @@ function openReturnHistoryForAccount(accountId, label) {
 }
 
 function renderReturnAccountHistory() {
+    // 账户收益历史：列出这个账户【全部成员】的记录，不再按当前查看成员过滤。
+    // 否则从「资产负债」页记的、被归到默认成员（如本人）的收益，在投资收益页切到其它成员查看时会整条消失、改不了。
     const rows = state.returns
-        .filter(r => r.accountId === returnHistoryAccountId && (state.balanceOwner === 'all' || r.member === state.balanceOwner))
+        .filter(r => r.accountId === returnHistoryAccountId)
         .slice()
         .sort((x, y) => y.month.localeCompare(x.month) || String(x.member).localeCompare(String(y.member)));
     const all = state.returns.filter(r => r.accountId === returnHistoryAccountId);
@@ -10298,12 +10301,12 @@ function renderReturnAccountHistory() {
         <span class="cat-txn-summary-item">最新 <b>${rows.length ? formatCurrency(rows[0].amount) : '—'}</b></span>`;
     const list = document.getElementById('acctHistList');
     if (list) list.innerHTML = rows.length ? rows.map(r => {
-        const m = accountReturnRate(returnHistoryAccountId, [r.month]);
+        const m = accountReturnRate(returnHistoryAccountId, [r.month], r.member);
         const mTxt = m.rate !== null ? pctText(m.rate) : (m.skipped ? '本金未知' : '—');
         const mCls = m.rate === null ? 'breakdown-rate-unknown' : (m.rate > 0 ? 'income' : (m.rate < 0 ? 'expense' : ''));
         return `
         <div class="bal-history-row">
-            <span class="bh-month">${r.month.replace('-', '年')}月${state.balanceOwner === 'all' ? `<span class="bh-member">${_esc(r.member || '')}</span>` : ''}</span>
+            <span class="bh-month">${r.month.replace('-', '年')}月<span class="bh-member">${_esc(r.member || '')}</span></span>
             <span class="bh-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)} <span class="breakdown-rate ${mCls}">${mTxt}</span></span>
             <button class="bh-edit" onclick="editReturnRecord('${r.id}')" title="修改这一期"><i class="fa-solid fa-pen"></i></button>
             <button class="bh-delete" onclick="deleteReturnSnapshot('${r.id}')" title="删除这一期"><i class="fa-solid fa-xmark"></i></button>
