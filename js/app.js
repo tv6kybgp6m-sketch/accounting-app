@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.2';
+const APP_VERSION = '1.39.3';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7419,8 +7419,9 @@ function renderMonthlyEntry() {
         // 行上如果挂着「现金 / 货币基金 / 定期存款 / 股票基金」这种名字，跟横轴撞词，
         // 两轴看起来就变成一样的了 —— 这里标出来，点一下就能改成「放钱的地方」
         const like = mwNameLooksLikeCat(a.name);
-        return `        <div class="mw-tr" data-mw-account="${a.id}">
+        return `        <div class="mw-tr" data-mw-account="${a.id}" style="--rowc:${_esc(a.color)}">
             <div class="mw-rowname">
+                <span class="mw-acct-dot" style="background:${_esc(a.color)}"></span>
                 <span class="mw-name${like ? ' mw-name-warn' : ''}" data-rename="${a.id}" draggable="true"
                     title="点一下改名；按住上下拖动可调整这一行（账户）的顺序">${_esc(a.name)}</span>
                 ${like ? `<span class="mw-badge" data-rename="${a.id}" title="这个名字是资产类别，建议改成放钱的地方">类别名</span>` : ''}
@@ -7489,6 +7490,7 @@ function renderMonthlyEntry() {
 // ---- 月度账单「列」管理：改名 / 删除 / 新增 / 拖拽排序 ----
 function colHeadHTML(c, extraCls) {
     return `<div class="mw-h mw-col mw-manc${extraCls || ''}" draggable="true" data-col-key="${_esc(c.key)}" data-col-kind="${_esc(c.kind)}">
+        <span class="mw-col-dot" style="background:${_esc(c.color)}"></span>
         <span class="mw-col-label" data-col-label="${_esc(c.key)}" title="点一下改名；按住拖动可调整列顺序">${_esc(c.label)}</span>
         <button class="mw-col-more" data-col-more="${_esc(c.key)}" title="更多操作（改名 / 删除）"><i class="fa-solid fa-ellipsis"></i></button>
     </div>`;

@@ -4150,12 +4150,77 @@ table.bill-stats {
 /* 占比行冻结：滚动录入行时这一行吸在表头下方，始终看得到每列对应的占比 */
 .mw-pct-row .mw-rowname, .mw-pct-row .mw-c {
     position: sticky; top: 22px; z-index: 5;
-    background: var(--bg-modal);
+    background: rgba(10, 122, 255, .07);
+    background: color-mix(in srgb, var(--accent) 7%, var(--bg-modal));
     border-bottom: 1px solid var(--border); padding-bottom: 4px;
     box-shadow: 0 1px 0 var(--bg-modal);
 }
 .mw-pct-row .mw-tcell b { font-size: 11.5px; font-weight: 500; color: var(--text-secondary); }
 .mw-pct-row .mw-sumcol b { font-weight: 600; color: var(--text-primary); }
+
+/* ---- 月度账单：视觉美化（v1.39.3） ---- */
+/* 账户行首 / 列头的小色点：用账户和资产类别各自的颜色，整张表立刻有了色彩层次 */
+.mw-acct-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(0, 0, 0, .04); }
+.mw-col-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+
+/* 网格整体做成卡片：圆角 + 细边 + 轻阴影，不再是裸的白底方块；自带滚动、表头吸顶 */
+.mw-scroll {
+    overflow: auto; max-height: 56vh; padding: 0;
+    border: 1px solid var(--border); border-radius: 12px;
+    background: var(--bg-modal);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 8px 24px rgba(0, 0, 0, .05);
+}
+/* 表头行：浅灰底 + 下边，和录入区区分开 */
+.mw-h { background: var(--bg-card-hover); border-bottom: 1px solid var(--border); }
+.mw-corner { background: var(--bg-card-hover); border-bottom: 1px solid var(--border); }
+
+/* 录入格：做成可填写的卡片格，而不是裸文字 */
+.mw-c .text-input {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, .03);
+    transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.mw-c .text-input:hover { border-color: var(--border-strong); }
+.mw-c .text-input:focus {
+    outline: none; border-color: var(--accent); background: var(--bg-modal);
+    box-shadow: 0 0 0 3px rgba(10, 122, 255, .18);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+/* 行 hover 高亮（.mw-tr 是 display:contents，对每格单独上色） */
+.mw-rowname { transition: background .12s; }
+.mw-tr:hover .mw-c, .mw-tr:hover .mw-rowname { background: var(--bg-card-hover); }
+.mw-tr:hover .mw-c .text-input { background: var(--bg-card-hover); }
+
+/* 负债列：淡红底，一眼看出是欠的钱；hover 仍保红 */
+.mw-c.mw-liab .text-input {
+    background: rgba(255, 59, 48, .07);
+    background: color-mix(in srgb, var(--expense) 7%, var(--bg-card));
+    border-color: rgba(255, 59, 48, .22);
+    border-color: color-mix(in srgb, var(--expense) 22%, var(--border));
+}
+.mw-c.mw-liab .text-input:focus {
+    border-color: var(--expense);
+    box-shadow: 0 0 0 3px rgba(255, 59, 48, .16);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--expense) 16%, transparent);
+}
+.mw-tr:hover .mw-c.mw-liab .text-input { background: rgba(255, 59, 48, .12); background: color-mix(in srgb, var(--expense) 12%, var(--bg-card)); }
+
+/* 合计 / 占比 两行：吸顶汇总条，带浅蓝底 + 数字上色 */
+.mw-total-row .mw-rowname, .mw-total-row .mw-c {
+    background: rgba(10, 122, 255, .07);
+    background: color-mix(in srgb, var(--accent) 7%, var(--bg-modal));
+}
+.mw-tcell b { color: var(--text-primary); font-weight: 600; }
+.mw-pct-row .mw-tcell b { color: var(--accent); font-weight: 600; }
+.mw-sumcol .mw-rownet b { color: var(--accent); }
+
+/* 弹窗头部加一抹蓝，不再一片死白 */
+#monthlyModal .modal { border-top: 3px solid var(--accent); overflow: hidden; }
+#monthlyModal .modal-header { background: linear-gradient(180deg, rgba(10, 122, 255, .08), rgba(10, 122, 255, 0)); }
+#monthlyModal h2 { color: var(--accent); }
 
 /* ---- 资产负债：按钱包折叠的卡片 ---- */
 .bal-wallet { margin-bottom: 8px; border-radius: 12px; background: var(--bg-input); overflow: hidden; }
