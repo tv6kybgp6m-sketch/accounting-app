@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.3';
+const APP_VERSION = '1.39.4';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -99,22 +99,20 @@ const CATEGORY_MIGRATION_V2 = {
 
 // 资产负债：预设账户（kind 决定计入资产还是负债，group 用于分组统计）
 const DEFAULT_ACCOUNTS = [
-    { id: 'a_cash',       name: '现金',      kind: 'asset',     group: '流动资金', icon: 'fa-money-bill-wave',      color: '#34c759' , bucket: 'cash' },
-    { id: 'a_debit',      name: '储蓄卡',    kind: 'asset',     group: '流动资金', icon: 'fa-building-columns',     color: '#5ac8fa' , bucket: 'cash' },
-    { id: 'a_fixed',      name: '定期存款',  kind: 'asset',     group: '储蓄存款', icon: 'fa-vault',                color: '#007aff' , bucket: 'steady' },
-    { id: 'a_mmf',        name: '货币基金',  kind: 'asset',     group: '投资理财', icon: 'fa-coins',                color: '#ffcc00' , bucket: 'cash' },
-    { id: 'a_stock',      name: '股票基金',  kind: 'asset',     group: '投资理财', icon: 'fa-arrow-trend-up',       color: '#ff9500' , bucket: 'growth' },
-    { id: 'a_wealth',     name: '理财产品',  kind: 'asset',     group: '投资理财', icon: 'fa-certificate',          color: '#af52de' , bucket: 'steady' },
-    { id: 'a_fund',       name: '公积金',    kind: 'asset',     group: '其他资产', icon: 'fa-house-chimney',        color: '#30b0c7' , bucket: 'growth' },
-    { id: 'a_house',      name: '房产',      kind: 'asset',     group: '固定资产', icon: 'fa-house',                color: '#a2845e' , bucket: 'growth' },
-    { id: 'a_car',        name: '车辆',      kind: 'asset',     group: '固定资产', icon: 'fa-car-side',             color: '#636e72' , bucket: 'growth' },
-    { id: 'a_receivable', name: '应收借款',  kind: 'asset',     group: '其他资产', icon: 'fa-hand-holding-dollar',  color: '#ff2d55' , bucket: 'cash' },
-    { id: 'l_credit',     name: '信用卡',    kind: 'liability', group: '消费负债', icon: 'fa-credit-card',          color: '#ff3b30'  },
-    { id: 'l_install',    name: '花呗/白条', kind: 'liability', group: '消费负债', icon: 'fa-mobile-screen-button', color: '#ff9500'  },
-    { id: 'l_mortgage',   name: '房贷',      kind: 'liability', group: '大额负债', icon: 'fa-house-circle-check',   color: '#5856d6'  },
-    { id: 'l_carloan',    name: '车贷',      kind: 'liability', group: '大额负债', icon: 'fa-car-burst',            color: '#f7475a'  },
-    { id: 'l_personal',   name: '私人借款',  kind: 'liability', group: '其他负债', icon: 'fa-handshake',            color: '#8e8e93'  },
-    { id: 'l_other',      name: '其他负债',  kind: 'liability', group: '其他负债', icon: 'fa-ellipsis',             color: '#aeaeb2'  },
+    { id: 'a_wechat',    name: '微信',   kind: 'asset',     group: '流动资金', icon: 'fa-mobile-screen-button', color: '#07c160', bucket: 'cash' },
+    { id: 'a_alipay',    name: '支付宝', kind: 'asset',     group: '流动资金', icon: 'fa-mobile-screen-button', color: '#1677ff', bucket: 'cash' },
+    { id: 'a_icbc',      name: '工商',   kind: 'asset',     group: '流动资金', icon: 'fa-building-columns',     color: '#f5444e', bucket: 'cash' },
+    { id: 'a_boc',       name: '中国',   kind: 'asset',     group: '流动资金', icon: 'fa-building-columns',     color: '#b51e2d', bucket: 'cash' },
+    { id: 'a_pingan',    name: '平安',   kind: 'asset',     group: '流动资金', icon: 'fa-building-columns',     color: '#e60012', bucket: 'cash' },
+    { id: 'a_eastmoney', name: '东方',   kind: 'asset',     group: '投资理财', icon: 'fa-chart-line',           color: '#ff9500', bucket: 'growth' },
+    { id: 'a_ttjj',      name: '天天',   kind: 'asset',     group: '投资理财', icon: 'fa-chart-line',           color: '#ffcc00', bucket: 'growth' },
+    { id: 'a_morgan',    name: '摩根',   kind: 'asset',     group: '投资理财', icon: 'fa-chart-line',           color: '#5ac8fa', bucket: 'growth' },
+    { id: 'a_huaan',     name: '华安',   kind: 'asset',     group: '投资理财', icon: 'fa-chart-line',           color: '#af52de', bucket: 'growth' },
+    { id: 'a_ccb',       name: '建设',   kind: 'asset',     group: '流动资金', icon: 'fa-building-columns',     color: '#0a4d9c', bucket: 'cash' },
+    { id: 'a_abc',       name: '农业',   kind: 'asset',     group: '流动资金', icon: 'fa-building-columns',     color: '#009b4d', bucket: 'cash' },
+    { id: 'a_house',     name: '房产',   kind: 'asset',     group: '固定资产', icon: 'fa-house',                color: '#a2845e', bucket: 'growth' },
+    { id: 'l_loan',      name: '借款',   kind: 'liability', group: '其他负债', icon: 'fa-hand-holding-dollar',  color: '#ff3b30' },
+    { id: 'a_cash',      name: '现金',   kind: 'asset',     group: '流动资金', icon: 'fa-money-bill-wave',      color: '#34c759', bucket: 'cash' },
 ];
 
 // 四笔钱：三个资产桶 + 保险保障清单
@@ -210,7 +208,7 @@ let state = {
     reportPeriod: 'month',
     reportYear: null,
     reportMonth: null,
-    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [], recurring: [] },  // soft-delete markers  // soft-delete markers
+    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [], recurring: [], cols: [] },  // soft-delete markers  // soft-delete markers
     pmAddedAt: {},          // payment method name -> when it was added (names are the identity)
     lastExportAt: 0,        // 最近一次导出的时间戳，用于备份提醒
     fundTargets: { cash: 0, steady: 0, growth: 0 },
@@ -461,6 +459,16 @@ function undoLastDelete() {
                 }
                 if (Array.isArray(state.deleted.insuranceMembers)) {
                     state.deleted.insuranceMembers = state.deleted.insuranceMembers.filter(t => t.id !== name);
+                }
+            });
+        } else if (coll === 'sheetCols') {
+            // 把删掉的列按原位置插回去，并清掉它的墓碑
+            items.forEach(s => {
+                if (!s || !s.col) return;
+                const at = Math.max(0, Math.min(s.index | 0, state.sheetCols.length));
+                state.sheetCols.splice(at, 0, Object.assign({}, s.col));
+                if (Array.isArray(state.deleted.cols)) {
+                    state.deleted.cols = state.deleted.cols.filter(t => t.id !== s.col.key);
                 }
             });
         } else if (coll === 'members') {
@@ -942,6 +950,7 @@ function normalizeTombstones(raw) {
         insuranceMembers: clean(src.insuranceMembers),
         insurance: clean(src.insurance),
         recurring: clean(src.recurring),
+        cols: clean(src.cols),
     };
 }
 
@@ -1327,6 +1336,7 @@ function mergeRemoteData(remoteData) {
         insuranceMembers: mergeTombstoneList(state.deleted.insuranceMembers, remoteDeleted.insuranceMembers),
         insurance: mergeTombstoneList(state.deleted.insurance, remoteDeleted.insurance),
         recurring: mergeTombstoneList(state.deleted.recurring, remoteDeleted.recurring),
+        cols: mergeTombstoneList(state.deleted.cols || [], remoteDeleted.cols),
     };
 
     // 保险清单：按 id 取并集，较新的赢；成员取并集；目标金额取较新的一份
@@ -5582,18 +5592,20 @@ function loadSampleData() {
 
     // 资产负债示例：最近 6 个月，每月给主要账户记一次余额
     const balSeed = {
-        a_debit:    [18200, 19650, 21300, 20450, 23800, 25600],
+        a_wechat:   [3200, 2900, 3500, 3100, 3600, 3800],
+        a_alipay:   [5600, 6100, 5800, 6400, 6700, 7200],
         a_cash:     [1200, 980, 1500, 1100, 1350, 1600],
-        a_fixed:    [80000, 80000, 90000, 90000, 90000, 100000],
-        a_mmf:      [12500, 13200, 12800, 14100, 15600, 16200],
-        a_stock:    [45800, 42300, 47600, 51200, 48900, 55400],
-        a_wealth:   [50000, 50000, 60000, 60000, 60000, 60000],
-        a_fund:     [36800, 37600, 38400, 39200, 40100, 41000],
+        a_icbc:     [42000, 43800, 45100, 46200, 47900, 49100],
+        a_boc:      [18000, 19200, 20500, 19800, 21300, 22600],
+        a_pingan:   [12500, 13200, 12800, 14100, 15600, 16200],
+        a_ccb:      [33000, 34200, 35100, 36900, 37800, 39200],
+        a_abc:      [15000, 15800, 16200, 17100, 16900, 17800],
+        a_eastmoney:[86000, 82300, 87600, 91200, 88900, 95400],
+        a_ttjj:     [54000, 52300, 57600, 61200, 58900, 65400],
+        a_morgan:   [38000, 36300, 37600, 41200, 38900, 45400],
+        a_huaan:    [29000, 28300, 29600, 31200, 29900, 33400],
         a_house:    [2850000, 2850000, 2850000, 2850000, 2850000, 2850000],
-        a_car:      [180000, 176000, 172000, 168000, 164000, 160000],
-        l_credit:   [4200, 6800, 3100, 5400, 2900, 7300],
-        l_install:  [880, 1450, 620, 2100, 980, 1650],
-        l_mortgage: [1620000, 1611000, 1602000, 1593000, 1584000, 1575000],
+        l_loan:     [50000, 48500, 47000, 45200, 43800, 42000],
     };
     const balMonths = [];
     for (let i = 5; i >= 0; i--) {
@@ -5603,7 +5615,7 @@ function loadSampleData() {
     // 家庭演示：账户类型共用，成员维度落在余额上。房贷/车/房归「家人」，其余归「本人」。
     if (!Array.isArray(state.balanceMembers) || !state.balanceMembers.length) state.balanceMembers = ['本人'];
     if (!state.balanceMembers.includes('家人')) state.balanceMembers.push('家人');
-    const memberForAccount = (accountId) => (['a_house', 'a_car', 'l_mortgage'].includes(accountId) ? '家人' : '本人');
+    const memberForAccount = (accountId) => (['a_house'].includes(accountId) ? '家人' : '本人');
     state.balances = [];
     Object.entries(balSeed).forEach(([accountId, series]) => {
         if (!state.accounts.some(a => a.id === accountId)) return;
@@ -5620,10 +5632,10 @@ function loadSampleData() {
 
     // 投资收益示例：与余额同样的 6 个月，含亏损月份
     const retSeed = {
-        a_stock:  [1200, -800, 2400, 3100, -1500, 2600],
-        a_wealth: [320, 310, 340, 300, 350, 330],
-        a_fixed:  [160, 160, 180, 180, 180, 200],
-        a_mmf:    [45, 52, 48, 60, 55, 66],
+        a_eastmoney: [1200, -800, 2400, 3100, -1500, 2600],
+        a_ttjj:      [800, 600, 950, 1100, -400, 1300],
+        a_morgan:    [600, 500, 720, 880, -300, 950],
+        a_huaan:     [400, 350, 480, 520, -200, 600],
     };
     state.returns = [];
     Object.entries(retSeed).forEach(([accountId, series]) => {
@@ -7557,22 +7569,38 @@ function renameSheetColumn(key) {
 function deleteSheetColumn(key) {
     const c = sheetColByKey(key);
     if (!c) return;
+    const idx = state.sheetCols.findIndex(x => x.key === key);
+    if (idx < 0) return;
+
+    // 「收益」列只隐藏、不删数据；同样进撤销栈，8 秒内可恢复
     if (c.kind === 'ret') {
-        if (!confirm('隐藏「收益」列？已记的收益数据仍保留，只是这一页不再显示。')) return;
-        state.sheetCols = state.sheetCols.filter(x => x.key !== key);
-        saveState(); renderMonthlyEntry(); showToast('已隐藏收益列', 'success'); return;
+        const removed = state.sheetCols.splice(idx, 1)[0];
+        if (state.balClassTags) delete state.balClassTags[key];
+        addTombstone('cols', key);
+        saveState();
+        renderMonthlyEntry();
+        const canUndo = pushUndo('列「' + c.label + '」', { sheetCols: [{ col: removed, index: idx }] });
+        if (canUndo) showUndoToast(c.label);
+        return;
     }
-    if (!confirm(`删除「${c.label}」这一列？该列所有已记账的历史数据（全部月份、全部成员）会一起删掉，且无法恢复。确定？`)) return;
-    state.sheetCols = state.sheetCols.filter(x => x.key !== key);
+
+    // 资产 / 负债列：连同全部月份、全部成员的已记账数据一起删，并打墓碑（删完 8 秒内可撤销）
+    if (!confirm(`删除「${c.label}」这一列？该列所有已记账的历史数据（全部月份、全部成员）会一起删掉，删掉后 8 秒内可以撤销。确定？`)) return;
+    const removed = state.sheetCols.splice(idx, 1)[0];
+    const removedBalances = [];
     state.balances = state.balances.filter(b => {
         if (b.cat !== key) return true;
-        addTombstone('balances', b.id); return false;
+        addTombstone('balances', b.id);
+        removedBalances.push(Object.assign({}, b));
+        return false;
     });
     if (state.balClassTags) delete state.balClassTags[key];
+    addTombstone('cols', key);          // 列本身也打墓碑：删除标记能随同步走，不会被另一台设备带回来
     saveState();
     renderMonthlyEntry();
     if (state.currentView === 'balance') renderBalance();
-    showToast(`已删除列「${c.label}」`, 'success');
+    const canUndo = pushUndo('列「' + c.label + '」', { sheetCols: [{ col: removed, index: idx }], balances: removedBalances });
+    if (canUndo) showUndoToast(c.label);
 }
 
 function addSheetColumn() {
