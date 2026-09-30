@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.11';
+const APP_VERSION = '1.39.12';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -10658,8 +10658,12 @@ async function init() {
     setTimeout(() => { try { runRecurringRules(true); } catch (e) { console.error('recurring failed', e); } }, 2500);
 
     // 桌面版没法自己更新，启动时悄悄比一下线上版本，有新版就提示重装 dmg。
-    // 网页版不需要：刷新就是最新，白跑一次网络请求反而拖慢首屏。
     if (isElectron()) setTimeout(() => { checkAppUpdate('startup').catch(() => {}); }, 4000);
+
+    // 网页/PWA：改成缓存优先后，新版本会滞后一个版本才生效，所以启动时查一下
+    // service worker 是否有待生效的更新，有就弹"新版本已就绪"提示（原逻辑已有，
+    // 只是启动时不调）。不阻塞首屏。
+    if (!isElectron()) setTimeout(() => { checkForUpdate().catch(() => {}); }, 5000);
 }
 
 // Mac 浏览器上，鼠标悬停在数字输入框上滚动滚轮会改值，录入时极易误触改了金额。

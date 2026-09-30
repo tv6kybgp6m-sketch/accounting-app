@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bookkeeping-v1.39.11';
+const CACHE_NAME = 'bookkeeping-v1.39.12';
 const PRECACHE = [
   './',
   './index.html',
@@ -52,40 +52,44 @@ function cacheAndReturn(request, response) {
   return response;
 }
 
-// network-first for static files: the local server is always available, so we
-// answer from the network and only fall back to cache when it is unreachable.
-// This keeps every asset current after an update; cache is just offline cover.
+// cache-first for static files: answer from the local Cache API instantly so the
+// app opens fast even when GitHub Pages is slow or unreachable (e.g. a phone in
+// China opening the home-screen PWA). A background fetch refreshes the cache; the
+// NEXT open shows the updated build. First paint never waits on the network.
 async function cacheFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request, { ignoreSearch: true });
+  if (cached) {
+    // refresh in the background without blocking first paint
+    fetch(request, NET).then((r) => cacheAndReturn(request, r)).catch(() => null);
+    return cached;
+  }
+  // first-ever load (nothing cached yet): fall through to the network
   try {
     const response = await fetch(request, NET);
     return cacheAndReturn(request, response);
   } catch (e) {
-    const cache = await caches.open(CACHE_NAME);
-    return (await cache.match(request, { ignoreSearch: true })) || null;
+    return null;
   }
 }
 
-// Serve a navigation from the network first (the local server is always up),
-// falling back to cache only if the server is unreachable. This guarantees a
-// freshly built release is shown the moment the app is relaunched — no stale
-// cache can shadow a new version. The cache is purely an offline safety net.
+// Navigation: serve the cached app shell immediately (instant first paint), then
+// refresh it in the background. This is what makes the PWA open in a blink whether
+// or not the network is fast — the user sees the app at once and a new release
+// lands on the next open. We NEVER block first paint on a round-trip to GitHub.
 async function serveNavigation(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = (await cache.match(request, { ignoreSearch: true })) || (await cache.match('./index.html'));
+  if (cached) {
+    fetch(request, NET).then((r) => cacheAndReturn(request, r)).catch(() => null);
+    return cached;
+  }
   try {
     const response = await fetch(request, NET);
     return cacheAndReturn(request, response);
   } catch (e) {
-    const cache = await caches.open(CACHE_NAME);
-    return (await cache.match(request, { ignoreSearch: true }))
-      || (await cache.match('./index.html'))
-      || Response.error();
+    return Response.error();
   }
-}
-
-// Background refresh for the page (bypasses the browser HTTP cache).
-function revalidatePage(request) {
-  return fetch(request, NET)
-    .then((response) => cacheAndReturn(request, response))
-    .catch(() => null);
 }
 
 self.addEventListener('fetch', (event) => {
@@ -103,12 +107,10 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (request.mode === 'navigate') {
-    // Answer from cache immediately (instant first paint — this is what made the
-    // original build feel fast), then refresh in the background so the next open
-    // is current. The refresh uses cache:'no-store' so the browser HTTP cache
-    // can never mask a new release.
+    // cache-first: instant first paint from the local cache; the background fetch
+    // inside serveNavigation keeps the next open current. First paint never waits
+    // on a round-trip to GitHub Pages.
     event.respondWith(serveNavigation(request));
-    event.waitUntil(revalidatePage(request));
     return;
   }
 
