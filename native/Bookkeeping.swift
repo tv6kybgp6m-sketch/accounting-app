@@ -104,7 +104,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.39.9"
+        webView.customUserAgent = "BookkeepingMacApp/1.39.10"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"
@@ -422,7 +422,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         try? data.write(to: dest, options: [.atomic])
     }
 
+    // 关掉最后一个窗口就直接退出 App：否则窗口关了进程还活着，
+    // 再点 Dock 图标时系统把那个已经关掉的窗口又抬出来，但里面的 WKWebView 内容进程
+    // 早就被挂起/回收了，表现成"再打开就卡死、只能退出重开才行"。
+    // 直接退出最干净：下次打开是全新启动，本地服务器固定 8731、网页重新加载，不会卡。
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        // 退出前留一份最新快照，避免"刚改完就关"丢掉最近一份备份
+        snapshot()
         icloudSource?.cancel()
         snapshotTimer?.invalidate()
     }
