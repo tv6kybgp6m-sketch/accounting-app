@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.8';
+const APP_VERSION = '1.39.9';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -2105,7 +2105,18 @@ async function decodeBackupText(text) {
             }
         }
         if (!plain) { showToast('导入失败：口令解不开这份备份', 'error'); return null; }
-        return decodeBackupText(plain);
+        // 解密出来的内层可能是「先压缩再加密」的同步载荷（BKZ1:…），也可能就是纯 JSON 备份。
+        // 必须交给 decodeSyncPayload 还原成对象，否则 BKZ1: 这种压缩串直接 JSON.parse 会报「不是有效的 JSON」。
+        // iCloud 同步文件和每 10 分钟快照都走 encryptString(encodeSyncPayload(...)) 这条链；
+        // 数据量大到超过 48KB 就会被压成 BKZ1:，手动「导出备份」才是纯 JSON。两条路都要能导入。
+        try {
+            const inner = (typeof plain === 'string') ? await decodeSyncPayload(plain) : plain;
+            if (!inner || !inner.data) { showToast('导入失败：文件里没有账本数据', 'error'); return null; }
+            return inner;
+        } catch (e) {
+            showToast('导入失败：' + ((e && e.message) || '内容无法解析'), 'error');
+            return null;
+        }
     }
     if (!parsed || !parsed.data) { showToast('导入失败：文件里没有账本数据', 'error'); return null; }
     return parsed;
@@ -2213,7 +2224,14 @@ async function applyImportedJSON(text, opts) {
     // 明文备份走同步快路：先就地解析，只有加密的才 await 解锁。
     // （改成"进函数先 await"会让不 await 调用方的老代码看到"什么都没发生"）
     let parsed = null;
-    try { parsed = JSON.parse(text); } catch (e) { showToast('导入失败：不是有效的 JSON', 'error'); return false; }
+    try { parsed = JSON.parse(text); } catch (e) {
+        // 明文文件本身也可能是「先压缩」的同步载荷（BKZ1:…，比如从 GitHub Gist 拷出来的同步文件），
+        // 先试着解压再解析，解不开才报"不是有效的 JSON"
+        if (typeof text === 'string' && text.indexOf(GIST_PREFIX) === 0) {
+            try { parsed = await decodeSyncPayload(text); } catch (_) { parsed = null; }
+        }
+        if (!parsed) { showToast('导入失败：不是有效的 JSON', 'error'); return false; }
+    }
     if (LedgerCrypto.looksEncrypted(parsed)) {
         parsed = await decodeBackupText(text);
         if (!parsed) return false;
