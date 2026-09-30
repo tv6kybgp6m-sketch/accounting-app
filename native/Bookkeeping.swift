@@ -68,7 +68,7 @@ let BRIDGE_JS = """
 """
 
 // MARK: - AppDelegate
-class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     var window: NSWindow!
     var webView: WKWebView!
     var server: MiniHTTPServer!
@@ -104,12 +104,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.39.10"
+        webView.customUserAgent = "BookkeepingMacApp/1.39.11"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"
         window.contentView = webView
         window.center()
+        window.delegate = self
         window.makeKeyAndOrderFront(nil)
 
         let startURL = URL(string: "http://127.0.0.1:\(port)/index.html")!
@@ -422,12 +423,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         try? data.write(to: dest, options: [.atomic])
     }
 
-    // 关掉最后一个窗口就直接退出 App：否则窗口关了进程还活着，
-    // 再点 Dock 图标时系统把那个已经关掉的窗口又抬出来，但里面的 WKWebView 内容进程
-    // 早就被挂起/回收了，表现成"再打开就卡死、只能退出重开才行"。
-    // 直接退出最干净：下次打开是全新启动，本地服务器固定 8731、网页重新加载，不会卡。
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    // 红色关闭按钮 = 隐藏窗口（后台留着），不直接退出；
+    // 点 Dock 图标经 applicationShouldHandleReopen 把同一份还活着的窗口抬出来，
+    // WKWebView 从未被真正关掉/回收，所以秒开、不卡。要彻底退出用「退出」(Cmd+Q)。
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        window.orderOut(nil)   // 只隐藏，窗口和 WKWebView 都还活着
+        return false          // 返回 false 表示"不真正关闭"
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if window == nil || !window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+        }
         return true
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
