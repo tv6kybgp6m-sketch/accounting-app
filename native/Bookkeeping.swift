@@ -104,7 +104,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.39.7"
+        webView.customUserAgent = "BookkeepingMacApp/1.39.8"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"
@@ -263,7 +263,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
         let base64 = opts["base64"] as? String ?? ""
         let panel = NSSavePanel()
         panel.nameFieldStringValue = name
-        panel.allowedContentTypes = [.json]
+        // 按文件后缀决定允许的类型：Excel 导出是 .xlsx（内容是 zip 二进制），
+        // 绝不能把它强制成 .json，否则手机会把 zip 字节当 JSON 解析 → "不是有效的 JSON"。
+        let ext = (name as NSString).pathExtension.lowercased()
+        if ext == "xlsx" {
+            panel.allowedContentTypes = [UTType(filenameExtension: "xlsx") ?? .data, UTType(filenameExtension: "json") ?? .data]
+        } else {
+            panel.allowedContentTypes = [UTType(filenameExtension: "json") ?? .data, UTType(filenameExtension: "xlsx") ?? .data]
+        }
         if panel.runModal() == .OK, let url = panel.url, let data = Data(base64Encoded: base64) {
             try? data.write(to: url)
             respond(id: id, ok: true, result: url.path)
@@ -421,6 +428,35 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDe
     }
 }
 
+// MARK: - 主菜单
+// 必须有一个「编辑」菜单并带 拷贝 / 粘贴 / 剪切 / 全选 / 撤销 / 重做 这些标准动作，
+// 否则 WKWebView 里的文本框收不到 Cmd+C / Cmd+V（键盘快捷键是走菜单 responder 链的），
+// 表现成"整个 App 都不能复制粘贴"。WKWebView 自身会在有选区 / 焦点时响应这些动作。
+func buildMainMenu() {
+    let main = NSMenu()
+    let appMenu = NSMenu()
+    let appItem = NSMenuItem(title: "记账本", action: nil, keyEquivalent: "")
+    appItem.submenu = appMenu
+    main.addItem(appItem)
+    appMenu.addItem(withTitle: "退出记账本", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+    let editMenu = NSMenu(title: "编辑")
+    let editItem = NSMenuItem(title: "编辑", action: nil, keyEquivalent: "")
+    editItem.submenu = editMenu
+    main.addItem(editItem)
+    editMenu.addItem(withTitle: "撤销", action: Selector("undo:"), keyEquivalent: "z")
+    editMenu.addItem(withTitle: "重做", action: Selector("redo:"), keyEquivalent: "Z")
+    editMenu.addItem(.separator())
+    editMenu.addItem(withTitle: "剪切", action: Selector("cut:"), keyEquivalent: "x")
+    editMenu.addItem(withTitle: "拷贝", action: Selector("copy:"), keyEquivalent: "c")
+    editMenu.addItem(withTitle: "粘贴", action: Selector("paste:"), keyEquivalent: "v")
+    editMenu.addItem(withTitle: "全选", action: Selector("selectAll:"), keyEquivalent: "a")
+    editMenu.addItem(.separator())
+    editMenu.addItem(withTitle: "删除", action: Selector("delete:"), keyEquivalent: "\u{08}")
+
+    NSApp.mainMenu = main
+}
+
 // MARK: - 入口
 @main
 struct BookkeepingApp {
@@ -429,6 +465,7 @@ struct BookkeepingApp {
         app.setActivationPolicy(.regular)
         let delegate = AppDelegate()
         app.delegate = delegate
+        buildMainMenu()   // 必须有「编辑」菜单，Cmd+C / Cmd+V 才能进 WKWebView
         app.activate(ignoringOtherApps: true)
         app.run()
     }

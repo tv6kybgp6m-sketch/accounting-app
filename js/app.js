@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.7';
+const APP_VERSION = '1.39.8';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7448,10 +7448,10 @@ function renderMonthlyEntry() {
         return `        <div class="mw-tr" data-mw-account="${a.id}" style="--rowc:${_esc(a.color)}">
             <div class="mw-rowname">
                 <span class="mw-acct-dot" style="background:${_esc(a.color)}"></span>
-                <span class="mw-name${like ? ' mw-name-warn' : ''}" data-rename="${a.id}"
-                    title="点一下改名；长按 0.3 秒后再上下拖动可调整这一行（账户）的顺序">${_esc(a.name)}</span>
+                <span class="mw-name${like ? ' mw-name-warn' : ''}" data-rename="${a.id}" draggable="true"
+                    title="按住拖动可调整这一行（账户）的顺序；点 ⋯ 可改名 / 删除">${_esc(a.name)}</span>
                 ${like ? `<span class="mw-badge" data-rename="${a.id}" title="这个名字是资产类别，建议改成放钱的地方">类别名</span>` : ''}
-                <button class="mw-more" data-row-more="${a.id}" title="更多操作（修改 / 删除）"><i class="fa-solid fa-ellipsis"></i></button>
+                <button class="mw-more" data-row-more="${a.id}" draggable="false" title="更多操作（修改 / 删除）"><i class="fa-solid fa-ellipsis"></i></button>
             </div>
             ${assetCats.map(c => `<div class="mw-c">${balInput(a, c.key)}</div>`).join('')}
             ${liabCats.map(c => `<div class="mw-c">${balInput(a, c.key, ' mw-liab')}</div>`).join('')}
@@ -7516,10 +7516,10 @@ function renderMonthlyEntry() {
 
 // ---- 月度账单「列」管理：改名 / 删除 / 新增 / 拖拽排序 ----
 function colHeadHTML(c, extraCls) {
-    return `<div class="mw-h mw-col mw-manc${extraCls || ''}" data-col-key="${_esc(c.key)}" data-col-kind="${_esc(c.kind)}">
+    return `<div class="mw-h mw-col mw-manc${extraCls || ''}" data-col-key="${_esc(c.key)}" data-col-kind="${_esc(c.kind)}" draggable="true">
         <span class="mw-col-dot" style="background:${_esc(c.color)}"></span>
-        <span class="mw-col-label" data-col-label="${_esc(c.key)}" title="点一下改名；长按 0.3 秒后再拖动可调整列顺序">${_esc(c.label)}</span>
-        <button class="mw-col-more" data-col-more="${_esc(c.key)}" title="更多操作（改名 / 删除）"><i class="fa-solid fa-ellipsis"></i></button>
+        <span class="mw-col-label" data-col-label="${_esc(c.key)}" title="按住拖动可调整列顺序；点 ⋯ 可改名 / 删除">${_esc(c.label)}</span>
+        <button class="mw-col-more" data-col-more="${_esc(c.key)}" draggable="false" title="更多操作（改名 / 删除）"><i class="fa-solid fa-ellipsis"></i></button>
     </div>`;
 }
 
@@ -7564,8 +7564,8 @@ function syncMwSticky(list) {
 
 function bindMonthlyColOps(list) {
     list.querySelectorAll('.mw-h.mw-manc').forEach(h => {
-        armLongPressDrag(h);
-        h.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', h.dataset.colKey); h.classList.add('dragging'); });
+        // 列头默认即可拖（draggable 已在 HTML 里写死），不再需要长按 0.3 秒
+        h.addEventListener('dragstart', e => { if (list._suppressDrag) { e.preventDefault(); return; } e.dataTransfer.setData('text/plain', h.dataset.colKey); h.classList.add('dragging'); });
         h.addEventListener('dragend', () => h.classList.remove('dragging'));
         h.addEventListener('dragover', e => { e.preventDefault(); h.classList.add('drag-over'); });
         h.addEventListener('dragleave', () => h.classList.remove('drag-over'));
@@ -7578,6 +7578,8 @@ function bindMonthlyColOps(list) {
     });
     // 「⋯ 更多」浮层菜单：改名 / 删除（或隐藏收益列）
     list.querySelectorAll('[data-col-more]').forEach(btn => {
+        // 在 ⋯ 上按下时不要触发整列拖拽（否则点菜单会变成拖列），稍后自动解除
+        btn.addEventListener('mousedown', e => { list._suppressDrag = true; setTimeout(() => { list._suppressDrag = false; }, 400); });
         btn.addEventListener('click', e => {
             e.stopPropagation();
             const key = btn.dataset.colMore;
@@ -7769,10 +7771,10 @@ function bindMonthlyRowOps(list) {
         });
     });
 
-    // 整行拖拽重排：账户名是拖动手柄（draggable），落到另一行即交换顺序
+    // 整行拖拽重排：账户名是拖动手柄（draggable 已在 HTML 里写死，立即可拖）
     list.querySelectorAll('.mw-name[data-rename]').forEach(n => {
-        armLongPressDrag(n);
         n.addEventListener('dragstart', e => {
+            if (list._suppressDrag) { e.preventDefault(); return; }
             const tr = n.closest('.mw-tr');
             if (tr) tr.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'move';
@@ -7797,6 +7799,7 @@ function bindMonthlyRowOps(list) {
 
     // 「⋯ 更多」浮层菜单：修改 / 删除（上移 / 下移已移到「长按后拖拽行名」完成，避免菜单太深）
     list.querySelectorAll('[data-row-more]').forEach(btn => {
+        btn.addEventListener('mousedown', e => { list._suppressDrag = true; setTimeout(() => { list._suppressDrag = false; }, 400); });
         btn.addEventListener('click', e => {
             e.stopPropagation();
             const id = btn.dataset.rowMore;
@@ -8341,15 +8344,24 @@ function accountsSortedByKind(kind) {
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
 }
 
-// 上移 / 下移：与相邻的同类型账户交换 order，并更新时间戳让它同步出去
+// 上移 / 下移：账户管理里所有账户是扁平混排的（不再按资产 / 负债分堆），
+// 所以要在「全局顺序」里和相邻的那一行交换，而不是只在同类型里换 —— 否则
+// 中间夹着别类型的账户时，一次点击会在视觉上"连跳好几行"。
+// 交换后再把 order 重排成连续序号，顺便消除两台设备合并后出现的重复 order
+// （并列 order 会让排序退化到按名字，交换两个同号等于没换 → "有时调不动"）。
 function moveAccount(id, dir) {
     ensureAccountOrder();
-    const siblings = accountsSortedByKind(accountById(id)?.kind);
-    const idx = siblings.findIndex(a => a.id === id);
-    const other = siblings[idx + dir];
+    const ordered = state.accounts.slice().sort((a, b) =>
+        (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
+    const idx = ordered.findIndex(a => a.id === id);
+    const other = ordered[idx + dir];
     if (!other) return;
-    const a = accountById(id), b = other;
+    const a = ordered[idx], b = other;
     const tmp = a.order; a.order = b.order; b.order = tmp;
+    // 重排成连续序号，避免合并后重复 order 导致"调不动"
+    const reSorted = state.accounts.slice().sort((x, y) =>
+        (x.order ?? 0) - (y.order ?? 0) || String(x.name).localeCompare(String(y.name)));
+    reSorted.forEach((ac, i) => { ac.order = i + 1; });
     a.updatedAt = b.updatedAt = Date.now();
     saveState();
     renderAccountManageList();

@@ -4050,9 +4050,11 @@ table.bill-stats {
 .mw-rowname { display: flex; align-items: center; gap: 4px; min-height: 27px; padding: 0 4px 0 2px; position: relative; }
 .mw-name {
     font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    cursor: text; border-bottom: 1px dashed transparent; padding-bottom: 1px;
+    cursor: grab; border-bottom: 1px dashed transparent; padding-bottom: 1px;
 }
 .mw-name:hover { border-bottom-color: var(--border-strong); }
+.mw-name:active { cursor: grabbing; }
+.mw-name.dragging { cursor: grabbing; opacity: .4; }
 /* 行名撞了资产类别名（现金/货币基金…）时标一下，提醒改成「放钱的地方」 */
 .mw-name-warn { color: var(--warning, #ff9500); }
 .mw-badge {
