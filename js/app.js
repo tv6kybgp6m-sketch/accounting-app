@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.13';
+const APP_VERSION = '1.39.14';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -8192,21 +8192,42 @@ function renderAccountManageList() {
         <div class="fam-chips">${memberChips}<button class="fam-add" data-add="1"><i class="fa-solid fa-plus"></i> 添加</button></div>
         <div class="account-hint">账户 = 放钱的地方（中国银行 / 支付宝 / 微信 / 摩根…）。一个账户里可以同时有资产和负债，
             记账时在「负债」那一列填就行，不用再给账户打资产还是负债的标签。</div>
-        <div class="account-section-title">账户（${rows.length}）<span class="acct-order-hint">↑↓ 可调顺序</span></div>
-        ${rows.map((a, i) => { const recN = accountRecordCounts(a.id); const n = recN.bal + recN.ret; return `
-                <div class="account-row">
+        <div class="account-section-title">账户（${rows.length}）<span class="acct-order-hint">按住名字拖动可调顺序</span></div>
+        ${rows.map((a) => { const recN = accountRecordCounts(a.id); const n = recN.bal + recN.ret; return `
+                <div class="account-row" data-account-row="${a.id}">
                     <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
-                    <div class="ar-name" onclick="renameAccount('${a.id}')">${_esc(a.name)}<span class="be-kind">${_esc(a.group || '')}</span></div>
+                    <div class="ar-name" draggable="true" onclick="renameAccount('${a.id}')" title="按住拖动可调整账户顺序；点一下改名">${_esc(a.name)}<span class="be-kind">${_esc(a.group || '')}</span></div>
                     <select class="acct-group-select" data-group-account="${a.id}" title="账户分类">
                         ${groupsForKind(a.kind).map(g => `<option value="${g}" ${a.group === g ? 'selected' : ''}>${g}</option>`).join('')}
                     </select>
-                    <span class="acct-move-group">
-                        <button class="acct-move" data-move-account="${a.id}" data-dir="-1" ${i === 0 ? 'disabled' : ''} title="上移"><i class="fa-solid fa-arrow-up"></i></button>
-                        <button class="acct-move" data-move-account="${a.id}" data-dir="1" ${i === rows.length - 1 ? 'disabled' : ''} title="下移"><i class="fa-solid fa-arrow-down"></i></button>
-                    </span>
                     <button class="bh-edit" onclick="openAccountEdit('${a.id}')" title="编辑账户"><i class="fa-solid fa-pen"></i></button>
                     <button class="bh-delete${n ? ' bh-blocked' : ''}" onclick="deleteAccountFromList('${a.id}')" title="${n ? '还有 ' + n + ' 条记录，得先清掉才能删' : '删除'}"><i class="fa-solid ${n ? 'fa-lock' : 'fa-trash'}"></i></button>
                 </div>`; }).join('') || '<div class="breakdown-empty">暂无账户</div>'}`;
+
+    // 账户行拖拽排序：和「记月度账单」里的行拖拽同一套观感 —— 整行卡片跟手 + 落点高亮线。
+    // 用账户名当拖动手柄；拖完调 reorderMonthlyAccount（它会重排 order 并重画两处列表）。
+    box.querySelectorAll('.account-row').forEach(row => {
+        const handle = row.querySelector('.ar-name');
+        if (handle) {
+            handle.addEventListener('dragstart', e => {
+                row.classList.add('dragging');
+                try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', row.dataset.accountRow || ''); } catch (_) {}
+                mwSetDragImage(e, row, handle);
+            });
+            handle.addEventListener('dragend', () => {
+                row.classList.remove('dragging');
+                box.querySelectorAll('.account-row.drag-over').forEach(x => x.classList.remove('drag-over'));
+            });
+        }
+        row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('drag-over'); });
+        row.addEventListener('dragleave', e => { if (e.target === row) row.classList.remove('drag-over'); });
+        row.addEventListener('drop', e => {
+            e.preventDefault(); row.classList.remove('drag-over');
+            const from = e.dataTransfer.getData('text/plain');
+            const to = row.dataset.accountRow;
+            if (from && to && from !== to) reorderMonthlyAccount(from, to);
+        });
+    });
 
     if (!box.$acctWired) {
         box.$acctWired = true;
