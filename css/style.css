@@ -4085,6 +4085,17 @@ table.bill-stats {
 .mw-manc:active { cursor: grabbing; }
 .mw-manc.dragging { opacity: .4; }
 .mw-manc.drag-over { box-shadow: inset 0 2px 0 var(--accent); }
+/* 拖拽时跟随光标的影像（被拖行/列的克隆体）：做成一张清晰小卡片，
+   取代 macOS / WKWebView 默认退化出来的「红圈0」图标 */
+.mw-drag-ghost {
+    background: var(--bg-modal, #fff);
+    border: 1px solid var(--accent, #0a84ff);
+    border-radius: 8px;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .20);
+    opacity: .96;
+    pointer-events: none;
+    z-index: 9999;
+}
 .mw-col-label {
     font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     cursor: text; border-bottom: 1px dashed transparent; padding-bottom: 1px;

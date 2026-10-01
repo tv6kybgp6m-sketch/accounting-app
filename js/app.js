@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.12';
+const APP_VERSION = '1.39.13';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7580,10 +7580,31 @@ function syncMwSticky(list) {
     list.style.setProperty('--mw-sum-h', th + 'px');
 }
 
+// 用被拖元素的克隆做拖拽影像：避免 macOS / WKWebView 在无法为内联的账户名小元素
+// 生成影像时，退化为一个带「0」的红色默认圆圈图标（用户看到的"红圈0"）。
+// 改成本身整行 / 整列（含账户名 / 列名）作为拖拽影像，清晰跟着光标走，
+// 体验接近任务列表那种拖拽。
+function mwSetDragImage(e, srcEl, grabEl) {
+    try {
+        const ghost = srcEl.cloneNode(true);
+        ghost.classList.add('mw-drag-ghost');
+        ghost.classList.remove('dragging', 'drag-over');
+        ghost.style.position = 'fixed';
+        ghost.style.top = '-9999px';
+        ghost.style.left = '0';
+        ghost.style.margin = '0';
+        ghost.style.width = srcEl.offsetWidth + 'px';
+        document.body.appendChild(ghost);
+        const r = (grabEl || srcEl).getBoundingClientRect();
+        e.dataTransfer.setDragImage(ghost, e.clientX - r.left, e.clientY - r.top);
+        setTimeout(() => ghost.remove(), 0);
+    } catch (_) {}
+}
+
 function bindMonthlyColOps(list) {
     list.querySelectorAll('.mw-h.mw-manc').forEach(h => {
         // 列头默认即可拖（draggable 已在 HTML 里写死），不再需要长按 0.3 秒
-        h.addEventListener('dragstart', e => { if (list._suppressDrag) { e.preventDefault(); return; } e.dataTransfer.setData('text/plain', h.dataset.colKey); h.classList.add('dragging'); });
+        h.addEventListener('dragstart', e => { if (list._suppressDrag) { e.preventDefault(); return; } e.dataTransfer.setData('text/plain', h.dataset.colKey); h.classList.add('dragging'); mwSetDragImage(e, h, h); });
         h.addEventListener('dragend', () => h.classList.remove('dragging'));
         h.addEventListener('dragover', e => { e.preventDefault(); h.classList.add('drag-over'); });
         h.addEventListener('dragleave', () => h.classList.remove('drag-over'));
@@ -7797,6 +7818,7 @@ function bindMonthlyRowOps(list) {
             if (tr) tr.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'move';
             try { e.dataTransfer.setData('text/plain', n.dataset.rename); } catch (_) {}
+            if (tr) mwSetDragImage(e, tr, n);
         });
         n.addEventListener('dragend', () => {
             const tr = n.closest('.mw-tr');
