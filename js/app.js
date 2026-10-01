@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.17';
+const APP_VERSION = '1.39.18';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -965,6 +965,83 @@ function normalizeAddedAtMap(raw) {
     return out;
 }
 
+// ============================================================
+//  「名字数组」修复：支付方式 / 家庭成员 / 保险成员
+// ============================================================
+// 这三个集合是**字符串数组**（名字就是身份，没有 id）。历史上有一条路会把它们
+// 当普通记录克隆：`Object.assign({}, "微信")` 得到 `{0:"微",1:"信"}`，再加个
+// updatedAt 塞回数组 —— 界面上就冒出一堆名字叫 `[object Object]` 的支付方式。
+// （根因在 recoverMissingFromBackup，已单独修；这里负责把已经坏掉的数据捞回来。）
+//
+// 好在字符一个都没丢：对象里就是 `{0:"微",1:"信"}`，按数字键顺序拼起来正好还原。
+// 这个函数是幂等的，多跑几次没有副作用。
+function repairNameList(arr) {
+    const out = [];
+    const seen = new Set();
+    (Array.isArray(arr) ? arr : []).forEach(x => {
+        let name;
+        if (typeof x === 'string') name = x;
+        else if (x && typeof x === 'object') {
+            const idx = Object.keys(x).filter(k => /^\d+$/.test(k)).sort((a, b) => a - b);
+            if (idx.length) name = idx.map(k => x[k]).join('');      // {0:"微",1:"信"} -> "微信"
+            else if (typeof x.name === 'string') name = x.name;      // 万一将来存成 {name:...}
+            else name = '';
+        } else if (x === null || x === undefined) return;
+        else name = String(x);
+        name = String(name).trim();
+        if (!name || name === '[object Object]' || seen.has(name)) return;
+        seen.add(name);
+        out.push(name);
+    });
+    return out;
+}
+
+// 返回 true 表示真的修了东西（调用方据此决定要不要落盘 / 提示用户）
+function repairNameLists() {
+    let changed = false;
+    [['paymentMethods', 'pmAddedAt'],
+     ['balanceMembers', 'memberAddedAt'],
+     ['insuranceMembers', 'insuranceMemberAddedAt']].forEach(([key, atKey]) => {
+        const before = Array.isArray(state[key]) ? state[key] : [];
+        const fixed = repairNameList(before);
+        if (fixed.length !== before.length || fixed.some((v, i) => v !== before[i])) {
+            state[key] = fixed;
+            changed = true;
+        }
+        // 顺带把「新增时间」表也收干净：键必须是真名字，且别指向不存在的项
+        if (state[atKey] && typeof state[atKey] === 'object') {
+            const cleaned = {};
+            Object.keys(state[atKey]).forEach(k => {
+                if (k && k !== '[object Object]' && state[key].includes(k)) cleaned[k] = state[atKey][k];
+            });
+            if (Object.keys(cleaned).length !== Object.keys(state[atKey]).length) {
+                state[atKey] = cleaned;
+                changed = true;
+            }
+        }
+    });
+    // 绝不让列表空掉 —— 空数组会让下拉框没得选
+    if (!state.paymentMethods.length) { state.paymentMethods = [...DEFAULT_PAYMENT_METHODS]; changed = true; }
+    if (!state.balanceMembers.length) { state.balanceMembers = ['本人']; changed = true; }
+    if (!state.insuranceMembers.length) { state.insuranceMembers = [...DEFAULT_INSURANCE_MEMBERS]; changed = true; }
+    // 垃圾墓碑：名字数组的墓碑 id 必须是真名字。
+    // `addTombstone('paymentMethods', obj)` 会写出 `{id:"[object Object]"}` 这种。
+    [['paymentMethods', 'pmAddedAt'], ['members', 'memberAddedAt'], ['insuranceMembers', 'insuranceMemberAddedAt']]
+        .forEach(([k, atKey]) => {
+            const list = state.deleted[k];
+            if (!Array.isArray(list)) return;
+            const kept = list.filter(t => t && typeof t.id === 'string' && t.id && t.id !== '[object Object]');
+            if (kept.length !== list.length) { state.deleted[k] = kept; changed = true; }
+        });
+    // 默认支付方式必须是个存在的名字
+    const dpm = state.settings && state.settings.defaultPaymentMethod;
+    if (typeof dpm !== 'string' || !state.paymentMethods.includes(dpm)) {
+        state.settings.defaultPaymentMethod = state.paymentMethods[0];
+        changed = true;
+    }
+    return changed;
+}
+
 function addTombstone(kind, id) {
     const list = state.deleted[kind];
     const existing = list.find(x => x.id === id);
@@ -1380,6 +1457,9 @@ function mergeRemoteData(remoteData) {
     pruneTombstones();
     applyTombstones();
     ensureAccountOrder();   // 云端旧副本没有 order 字段，合并后要补齐
+    // 合并可能把别处的异常数据带进来（名字数组里混进对象）—— 统一收一遍再落盘。
+    // 注意要在 syncFingerprint() 之前修，否则会把"坏数据"当成一次内容变更推回去。
+    repairNameLists();
 
     // Settings: prefer remote if newer
     if (remoteData.lastModified > (iCloudLastSyncTime || 0)) {
@@ -2188,6 +2268,14 @@ function clearTombstonesFor(data) {
 
 // 「补回缺失」：只把"备份里有、本地没有"的记录捞回来，本地已有的一条不动、也不删任何东西。
 // 复活时把 updatedAt 刷成现在 —— 不刷的话，别的设备（和本机残留的标记）会把它再次吃掉。
+//
+// ⚠️ 这里的「补回」必须区分两种集合，判断依据是**备份里那一项本身是不是字符串**：
+//   · 名字数组（paymentMethods / balanceMembers / insuranceMembers）：名字即身份，
+//     直接 push 字符串，并把「新增时间」补上；
+//   · 普通记录数组：克隆一份 + 刷 updatedAt。
+//   以前只特判了 balanceMembers / insuranceMembers，paymentMethods 掉进了克隆分支 ——
+//   `Object.assign({}, "微信")` 变成 `{0:"微",1:"信"}`，界面上就出现一堆
+//   叫 `[object Object]` 的支付方式（v1.39.17 修）。以后新增字符串集合也不用再改这里。
 function recoverMissingFromBackup(data) {
     const report = { added: 0, byKind: {} };
     Object.keys(SYNC_BUCKETS).forEach(coll => {
@@ -2198,15 +2286,19 @@ function recoverMissingFromBackup(data) {
         if (!Array.isArray(target)) return;
         const have = new Set(target.map(x => (typeof x === 'string' ? x : (x && x.id))));
         list.forEach(row => {
-            const key = typeof row === 'string' ? row : (row && row.id);
+            const isName = typeof row === 'string';
+            const key = isName ? row : (row && row.id);
             if (!key || have.has(key)) return;
             if (Array.isArray(state.deleted[bucketName])) {
                 state.deleted[bucketName] = state.deleted[bucketName].filter(t => t.id !== key);
             }
-            if (coll === 'balanceMembers' || coll === 'insuranceMembers') {
+            if (isName) {
+                // 名字即身份：只 push 名字，并且给「新增时间」打上现在的时间戳
                 target.push(key);
-                const at = coll === 'balanceMembers' ? state.memberAddedAt : state.insuranceMemberAddedAt;
-                at[key] = Date.now();
+                const at = coll === 'balanceMembers' ? state.memberAddedAt
+                    : coll === 'insuranceMembers' ? state.insuranceMemberAddedAt
+                        : coll === 'paymentMethods' ? state.pmAddedAt : null;
+                if (at) at[key] = Date.now();
             } else {
                 const clone = Object.assign({}, row);
                 clone.updatedAt = Date.now();
@@ -2243,12 +2335,14 @@ async function applyImportedJSON(text, opts) {
     const replace = mode === 'replace';
     if (mode === 'recover') {
         const rep = recoverMissingFromBackup(parsed.data);
+        const fixed = repairNameLists();   // 补回过程中若有异常条目，顺手收干净
         saveState();
         applyTheme(state.settings.theme);
         renderView(state.currentView);
         updateSidebarSummary();
         updateICloudSyncUI();
-        showToast(rep.added ? `已补回 ${rep.added} 条记录，本地原有的没动` : '备份里没有可补回的记录（一条都没少）',
+        const tail = fixed ? '（已同时修好列表中异常的条目）' : '';
+        showToast(rep.added ? `已补回 ${rep.added} 条记录，本地原有的没动${tail}` : `备份里没有可补回的记录（一条都没少）${tail}`,
             rep.added ? 'success' : 'info');
         return true;
     }
@@ -2850,6 +2944,16 @@ function loadState() {
         } catch (e) {
             console.error('Failed to load state:', e);
         }
+    }
+    // 最后统一收一遍「名字数组」：把历史上被误存成对象的支付方式 / 成员还原成名字，
+    // 并清掉 `[object Object]` 这类垃圾墓碑。修过就立刻落盘，让它跟着同步走。
+    try {
+        if (repairNameLists()) {
+            saveState();
+            console.warn('已修复「名字数组」中的异常条目（支付方式 / 成员）');
+        }
+    } catch (e) {
+        console.error('repairNameLists failed:', e);
     }
 }
 
