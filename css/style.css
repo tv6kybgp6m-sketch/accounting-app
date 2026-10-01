@@ -1263,6 +1263,11 @@ body {
 .pm-chip:hover {
     border-color: var(--accent);
 }
+/* 支付方式卡拖拽排序（与账户 / 分类同一套观感） */
+.pm-chip { cursor: grab; }
+.pm-chip:active { cursor: grabbing; }
+.pm-chip.dragging { opacity: .4; }
+.pm-chip.drag-over { box-shadow: inset 3px 0 0 var(--accent); }
 .pm-chip-default {
     border-color: var(--accent);
     background: rgba(88, 101, 242, 0.08);
@@ -1274,7 +1279,7 @@ body {
     padding: 1px 6px;
     border-radius: 8px;
 }
-.pm-chip-delete {
+.pm-chip-delete, .pm-chip-edit {
     width: 18px;
     height: 18px;
     border-radius: 50%;
@@ -1291,6 +1296,10 @@ body {
 .pm-chip-delete:hover {
     background: var(--expense-light);
     color: #ff3b30;
+}
+.pm-chip-edit:hover {
+    background: var(--accent-light);
+    color: var(--accent);
 }
 .payment-add-row {
     display: flex;
@@ -4091,9 +4100,10 @@ table.bill-stats {
 }
 .mw-tr:hover .mw-more, .mw-manc:hover .mw-col-more { opacity: .65; }
 .mw-more:hover, .mw-col-more:hover { opacity: 1 !important; color: var(--accent); background: rgba(10, 132, 255, .12); }
-/* 行拖拽重排的视觉反馈 */
-.mw-tr.dragging { opacity: .4; }
-.mw-tr.drag-over { box-shadow: inset 3px 0 0 var(--accent); }
+/* 行拖拽重排的视觉反馈：.mw-tr 是 display:contents（没有盒子），
+   所以变淡 / 高亮要打在它的格子上，打在 .mw-tr 上根本画不出来（这就是之前"看着没改"的原因） */
+.mw-tr.dragging .mw-rowname, .mw-tr.dragging .mw-c { opacity: .4; }
+.mw-tr.drag-over .mw-rowname { box-shadow: inset 3px 0 0 var(--accent); }
 /* 长按 0.3 秒后才可拖：长按期间给个视觉反馈，提示「现在能拖了」 */
 .mw-armed { cursor: grabbing; user-select: none; }
 .mw-name.mw-armed { background: color-mix(in srgb, var(--accent) 12%, var(--bg-modal)); border-radius: 4px; }

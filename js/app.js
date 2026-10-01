@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.15';
+const APP_VERSION = '1.39.16';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -3558,16 +3558,101 @@ function renderPaymentMethodsManage() {
         const count = state.transactions.filter(t => (t.paymentMethod || '现金') === p).length;
         const isDefault = p === (state.settings.defaultPaymentMethod || '微信支付');
         return `
-            <div class="pm-chip ${isDefault ? 'pm-chip-default' : ''}" onclick="setDefaultPaymentMethod('${p}')">
+            <div class="pm-chip ${isDefault ? 'pm-chip-default' : ''}" draggable="true" data-pm="${_esc(p)}"
+                 onclick="setDefaultPaymentMethod('${p}')" title="按住拖动可调整顺序；点一下设为默认">
                 <i class="${paymentIconFor(p)}"></i>
                 <span>${p}</span>
                 ${isDefault ? '<span class="pm-default-tag">默认</span>' : ''}
-                <button class="pm-chip-delete" onclick="event.stopPropagation(); deletePaymentMethod('${p}')" title="删除">
+                <button class="pm-chip-edit" draggable="false" onclick="event.stopPropagation(); renamePaymentMethod('${p}')" title="改名">
+                    <i class="fa-solid fa-pen"></i>
+                </button>
+                <button class="pm-chip-delete" draggable="false" onclick="event.stopPropagation(); deletePaymentMethod('${p}')" title="删除">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
         `;
     }).join('');
+    bindPaymentMethodDrag(container);
+}
+
+// 支付方式卡的拖拽排序（与账户 / 分类同一套观感）。事件委托绑在容器上，只绑一次。
+function bindPaymentMethodDrag(container) {
+    if (container.$dragWired) return;
+    container.$dragWired = true;
+    const chipFromEvent = (e) => {
+        let el = e.target;
+        while (el && el !== document) {
+            if (el.classList && el.classList.contains('pm-chip')) return el;
+            el = el.parentElement;
+        }
+        return null;
+    };
+    container.addEventListener('dragstart', e => {
+        const chip = chipFromEvent(e);
+        if (!chip) return;
+        chip.classList.add('dragging');
+        try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', chip.dataset.pm || ''); } catch (_) {}
+        mwSetDragImage(e, chip, chip);
+    });
+    container.addEventListener('dragend', e => {
+        const chip = chipFromEvent(e);
+        if (chip) chip.classList.remove('dragging');
+        container.querySelectorAll('.pm-chip.drag-over').forEach(x => x.classList.remove('drag-over'));
+    });
+    container.addEventListener('dragover', e => {
+        e.preventDefault();
+        const chip = chipFromEvent(e);
+        if (chip) chip.classList.add('drag-over');
+    });
+    container.addEventListener('dragleave', e => {
+        const chip = chipFromEvent(e);
+        if (chip) chip.classList.remove('drag-over');
+    });
+    container.addEventListener('drop', e => {
+        e.preventDefault();
+        const chip = chipFromEvent(e);
+        if (!chip) return;
+        chip.classList.remove('drag-over');
+        const from = e.dataTransfer.getData('text/plain');
+        const to = chip.dataset.pm;
+        if (from && to && from !== to) reorderPaymentMethod(from, to);
+    });
+}
+
+function reorderPaymentMethod(from, to) {
+    if (!from || !to || from === to) return;
+    const arr = state.paymentMethods.slice();
+    const fi = arr.indexOf(from);
+    if (fi < 0) return;
+    arr.splice(fi, 1);
+    const ti = arr.indexOf(to);
+    if (ti < 0) arr.push(from); else arr.splice(ti, 0, from);
+    state.paymentMethods = arr;
+    saveState();
+    renderPaymentMethodsManage();
+    showToast('支付方式顺序已更新', 'success');
+}
+
+// 支付方式以「名字」为身份，改名要连带改：交易引用、默认项、新增时间键（否则同步会打架），
+// 并给旧名打墓碑，避免别的设备把旧名又合并回来。
+function renamePaymentMethod(old) {
+    const input = prompt('修改支付方式名称', old);
+    if (input === null) return;
+    const n = input.trim();
+    if (!n || n === old) return;
+    if (state.paymentMethods.includes(n)) { showToast('已存在同名支付方式', 'error'); return; }
+    const idx = state.paymentMethods.indexOf(old);
+    if (idx < 0) return;
+    state.paymentMethods[idx] = n;
+    state.transactions.forEach(t => { if ((t.paymentMethod || '现金') === old) { t.paymentMethod = n; t.updatedAt = Date.now(); } });
+    if (state.pmAddedAt[old] !== undefined) { state.pmAddedAt[n] = state.pmAddedAt[old]; delete state.pmAddedAt[old]; }
+    else state.pmAddedAt[n] = Date.now();
+    if ((state.settings.defaultPaymentMethod || '微信支付') === old) state.settings.defaultPaymentMethod = n;
+    addTombstone('paymentMethods', old);
+    saveState();
+    renderPaymentMethodsManage();
+    try { renderPaymentOptions(); } catch (_) {}
+    showToast(`已改名为「${n}」`, 'success');
 }
 
 function setDefaultPaymentMethod(name) {
@@ -7654,6 +7739,33 @@ function mwSetDragImage(e, srcEl, grabEl) {
     } catch (_) {}
 }
 
+// 月度账单的行是 .mw-tr{display:contents}，**没有自己的盒子** —— 直接克隆它得到的是空影像，
+// 给它加 .dragging/.drag-over 也画不出来。所以这里把这一行的每个格子克隆进一个「同列宽的 grid」
+// 里当拖拽影像，拖动时才看得到整行跟手。
+function mwRowDragImage(e, tr, grid, grabEl) {
+    try {
+        const gridRect = grid.getBoundingClientRect();
+        const grabRect = (grabEl || tr).getBoundingClientRect();
+        const ghost = document.createElement('div');
+        ghost.className = 'mw-drag-ghost mw-drag-ghost-row';
+        ghost.style.position = 'fixed';
+        ghost.style.top = '-9999px';
+        ghost.style.left = '0';
+        ghost.style.margin = '0';
+        ghost.style.width = gridRect.width + 'px';
+        ghost.style.display = 'grid';
+        ghost.style.gridTemplateColumns = getComputedStyle(grid).gridTemplateColumns;
+        Array.from(tr.children).forEach(c => {
+            const clone = c.cloneNode(true);
+            clone.classList.remove('dragging', 'drag-over');
+            ghost.appendChild(clone);
+        });
+        document.body.appendChild(ghost);
+        e.dataTransfer.setDragImage(ghost, e.clientX - gridRect.left, e.clientY - grabRect.top);
+        setTimeout(() => ghost.remove(), 0);
+    } catch (_) {}
+}
+
 function bindMonthlyColOps(list) {
     list.querySelectorAll('.mw-h.mw-manc').forEach(h => {
         // 列头默认即可拖（draggable 已在 HTML 里写死），不再需要长按 0.3 秒
@@ -7872,7 +7984,8 @@ function bindMonthlyRowOps(list) {
             if (tr) tr.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'move';
             try { e.dataTransfer.setData('text/plain', (tr && tr.dataset.mwAccount) || ''); } catch (_) {}
-            if (tr) mwSetDragImage(e, tr, n);
+            const grid = list.querySelector('.mw-grid');
+            if (tr && grid) mwRowDragImage(e, tr, grid, n);
         });
         n.addEventListener('dragend', () => {
             const tr = n.closest('.mw-tr');
