@@ -1354,6 +1354,11 @@ body {
     user-select: none;
     -webkit-touch-callout: none;
 }
+/* 分类卡拖拽排序（与月度账单/账户列表同一套观感） */
+.category-card { cursor: grab; }
+.category-card:active { cursor: grabbing; }
+.category-card.dragging { opacity: .4; }
+.category-card.drag-over { box-shadow: inset 0 3px 0 var(--accent); transform: none; }
 
 /* iOS-style action sheet (tap a category card) */
 .action-sheet-overlay {
@@ -3446,7 +3451,11 @@ table.bill-stats {
 .account-row.drag-over { box-shadow: inset 0 3px 0 var(--accent); border-radius: 6px; }
 
 /* ---- 保险成员：改名 / 删除 ---- */
-.ins-member-wrap { display: inline-flex; align-items: center; gap: 3px; }
+.ins-member-wrap { display: inline-flex; align-items: center; gap: 3px; cursor: grab; }
+.ins-member-wrap:active { cursor: grabbing; }
+.ins-member-wrap .ins-member { cursor: pointer; }
+.ins-member-wrap.dragging { opacity: .4; }
+.ins-member-wrap.drag-over { box-shadow: inset 3px 0 0 var(--accent); border-radius: 6px; }
 .ins-member-wrap .ins-member { border-radius: 12px 4px 4px 12px; padding-right: 6px; }
 .ins-member-wrap i[data-insact] {
     cursor: pointer; color: var(--text-tertiary); font-size: 10px; padding: 2px 1px;
@@ -4053,6 +4062,9 @@ table.bill-stats {
     -moz-appearance: textfield; appearance: textfield;
 }
 .mw-rowname { display: flex; align-items: center; gap: 4px; min-height: 27px; padding: 0 4px 0 2px; position: relative; }
+/* 账户行整条「账户」单元格都是拖动手柄（合计/占比行不给抓手） */
+.mw-tr[data-mw-account] .mw-rowname { cursor: grab; }
+.mw-tr[data-mw-account] .mw-rowname:active { cursor: grabbing; }
 .mw-name {
     font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     cursor: grab; border-bottom: 1px dashed transparent; padding-bottom: 1px;

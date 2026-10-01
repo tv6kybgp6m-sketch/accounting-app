@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.14';
+const APP_VERSION = '1.39.15';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -4696,7 +4696,7 @@ function renderCategories() {
     const catCardHTML = (c) => {
         const count = state.transactions.filter(t => t.categoryId === c.id).length;
         return `
-            <div class="category-card" data-id="${c.id}" data-type="${c.type}">
+            <div class="category-card" data-id="${c.id}" data-type="${c.type}" draggable="true" title="按住拖动可调整顺序；点一下可改 / 删">
                 <div class="category-card-icon" style="background:${c.color}22;color:${c.color}">
                     <i class="fa-solid ${c.icon}"></i>
                 </div>
@@ -4830,6 +4830,29 @@ function moveCategory(id, direction) {
     [state.categories[idx], state.categories[targetIdx]] = [state.categories[targetIdx], state.categories[idx]];
     saveState();
     renderCategories();
+}
+
+// 拖拽把分类 fromId 放到 toId 的位置（只在同一类型收入/支出内部重排）。
+// 与「记月度账单」「账户管理」用同一套拖拽观感。
+function reorderCategory(fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return;
+    const fromCat = state.categories.find(c => c.id === fromId);
+    const toCat = state.categories.find(c => c.id === toId);
+    if (!fromCat || !toCat || fromCat.type !== toCat.type) return;
+    const type = fromCat.type;
+    const ids = state.categories.filter(c => c.type === type).map(c => c.id);
+    const fromIdx = ids.indexOf(fromId);
+    const toIdx = ids.indexOf(toId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    ids.splice(fromIdx, 1);
+    ids.splice(toIdx, 0, fromId);
+    const byId = {};
+    state.categories.forEach(c => { byId[c.id] = c; });
+    let k = 0;
+    state.categories = state.categories.map(c => c.type === type ? byId[ids[k++]] : c);
+    saveState();
+    renderCategories();
+    showToast('分类顺序已更新', 'success');
 }
 
 function deleteCategory(id) {
@@ -5064,14 +5087,44 @@ function initCategoryInteractions() {
         const list = document.getElementById(listId);
         if (!list) return;
         list.addEventListener('click', onCatListClick);
+        // 触屏：保留长按拖拽（iOS 不支持 HTML5 drag，长按是手机端唯一能拖的路子）
         list.addEventListener('touchstart', onCatTouchStart, { passive: true });
         list.addEventListener('touchmove', onCatTouchMove, { passive: false });
         list.addEventListener('touchend', onCatTouchEnd);
         list.addEventListener('touchcancel', onCatTouchEnd);
-        list.addEventListener('mousedown', onCatMouseDown);
+        // 桌面：整卡立即可拖（不再长按 0.45 秒），和月度账单 / 账户列表同一套观感
+        // —— 卡片跟手 + 落点高亮线。
+        list.addEventListener('dragstart', e => {
+            const card = catCardFromEvent(e);
+            if (!card) return;
+            card.classList.add('dragging');
+            try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', card.dataset.id); } catch (_) {}
+            mwSetDragImage(e, card, card);
+        });
+        list.addEventListener('dragend', e => {
+            const card = catCardFromEvent(e);
+            if (card) card.classList.remove('dragging');
+            list.querySelectorAll('.category-card.drag-over').forEach(x => x.classList.remove('drag-over'));
+        });
+        list.addEventListener('dragover', e => {
+            e.preventDefault();
+            const card = catCardFromEvent(e);
+            if (card) card.classList.add('drag-over');
+        });
+        list.addEventListener('dragleave', e => {
+            const card = catCardFromEvent(e);
+            if (card) card.classList.remove('drag-over');
+        });
+        list.addEventListener('drop', e => {
+            e.preventDefault();
+            const card = catCardFromEvent(e);
+            if (!card) return;
+            card.classList.remove('drag-over');
+            const from = e.dataTransfer.getData('text/plain');
+            const to = card.dataset.id;
+            if (from && to && from !== to) reorderCategory(from, to);
+        });
     });
-    document.addEventListener('mousemove', onCatMouseMove);
-    document.addEventListener('mouseup', onCatMouseUp);
 }
 
 // ---- Settings ----
@@ -7464,10 +7517,10 @@ function renderMonthlyEntry() {
         // 两轴看起来就变成一样的了 —— 这里标出来，点一下就能改成「放钱的地方」
         const like = mwNameLooksLikeCat(a.name);
         return `        <div class="mw-tr" data-mw-account="${a.id}" style="--rowc:${_esc(a.color)}">
-            <div class="mw-rowname">
+            <div class="mw-rowname" draggable="true" title="按住拖动可调整这一行（账户）的顺序">
                 <span class="mw-acct-dot" style="background:${_esc(a.color)}"></span>
-                <span class="mw-name${like ? ' mw-name-warn' : ''}" data-rename="${a.id}" draggable="true"
-                    title="按住拖动可调整这一行（账户）的顺序；点 ⋯ 可改名 / 删除">${_esc(a.name)}</span>
+                <span class="mw-name${like ? ' mw-name-warn' : ''}" data-rename="${a.id}"
+                    title="点一下这里改名">${_esc(a.name)}</span>
                 ${like ? `<span class="mw-badge" data-rename="${a.id}" title="这个名字是资产类别，建议改成放钱的地方">类别名</span>` : ''}
                 <button class="mw-more" data-row-more="${a.id}" draggable="false" title="更多操作（修改 / 删除）"><i class="fa-solid fa-ellipsis"></i></button>
             </div>
@@ -7810,14 +7863,15 @@ function bindMonthlyRowOps(list) {
         });
     });
 
-    // 整行拖拽重排：账户名是拖动手柄（draggable 已在 HTML 里写死，立即可拖）
-    list.querySelectorAll('.mw-name[data-rename]').forEach(n => {
+    // 整行拖拽重排：整条「账户」单元格都是拖动手柄（draggable 写在 .mw-rowname 上），
+    // 不用去够那行小字，抓哪儿都能拖。真正的行只在 .mw-tr[data-mw-account] 上，跳过合计/占比行。
+    list.querySelectorAll('.mw-tr[data-mw-account] .mw-rowname').forEach(n => {
         n.addEventListener('dragstart', e => {
             if (list._suppressDrag) { e.preventDefault(); return; }
             const tr = n.closest('.mw-tr');
             if (tr) tr.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'move';
-            try { e.dataTransfer.setData('text/plain', n.dataset.rename); } catch (_) {}
+            try { e.dataTransfer.setData('text/plain', (tr && tr.dataset.mwAccount) || ''); } catch (_) {}
             if (tr) mwSetDragImage(e, tr, n);
         });
         n.addEventListener('dragend', () => {
@@ -8748,18 +8802,55 @@ function renderFundUnassigned() {
         <button class="secondary-btn" onclick="openFundAccounts()">去归类</button>`;
 }
 
+// 保险成员拖拽排序：把 from 移到 to 的位置（成员名即身份，只改显示次序）
+function reorderInsuranceMember(from, to) {
+    if (!from || !to || from === to) return;
+    const arr = (state.insuranceMembers || []).slice();
+    const fi = arr.indexOf(from);
+    if (fi < 0) return;
+    arr.splice(fi, 1);
+    const ti = arr.indexOf(to);
+    if (ti < 0) arr.push(from); else arr.splice(ti, 0, from);
+    state.insuranceMembers = arr;
+    saveState();
+    renderInsuranceSection();
+}
+
 // ---- 保险保障：成员 + 8 险种清单 ----
 function renderInsuranceSection() {
     const membersBox = document.getElementById('insMembers');
     const listBox = document.getElementById('insList');
     if (!membersBox || !listBox) return;
     membersBox.innerHTML = state.insuranceMembers.map(m =>
-        `<span class="ins-member-wrap"><button class="ins-member ${m === fundEditMember ? 'active' : ''}" data-insmember="${_esc(m)}" title="${_esc(m)} 的年保费">${_esc(m)}<span class="im-prem">${memberPremiumText(m)}</span></button>` +
-        `<i class="fa-solid fa-pen" data-insact="rename" data-insmember="${_esc(m)}" title="改名"></i>` +
-        `<i class="fa-solid fa-xmark" data-insact="del" data-insmember="${_esc(m)}" title="删除"></i></span>`
+        `<span class="ins-member-wrap" draggable="true" data-inswrap="${_esc(m)}" title="按住拖动可调整成员顺序"><button class="ins-member ${m === fundEditMember ? 'active' : ''}" data-insmember="${_esc(m)}" title="${_esc(m)} 的年保费">${_esc(m)}<span class="im-prem">${memberPremiumText(m)}</span></button>` +
+        `<i class="fa-solid fa-pen" draggable="false" data-insact="rename" data-insmember="${_esc(m)}" title="改名"></i>` +
+        `<i class="fa-solid fa-xmark" draggable="false" data-insact="del" data-insmember="${_esc(m)}" title="删除"></i></span>`
     ).join('') + `<button class="ins-member ins-add" data-insadd="1"><i class="fa-solid fa-plus"></i> 成员</button>`
         // 全家一年要交多少保费，以前得自己把每个人头上的数加起来
         + `<span class="ins-prem-total">全部保费 <b>${formatCurrency(insTotalPremium())}</b>/年</span>`;
+
+    // 保险成员横向拖拽排序：和账户 / 分类同一套观感（卡片跟手 + 落点高亮线）。
+    // 成员名是身份（保单按 险种__成员 存），所以拖的是数组顺序，改的是显示次序。
+    membersBox.querySelectorAll('.ins-member-wrap').forEach(wrap => {
+        wrap.addEventListener('dragstart', e => {
+            if (e.target.closest && e.target.closest('[draggable="false"]')) { e.preventDefault(); return; }
+            wrap.classList.add('dragging');
+            try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', wrap.dataset.inswrap || ''); } catch (_) {}
+            mwSetDragImage(e, wrap, wrap);
+        });
+        wrap.addEventListener('dragend', () => {
+            wrap.classList.remove('dragging');
+            membersBox.querySelectorAll('.ins-member-wrap.drag-over').forEach(x => x.classList.remove('drag-over'));
+        });
+        wrap.addEventListener('dragover', e => { e.preventDefault(); wrap.classList.add('drag-over'); });
+        wrap.addEventListener('dragleave', e => { if (e.target === wrap) wrap.classList.remove('drag-over'); });
+        wrap.addEventListener('drop', e => {
+            e.preventDefault(); wrap.classList.remove('drag-over');
+            const from = e.dataTransfer.getData('text/plain');
+            const to = wrap.dataset.inswrap;
+            if (from && to && from !== to) reorderInsuranceMember(from, to);
+        });
+    });
 
     if (!membersBox.$wired) {
         membersBox.$wired = true;
