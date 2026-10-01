@@ -286,7 +286,7 @@
                         <div class="chart-header">
                             <div class="drill-title-wrap">
                                 <h3>保险保障</h3>
-                                <span class="chart-subtitle">配置即打勾 · 可分家庭成员</span>
+                                <span class="chart-subtitle">配置即打勾 · 可分家庭成员 · <span class="hint-pointer">按住</span><span class="hint-touch">长按</span>成员可排序</span>
                             </div>
                         </div>
                         <div class="ins-members" id="insMembers"></div>
@@ -610,7 +610,7 @@
                             <div class="category-grid" id="incomeCategories"></div>
                         </div>
                         <div class="category-section">
-                            <h3><i class="fa-solid fa-credit-card"></i> 支付方式 <span class="pm-section-hint">点击可设为默认</span></h3>
+                            <h3><i class="fa-solid fa-credit-card"></i> 支付方式 <span class="pm-section-hint">点击可设为默认 · 铅笔可改名 · <span class="hint-pointer">按住</span><span class="hint-touch">长按</span>拖动排序</span></h3>
                             <div class="payment-methods-manage" id="paymentMethodsList"></div>
                             <div class="payment-add-row">
                                 <input type="text" class="text-input" id="newPaymentInput" placeholder="输入新的支付方式名称...">
@@ -1289,7 +1289,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.16').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.17').catch(() => {});
             });
         }
     </script>

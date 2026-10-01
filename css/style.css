@@ -4104,9 +4104,23 @@ table.bill-stats {
    所以变淡 / 高亮要打在它的格子上，打在 .mw-tr 上根本画不出来（这就是之前"看着没改"的原因） */
 .mw-tr.dragging .mw-rowname, .mw-tr.dragging .mw-c { opacity: .4; }
 .mw-tr.drag-over .mw-rowname { box-shadow: inset 3px 0 0 var(--accent); }
-/* 长按 0.3 秒后才可拖：长按期间给个视觉反馈，提示「现在能拖了」 */
-.mw-armed { cursor: grabbing; user-select: none; }
-.mw-name.mw-armed { background: color-mix(in srgb, var(--accent) 12%, var(--bg-modal)); border-radius: 4px; }
+/* ---- 触屏长按排序（手机端唯一的排序路子）----
+   iOS Safari 不支持 HTML5 drag，所以桌面那套 draggable 在手机上完全不响应；
+   手机端靠「长按 0.4 秒进入拖动」（JS 里的 bindTouchSort）。
+   长按期间必须压掉 iOS 的文字选择放大镜和系统呼出菜单，否则一按就弹「拷贝 / 查询」，
+   根本进不了拖动状态。视觉反馈仍复用 .dragging / .drag-over，两边观感一致。 */
+.pm-chip, .account-row, .ins-member-wrap, .mw-rowname, .mw-manc, .category-card {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+/* 触屏上再把 WebKit 的原生拖拽关掉：万一这台 iOS 恰好支持 HTML5 drag，
+   长按会被系统抢去走原生拖拽，我们的长按拖动就永远进不去。关掉它是纯保险。 */
+@media (pointer: coarse) {
+    .pm-chip, .account-row, .ins-member-wrap, .mw-rowname, .mw-manc, .category-card {
+        -webkit-user-drag: none;
+    }
+}
 /* 月度账单：可管理的列头（改名 / 删除 / 拖拽排序） */
 .mw-manc { display: flex; align-items: center; justify-content: center; gap: 3px; overflow: visible; cursor: grab; user-select: none; }
 .mw-manc:active { cursor: grabbing; }
@@ -4122,6 +4136,22 @@ table.bill-stats {
     opacity: .96;
     pointer-events: none;
     z-index: 9999;
+}
+/* 拖拽操作提示：桌面说「按住」，触屏说「长按」—— 手机上既没有光标也没有 hover
+   （长按是唯一能拖的路子），必须把文案换掉，否则用户根本不知道能拖。
+   用 pointer:coarse 判断触屏设备，比看宽度准（iPad 横屏也一样宽）。 */
+.hint-touch { display: none; }
+@media (pointer: coarse) {
+    .hint-pointer { display: none; }
+    .hint-touch { display: inline; }
+}
+/* 月度账单：手机专用的排序提示（桌面有 hover 抓手，不用占地方） */
+.mw-sort-hint { display: none; }
+@media (pointer: coarse) {
+    .mw-sort-hint {
+        display: block; margin: 8px 2px 0; font-size: 12px;
+        color: var(--text-secondary); line-height: 1.6;
+    }
 }
 .mw-col-label {
     font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

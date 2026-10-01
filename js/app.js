@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.16';
+const APP_VERSION = '1.39.17';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -3559,23 +3559,28 @@ function renderPaymentMethodsManage() {
         const isDefault = p === (state.settings.defaultPaymentMethod || '微信支付');
         return `
             <div class="pm-chip ${isDefault ? 'pm-chip-default' : ''}" draggable="true" data-pm="${_esc(p)}"
-                 onclick="setDefaultPaymentMethod('${p}')" title="按住拖动可调整顺序；点一下设为默认">
+                 title="按住拖动可调整顺序；点一下设为默认">
                 <i class="${paymentIconFor(p)}"></i>
-                <span>${p}</span>
+                <span>${_esc(p)}</span>
                 ${isDefault ? '<span class="pm-default-tag">默认</span>' : ''}
-                <button class="pm-chip-edit" draggable="false" onclick="event.stopPropagation(); renamePaymentMethod('${p}')" title="改名">
+                <button class="pm-chip-edit" draggable="false" data-pm-act="rename" title="改名">
                     <i class="fa-solid fa-pen"></i>
                 </button>
-                <button class="pm-chip-delete" draggable="false" onclick="event.stopPropagation(); deletePaymentMethod('${p}')" title="删除">
+                <button class="pm-chip-delete" draggable="false" data-pm-act="del" title="删除">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
         `;
     }).join('');
     bindPaymentMethodDrag(container);
+    bindTouchSort(container, '.pm-chip', el => el.dataset.pm, reorderPaymentMethod);
 }
 
 // 支付方式卡的拖拽排序（与账户 / 分类同一套观感）。事件委托绑在容器上，只绑一次。
+// ⚠️ 支付方式的「名字」就是身份（没有 id），而且名字用户能改。所以点击一律走
+//    委托 + data-pm 读取，**不要**把名字拼进 onclick="fn('${p}')" —— 那样名字里
+//    一旦有单引号（_esc 会还原成裸引号）内联 JS 就成了语法错误，按钮直接点不动。
+//    成员条（memberBarHTML）早就因为这个原因改成委托了，这里保持一致。
 function bindPaymentMethodDrag(container) {
     if (container.$dragWired) return;
     container.$dragWired = true;
@@ -3587,6 +3592,18 @@ function bindPaymentMethodDrag(container) {
         }
         return null;
     };
+    container.addEventListener('click', e => {
+        const chip = chipFromEvent(e);
+        if (!chip || !chip.dataset.pm) return;
+        const actBtn = e.target.closest ? e.target.closest('[data-pm-act]') : null;
+        if (actBtn) {
+            e.stopPropagation();
+            if (actBtn.dataset.pmAct === 'rename') renamePaymentMethod(chip.dataset.pm);
+            else deletePaymentMethod(chip.dataset.pm);
+            return;
+        }
+        setDefaultPaymentMethod(chip.dataset.pm);
+    });
     container.addEventListener('dragstart', e => {
         const chip = chipFromEvent(e);
         if (!chip) return;
@@ -5052,28 +5069,6 @@ function onCatTouchMove(e) {
 }
 
 function onCatTouchEnd() {
-    if (catDrag) { endCatDrag(); return; }
-    if (catPress) { clearTimeout(catPress.timer); catPress = null; }
-}
-
-function onCatMouseDown(e) {
-    if (catDrag || e.button !== 0) return;
-    const card = catCardFromEvent(e);
-    if (!card) return;
-    catPress = { card, x: e.clientX, y: e.clientY, timer: null };
-    catPress.timer = setTimeout(() => startCatDrag(e.clientX, e.clientY), CAT_PRESS_MS);
-}
-
-function onCatMouseMove(e) {
-    if (catDrag) { moveCatDrag(e.clientX, e.clientY); return; }
-    if (!catPress) return;
-    if (Math.abs(e.clientX - catPress.x) > 5 || Math.abs(e.clientY - catPress.y) > 5) {
-        clearTimeout(catPress.timer);
-        catPress = null;
-    }
-}
-
-function onCatMouseUp() {
     if (catDrag) { endCatDrag(); return; }
     if (catPress) { clearTimeout(catPress.timer); catPress = null; }
 }
@@ -7665,7 +7660,9 @@ function renderMonthlyEntry() {
         + `<div class="re-hidden-note"><span>一行 = 一个「放钱的地方」（中国银行 / 支付宝 / 微信 / 摩根…），一列 = 一类资产。
             一个账户里同时有活期、定期、货币基金、股票基金、黄金和信用卡欠款，都在同一行里填：
             资产填对应的类别列，欠款（信用卡、花呗、房贷）填「负债」列 —— 账户本身不再分资产还是负债。
-            像「信用卡」「花呗」这种单独的行，可以直接把数填进所属银行那一行的负债列，再用行尾的 × 删掉它。</span></div>`;
+            像「信用卡」「花呗」这种单独的行，可以直接把数填进所属银行那一行的负债列，再用行尾的 × 删掉它。</span></div>`
+        // 手机上没有光标、也没有 hover，拖拽得靠长按，必须显式说一句，否则没人猜得到
+        + `<div class="mw-sort-hint">按住<b>账户名</b>或<b>列头</b>约半秒，就能拖动调整这一行 / 这一列的顺序。</div>`;
     bindMonthlyEntry();
     syncMwSticky(list);
 }
@@ -7679,30 +7676,98 @@ function colHeadHTML(c, extraCls) {
     </div>`;
 }
 
-// 「严格长按 0.x 秒后再拖」：元素默认 draggable=false，按住满 300ms 才真正可拖。
-// 这样「点一下改名」不会被误判成拖动，也不会一按住就拖；长按期间松手则自动取消。
-function armLongPressDrag(el, delay) {
-    delay = delay || 300;
-    let timer = null, winUp = null;
-    const disarm = () => {
-        if (timer) { clearTimeout(timer); timer = null; }
-        if (winUp) { window.removeEventListener('pointerup', winUp); winUp = null; }
-        if (el.getAttribute('draggable') === 'true') el.setAttribute('draggable', 'false');
-        el.classList.remove('mw-armed');
+// ============================================================
+//  触屏长按排序 —— 手机端唯一的排序路子
+// ============================================================
+// iOS Safari **不支持 HTML5 drag**（桌面那套 draggable 在手机上完全不响应），
+// 所以凡是用 HTML5 拖拽做的排序，都必须再补一条触屏路径，否则手机上就没有任何
+// 办法调整顺序。这里把这条路径抽成一个通用引擎，各处只传选择器 + 回调。
+//
+// 行为：按住 0.4 秒（期间位移不超过 8px）即进入拖动 → 手指下的元素实时加
+// `.drag-over`（高亮线），被拖元素加 `.dragging`（变淡）→ 松手调 onDrop(from, to)。
+// 视觉类名与桌面拖拽完全复用，所以两边观感一致，不需要额外写样式。
+//
+// ⚠️ 新增任何「可排序列表」时，桌面 drag 和这里都要绑一次，别只绑桌面。
+const TOUCH_SORT_PRESS_MS = 400;
+const TOUCH_SORT_TOL = 8;
+// 交互控件上不应该起拖：默认忽略下拉框 / 输入框 / 按钮（含标了 draggable="false" 的图标）
+const TOUCH_SORT_IGNORE = 'select, input, textarea, button, [draggable="false"]';
+let touchSortLastEndAt = 0;
+
+function bindTouchSort(container, itemSel, keyOf, onDrop, ignoreSel) {
+    if (!container || !itemSel) return;
+    container.$touchSortSel = container.$touchSortSel || [];
+    if (container.$touchSortSel.indexOf(itemSel) >= 0) return; // 同一容器 + 同一选择器只绑一次
+    container.$touchSortSel.push(itemSel);
+    const ignore = ignoreSel || TOUCH_SORT_IGNORE;
+    let press = null; // { item, x, y, timer }
+    let drag = null;  // { item, over }
+
+    const itemOf = (node) => {
+        const it = node && node.closest ? node.closest(itemSel) : null;
+        return it && container.contains(it) ? it : null;
     };
-    el.addEventListener('pointerdown', e => {
-        if (e.button !== undefined && e.button !== 0) return; // 仅主键 / 触摸
-        if (timer) return;
-        timer = setTimeout(() => {
-            timer = null;
-            el.setAttribute('draggable', 'true');
-            el.classList.add('mw-armed');
-        }, delay);
-        winUp = () => disarm();
-        window.addEventListener('pointerup', winUp, { once: true });
-    });
-    el.addEventListener('dragend', disarm);
-    el.addEventListener('pointercancel', disarm);
+    const clearOver = () => container.querySelectorAll('.drag-over').forEach(x => x.classList.remove('drag-over'));
+
+    const finish = (doDrop) => {
+        if (press) { clearTimeout(press.timer); press = null; }
+        if (!drag) return;
+        const src = drag.item, tgt = drag.over;
+        src.classList.remove('dragging');
+        clearOver();
+        drag = null;
+        touchSortLastEndAt = Date.now(); // 拖完浏览器会补一个 click，得让它别触发「点一下改名」之类
+        const from = keyOf(src), to = tgt ? keyOf(tgt) : null;
+        if (doDrop && from && to && from !== to) onDrop(from, to);
+    };
+
+    container.addEventListener('touchstart', e => {
+        if (drag || press) return;
+        if (ignore && e.target.closest && e.target.closest(ignore)) return;
+        const item = itemOf(e.target);
+        if (!item) return;
+        const t = e.touches[0];
+        press = {
+            item, x: t.clientX, y: t.clientY,
+            timer: setTimeout(() => {
+                if (!press) return;
+                const it = press.item; press = null;
+                drag = { item: it, over: null };
+                it.classList.add('dragging');
+                if (navigator.vibrate) { try { navigator.vibrate(12); } catch (_) {} }
+            }, TOUCH_SORT_PRESS_MS),
+        };
+    }, { passive: true });
+
+    container.addEventListener('touchmove', e => {
+        const t = e.touches[0];
+        if (!drag) {
+            // 还没进入拖动：手指挪开超过容差就取消长按（= 用户在滚动页面）
+            if (press && (Math.abs(t.clientX - press.x) > TOUCH_SORT_TOL || Math.abs(t.clientY - press.y) > TOUCH_SORT_TOL)) {
+                clearTimeout(press.timer); press = null;
+            }
+            return;
+        }
+        e.preventDefault(); // 拖动中别让页面跟着滚（监听器是 passive:false 才有用）
+        const it = itemOf(document.elementFromPoint(t.clientX, t.clientY));
+        if (it === drag.over) return;
+        clearOver();
+        drag.over = (it && it !== drag.item) ? it : null;
+        if (drag.over) drag.over.classList.add('drag-over');
+    }, { passive: false });
+
+    container.addEventListener('touchend', () => finish(true));
+    container.addEventListener('touchcancel', () => finish(false));
+
+    // 拖完那一下浏览器会补发 click（比如账户名 = 点一下改名），全局吃掉它一次
+    if (!window.$touchSortClickGuard) {
+        window.$touchSortClickGuard = true;
+        document.addEventListener('click', e => {
+            if (Date.now() - touchSortLastEndAt < 600) {
+                e.stopPropagation(); e.preventDefault(); touchSortLastEndAt = 0;
+            }
+        }, true);
+    }
 }
 
 // 计算表头 / 合计两行的真实像素高度，写进 CSS 变量，
@@ -7768,7 +7833,7 @@ function mwRowDragImage(e, tr, grid, grabEl) {
 
 function bindMonthlyColOps(list) {
     list.querySelectorAll('.mw-h.mw-manc').forEach(h => {
-        // 列头默认即可拖（draggable 已在 HTML 里写死），不再需要长按 0.3 秒
+        // 桌面：列头默认即可拖（draggable 已在 HTML 里写死），不需要先长按
         h.addEventListener('dragstart', e => { if (list._suppressDrag) { e.preventDefault(); return; } e.dataTransfer.setData('text/plain', h.dataset.colKey); h.classList.add('dragging'); mwSetDragImage(e, h, h); });
         h.addEventListener('dragend', () => h.classList.remove('dragging'));
         h.addEventListener('dragover', e => { e.preventDefault(); h.classList.add('drag-over'); });
@@ -7803,6 +7868,8 @@ function bindMonthlyColOps(list) {
     });
     const addBtn = document.getElementById('mwAddColBtn');
     if (addBtn) addBtn.addEventListener('click', addSheetColumn);
+    // 手机端：长按列头也能拖动整列（列头里的 ⋯ 是按钮，会被默认忽略规则挡掉）
+    bindTouchSort(list, '.mw-h.mw-manc', el => el.dataset.colKey, moveSheetColumn);
 }
 
 function renameSheetColumn(key) {
@@ -8003,8 +8070,11 @@ function bindMonthlyRowOps(list) {
             if (from && toId && from !== toId) reorderMonthlyAccount(from, toId);
         });
     });
+    // 手机端：拖拽键只有「账户名」那一格（其余格子是输入框，长按应该聚焦而不是拖动）
+    bindTouchSort(list, '.mw-tr[data-mw-account]', el => el.dataset.mwAccount, reorderMonthlyAccount);
 
-    // 「⋯ 更多」浮层菜单：修改 / 删除（上移 / 下移已移到「长按后拖拽行名」完成，避免菜单太深）
+    // 「⋯ 更多」浮层菜单：修改 / 删除（上移 / 下移已移到「拖动行名」完成，避免菜单太深；
+    // 手机端那条路是长按账户名，见下面的 bindTouchSort）
     list.querySelectorAll('[data-row-more]').forEach(btn => {
         btn.addEventListener('mousedown', e => { list._suppressDrag = true; setTimeout(() => { list._suppressDrag = false; }, 400); });
         btn.addEventListener('click', e => {
@@ -8359,7 +8429,7 @@ function renderAccountManageList() {
         <div class="fam-chips">${memberChips}<button class="fam-add" data-add="1"><i class="fa-solid fa-plus"></i> 添加</button></div>
         <div class="account-hint">账户 = 放钱的地方（中国银行 / 支付宝 / 微信 / 摩根…）。一个账户里可以同时有资产和负债，
             记账时在「负债」那一列填就行，不用再给账户打资产还是负债的标签。</div>
-        <div class="account-section-title">账户（${rows.length}）<span class="acct-order-hint">按住名字拖动可调顺序</span></div>
+        <div class="account-section-title">账户（${rows.length}）<span class="acct-order-hint hint-pointer">按住名字拖动可调顺序</span><span class="acct-order-hint hint-touch">长按账户名可拖动排序</span></div>
         ${rows.map((a) => { const recN = accountRecordCounts(a.id); const n = recN.bal + recN.ret; return `
                 <div class="account-row" data-account-row="${a.id}">
                     <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
@@ -8395,6 +8465,8 @@ function renderAccountManageList() {
             if (from && to && from !== to) reorderMonthlyAccount(from, to);
         });
     });
+    // 手机端：长按账户行也能拖动（行里的下拉框 / 编辑 / 删除按钮会被忽略规则挡掉）
+    bindTouchSort(box, '.account-row', el => el.dataset.accountRow, reorderMonthlyAccount);
 
     if (!box.$acctWired) {
         box.$acctWired = true;
@@ -8964,6 +9036,11 @@ function renderInsuranceSection() {
             if (from && to && from !== to) reorderInsuranceMember(from, to);
         });
     });
+
+    // 手机端：长按成员即可横拖重排。
+    // ⚠️ 这里的成员名本身就是 <button>，所以不能套用默认忽略规则（默认会把 button 挡掉），
+    //    只忽略改名 / 删除那两个图标。
+    bindTouchSort(membersBox, '.ins-member-wrap', el => el.dataset.inswrap, reorderInsuranceMember, '[draggable="false"]');
 
     if (!membersBox.$wired) {
         membersBox.$wired = true;
