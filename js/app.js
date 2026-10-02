@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.20';
+const APP_VERSION = '1.39.21';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1043,6 +1043,10 @@ function repairNameLists() {
 }
 
 function addTombstone(kind, id) {
+    // 兜底：state.deleted 缺这个键时不能直接 .find → TypeError 会让删除静默失败。
+    // 以前的写法只在 12 个键都齐全时才安全，属于埋雷（和 v1.38.2 的 balClassTags 同一类坑）。
+    if (!state.deleted) state.deleted = {};
+    if (!Array.isArray(state.deleted[kind])) state.deleted[kind] = [];
     const list = state.deleted[kind];
     const existing = list.find(x => x.id === id);
     if (existing) existing.deletedAt = Date.now();
@@ -1052,13 +1056,17 @@ function addTombstone(kind, id) {
 // Drop markers older than the retention window so the lists cannot grow forever.
 function pruneTombstones() {
     const cutoff = Date.now() - TOMBSTONE_TTL_DAYS * 86400000;
+    if (!state.deleted) return;
     Object.keys(state.deleted).forEach(k => {
-        state.deleted[k] = state.deleted[k].filter(x => x.deletedAt > cutoff);
+        if (!Array.isArray(state.deleted[k])) { state.deleted[k] = []; return; }
+        state.deleted[k] = state.deleted[k].filter(x => x && x.deletedAt > cutoff);
     });
 }
 
 // Hide any live row a newer marker covers. A row edited after the deletion wins
 // (last write wins), which is what lets an intentional re-add resurrect a record.
+// 用 >= 而不是 > ：saveMonthly 是「先写墓碑、紧接着写回新记录」，两者 Date.now() 常常
+// 落在同一毫秒。若判成 <= 就会把用户刚存进去的那一格当成"已被删除"抹掉。
 function applyTombstones() {
     const drop = (list, marks) => {
         if (!Array.isArray(list)) return list || [];
@@ -1067,7 +1075,7 @@ function applyTombstones() {
         return list.filter(item => {
             const at = byId.get(item.id);
             if (at === undefined) return true;
-            return (item.updatedAt || item.createdAt || 0) > at;
+            return (item.updatedAt || item.createdAt || 0) >= at;
         });
     };
     state.transactions = drop(state.transactions, state.deleted.transactions);
@@ -2908,13 +2916,22 @@ function loadState() {
 
             // 家庭资产负债表 v2 迁移：账户类型全家共用，成员维度落到余额记录上。
             // 旧记录没有 member 字段、id 为 accountId__month，回填为首要成员并改用新 id 格式。
+            //
+            // ⚠️ 致命坑（v1.39.21 修）：这里过去只会拼出 `member__account__month`。
+            //    但 v1.37.0 起一格 = 成员 + 账户 + **类别** + 月份（支付宝同时有余额和花呗），
+            //    id 是四段式的。结果这个函数**每次启动**都把带类别的 id 降级成三段：
+            //      ① 同一账户同月有两个类别时，降级后 id 撞车 → 后面的直接当重复丢掉；
+            //      ② 降级后的 id 会撞上 saveMonthly 写下的删除墓碑（墓碑正是按降级后的 id 记的），
+            //         applyTombstones 就把它当"用户删过"直接抹掉 —— 表现成"更新后某月某成员的数据没了"。
+            //    id 的拼法必须和 saveMonthly / normalizeBalanceCats 完全一致。
             (function migrateBalancesToMember() {
                 const primary = state.balanceMembers[0] || '本人';
                 const seen = new Set();
                 state.balances.forEach(b => {
                     if (b.owner !== undefined) delete b.owner;
                     if (!b.member) b.member = primary;
-                    const newId = `${b.member}__${b.accountId}__${b.month}`;
+                    if (!b.cat) b.cat = balanceCatOf(b);   // 老数据补上类别，id 才稳定
+                    const newId = `${b.member}__${b.accountId}__${b.cat}__${b.month}`;
                     if (b.id !== newId) b.id = newId;
                     if (seen.has(b.id)) { b.__dup = true; } else { seen.add(b.id); }
                 });
@@ -9477,7 +9494,12 @@ function addBalanceMember() {
     refreshAccountsModalIfOpen();
 }
 
-function _rebalanceId(member, accountId, month) { return `${member}__${accountId}__${month}`; }
+// 余额 id 要带类别（一格 = 成员 + 账户 + 类别 + 月份，同账户可以同时有现金和负债）；
+// 收益一个账户一个月只有一条，不带类别。传了 cat 才是四段式 —— 千万别给余额少传 cat，
+// 少一段就等于把这一格的 id 降级，会和删除墓碑撞上被误删（见 loadState 里的迁移注释）。
+function _rebalanceId(member, accountId, month, cat) {
+    return cat ? `${member}__${accountId}__${cat}__${month}` : `${member}__${accountId}__${month}`;
+}
 
 function renameBalanceMember(old) {
     const name = prompt('修改成员姓名', old);
@@ -9490,7 +9512,7 @@ function renameBalanceMember(old) {
     state.balances.forEach(b => {
         if (b.member !== old) return;
         b.member = n;
-        b.id = _rebalanceId(n, b.accountId, b.month);
+        b.id = _rebalanceId(n, b.accountId, b.month, b.cat || balanceCatOf(b));
         b.updatedAt = Date.now();
     });
     state.returns.forEach(r => {
@@ -9513,7 +9535,8 @@ function _mergeMemberRows(list, from, to) {
     const dropIds = [];
     list.forEach(r => {
         if (r.member !== from) return;
-        const targetId = _rebalanceId(to, r.accountId, r.month);
+        // 余额带 cat（四段式），收益不带（r.cat 为 undefined）—— 由 _rebalanceId 自己判断
+        const targetId = _rebalanceId(to, r.accountId, r.month, r.cat);
         const tgt = byId[targetId];
         if (tgt && tgt !== r) {
             tgt.amount = (Number(tgt.amount) || 0) + (Number(r.amount) || 0);
