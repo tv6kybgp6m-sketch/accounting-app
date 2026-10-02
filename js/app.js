@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.19';
+const APP_VERSION = '1.39.20';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -8620,7 +8620,11 @@ function addAccount() {
     state.accounts.push({
         id: 'acc_' + uid(),
         name, kind: 'asset', group,
-        icon: kind === 'asset' ? 'fa-wallet' : 'fa-credit-card',
+        // 这里原来写的是 `kind === 'asset' ? 'fa-wallet' : 'fa-credit-card'`，
+        // 但「资产 / 负债」下拉早就删了，kind 这个变量在本函数里根本不存在 ——
+        // 于是每次点「添加」都抛 ReferenceError: kind is not defined，
+        // 账户加不上而且没有任何提示（和 mwAddAccount 一样，图标直接写死即可）。
+        icon: 'fa-wallet',
         color: palette[state.accounts.length % palette.length],
         order: state.accounts.reduce((m, a) => Math.max(m, a.order || 0), 0) + 1,
         createdAt: Date.now(), updatedAt: Date.now(),
