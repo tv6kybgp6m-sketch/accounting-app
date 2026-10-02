@@ -1279,28 +1279,7 @@ body {
     padding: 1px 6px;
     border-radius: 8px;
 }
-.pm-chip-delete, .pm-chip-edit {
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    border: none;
-    background: transparent;
-    color: var(--text-tertiary);
-    font-size: 11px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-}
-.pm-chip-delete:hover {
-    background: var(--expense-light);
-    color: #ff3b30;
-}
-.pm-chip-edit:hover {
-    background: var(--accent-light);
-    color: var(--accent);
-}
+/* 卡上不再挂常驻的编辑 / 删除按钮：点一下弹操作面板（与支出分类同款） */
 .payment-add-row {
     display: flex;
     gap: 10px;

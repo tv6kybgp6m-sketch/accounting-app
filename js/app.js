@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.18';
+const APP_VERSION = '1.39.19';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -3663,16 +3663,10 @@ function renderPaymentMethodsManage() {
         const isDefault = p === (state.settings.defaultPaymentMethod || '微信支付');
         return `
             <div class="pm-chip ${isDefault ? 'pm-chip-default' : ''}" draggable="true" data-pm="${_esc(p)}"
-                 title="按住拖动可调整顺序；点一下设为默认">
+                 title="按住拖动可调整顺序；点一下可改 / 删">
                 <i class="${paymentIconFor(p)}"></i>
                 <span>${_esc(p)}</span>
                 ${isDefault ? '<span class="pm-default-tag">默认</span>' : ''}
-                <button class="pm-chip-edit" draggable="false" data-pm-act="rename" title="改名">
-                    <i class="fa-solid fa-pen"></i>
-                </button>
-                <button class="pm-chip-delete" draggable="false" data-pm-act="del" title="删除">
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
             </div>
         `;
     }).join('');
@@ -3681,7 +3675,9 @@ function renderPaymentMethodsManage() {
 }
 
 // 支付方式卡的拖拽排序（与账户 / 分类同一套观感）。事件委托绑在容器上，只绑一次。
-// ⚠️ 支付方式的「名字」就是身份（没有 id），而且名字用户能改。所以点击一律走
+// 卡片本身就是「按住拖动排序 / 点一下出操作面板」，所以卡上不再挂常驻的编辑、删除按钮
+// （和支出分类一致：点一下才出「编辑 / 删除」，列表更干净）。
+// ⚠️ 支付方式的「名字」就是身份（没有 id），而且名字用户能改。所以一切点击都走
 //    委托 + data-pm 读取，**不要**把名字拼进 onclick="fn('${p}')" —— 那样名字里
 //    一旦有单引号（_esc 会还原成裸引号）内联 JS 就成了语法错误，按钮直接点不动。
 //    成员条（memberBarHTML）早就因为这个原因改成委托了，这里保持一致。
@@ -3699,14 +3695,7 @@ function bindPaymentMethodDrag(container) {
     container.addEventListener('click', e => {
         const chip = chipFromEvent(e);
         if (!chip || !chip.dataset.pm) return;
-        const actBtn = e.target.closest ? e.target.closest('[data-pm-act]') : null;
-        if (actBtn) {
-            e.stopPropagation();
-            if (actBtn.dataset.pmAct === 'rename') renamePaymentMethod(chip.dataset.pm);
-            else deletePaymentMethod(chip.dataset.pm);
-            return;
-        }
-        setDefaultPaymentMethod(chip.dataset.pm);
+        openPmActionSheet(chip.dataset.pm);
     });
     container.addEventListener('dragstart', e => {
         const chip = chipFromEvent(e);
@@ -3738,6 +3727,54 @@ function bindPaymentMethodDrag(container) {
         const to = chip.dataset.pm;
         if (from && to && from !== to) reorderPaymentMethod(from, to);
     });
+}
+
+// 支付方式操作面板（与分类面板同款：点一下卡片才出「编辑 / 删除」）。
+// 名字就是身份，所以用模块级变量记住当前操作的是哪一个，绝不在按钮上拼名字。
+let pmSheetName = null;
+
+function openPmActionSheet(name) {
+    if (!name || !state.paymentMethods.includes(name)) return;
+    const sheet = document.getElementById('pmActionSheet');
+    if (!sheet) return;
+    pmSheetName = name;
+    const icon = document.getElementById('pmSheetIcon');
+    if (icon) {
+        icon.style.background = 'rgba(88, 101, 242, 0.12)';
+        icon.style.color = 'var(--accent)';
+        icon.innerHTML = `<i class="${paymentIconFor(name)}"></i>`;
+    }
+    const title = document.getElementById('pmSheetTitle');
+    if (title) title.textContent = name;
+    // 已经是默认了就把「设为默认」收起来，别给一个点了没反应的按钮
+    const defBtn = document.getElementById('pmSheetDefaultBtn');
+    if (defBtn) defBtn.style.display = ((state.settings.defaultPaymentMethod || '微信支付') === name) ? 'none' : '';
+    sheet.classList.remove('hidden');
+    raiseOverlay(sheet);
+}
+
+function closePmActionSheet() {
+    const sheet = document.getElementById('pmActionSheet');
+    if (sheet) sheet.classList.add('hidden');
+    pmSheetName = null;
+}
+
+function pmSheetSetDefault() {
+    const n = pmSheetName;
+    closePmActionSheet();
+    if (n) setDefaultPaymentMethod(n);
+}
+
+function pmSheetRename() {
+    const n = pmSheetName;
+    closePmActionSheet();
+    if (n) renamePaymentMethod(n);
+}
+
+function pmSheetDelete() {
+    const n = pmSheetName;
+    closePmActionSheet();
+    if (n) deletePaymentMethod(n);
 }
 
 function reorderPaymentMethod(from, to) {
@@ -5014,30 +5051,6 @@ function saveCategory() {
     renderCategories();
 }
 
-function moveCategory(id, direction) {
-    const idx = state.categories.findIndex(c => c.id === id);
-    if (idx === -1) return;
-    const cat = state.categories[idx];
-
-    // Find adjacent category of the same type
-    let targetIdx = -1;
-    if (direction === 'up') {
-        for (let i = idx - 1; i >= 0; i--) {
-            if (state.categories[i].type === cat.type) { targetIdx = i; break; }
-        }
-    } else {
-        for (let i = idx + 1; i < state.categories.length; i++) {
-            if (state.categories[i].type === cat.type) { targetIdx = i; break; }
-        }
-    }
-    if (targetIdx === -1) return; // already at boundary
-
-    // Swap positions
-    [state.categories[idx], state.categories[targetIdx]] = [state.categories[targetIdx], state.categories[idx]];
-    saveState();
-    renderCategories();
-}
-
 // 拖拽把分类 fromId 放到 toId 的位置（只在同一类型收入/支出内部重排）。
 // 与「记月度账单」「账户管理」用同一套拖拽观感。
 function reorderCategory(fromId, toId) {
@@ -5114,12 +5127,6 @@ function catSheetEdit() {
     const id = catSheetId;
     closeCatActionSheet();
     if (id) openCategoryModal(id);
-}
-
-function catSheetMove(direction) {
-    const id = catSheetId;
-    closeCatActionSheet();
-    if (id) moveCategory(id, direction);
 }
 
 function catSheetDelete() {

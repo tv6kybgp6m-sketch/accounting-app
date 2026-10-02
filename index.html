@@ -610,7 +610,7 @@
                             <div class="category-grid" id="incomeCategories"></div>
                         </div>
                         <div class="category-section">
-                            <h3><i class="fa-solid fa-credit-card"></i> 支付方式 <span class="pm-section-hint">点击可设为默认 · 铅笔可改名 · <span class="hint-pointer">按住</span><span class="hint-touch">长按</span>拖动排序</span></h3>
+                            <h3><i class="fa-solid fa-credit-card"></i> 支付方式 <span class="pm-section-hint">点击操作 · <span class="hint-pointer">按住</span><span class="hint-touch">长按</span>拖动排序</span></h3>
                             <div class="payment-methods-manage" id="paymentMethodsList"></div>
                             <div class="payment-add-row">
                                 <input type="text" class="text-input" id="newPaymentInput" placeholder="输入新的支付方式名称...">
@@ -916,10 +916,22 @@
                     <div class="action-sheet-title" id="catSheetTitle"></div>
                 </div>
                 <button class="action-sheet-btn" onclick="catSheetEdit()"><i class="fa-solid fa-pen"></i> 编辑分类</button>
-                <button class="action-sheet-btn" onclick="catSheetMove('up')"><i class="fa-solid fa-arrow-up"></i> 上移一位</button>
-                <button class="action-sheet-btn" onclick="catSheetMove('down')"><i class="fa-solid fa-arrow-down"></i> 下移一位</button>
                 <button class="action-sheet-btn action-sheet-danger" onclick="catSheetDelete()"><i class="fa-solid fa-trash-can"></i> 删除分类</button>
                 <button class="action-sheet-cancel" onclick="closeCatActionSheet()">取消</button>
+            </div>
+        </div>
+
+        <!-- Payment Method Action Sheet（与分类面板同款：点一下才出操作） -->
+        <div class="action-sheet-overlay hidden" id="pmActionSheet" onclick="if(event.target===this)closePmActionSheet()">
+            <div class="action-sheet">
+                <div class="action-sheet-header">
+                    <div class="action-sheet-icon" id="pmSheetIcon"></div>
+                    <div class="action-sheet-title" id="pmSheetTitle"></div>
+                </div>
+                <button class="action-sheet-btn" id="pmSheetDefaultBtn" onclick="pmSheetSetDefault()"><i class="fa-solid fa-star"></i> 设为默认</button>
+                <button class="action-sheet-btn" onclick="pmSheetRename()"><i class="fa-solid fa-pen"></i> 编辑名称</button>
+                <button class="action-sheet-btn action-sheet-danger" onclick="pmSheetDelete()"><i class="fa-solid fa-trash-can"></i> 删除</button>
+                <button class="action-sheet-cancel" onclick="closePmActionSheet()">取消</button>
             </div>
         </div>
 
@@ -1289,7 +1301,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.18').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.19').catch(() => {});
             });
         }
     </script>
