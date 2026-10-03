@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.28';
+const APP_VERSION = '1.39.29';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -114,6 +114,16 @@ const DEFAULT_ACCOUNTS = [
     { id: 'l_loan',      name: '借款',   kind: 'liability', group: '其他负债', icon: 'fa-hand-holding-dollar',  color: '#ff3b30' },
     { id: 'a_cash',      name: '现金',   kind: 'asset',     group: '流动资金', icon: 'fa-money-bill-wave',      color: '#34c759', bucket: 'cash' },
 ];
+
+// 新建账户时按分组给的默认资金桶（四笔钱页的 cash / steady / growth）。
+// 只在"分组能对上"时才给，认不出的分组留空 → 界面照样提示去归类，不瞎猜。
+const DEFAULT_ACCOUNT_BUCKET_BY_GROUP = {
+    '流动资金': 'cash',
+    '储蓄存款': 'cash',
+    '投资理财': 'growth',
+    '固定资产': 'growth',
+    // '其他资产' 故意不给：默认桶瞎猜比留空更糟，让用户在「去归类」里自己定。
+};
 
 // 四笔钱：三个资产桶 + 保险保障清单
 const FUND_BUCKETS = [
@@ -6665,7 +6675,11 @@ function renderBalanceBreakdown() {
     const info = balancePeriodInfo();
     const metric = state.balanceMetric;
     const titleEl = document.getElementById('balBreakdownTitle');
-    if (titleEl) titleEl.textContent = '资产构成（按类别）';
+    // 标题得跟着模式走（v1.39.29）：以前写死"资产构成"，切到负债 / 净资产看时名不副实。
+    if (titleEl) {
+        titleEl.textContent = (metric === 'liability' ? '负债构成（按类别）'
+            : metric === 'net' ? '净资产构成（按类别）' : '资产构成（按类别）');
+    }
 
     const cat = monthHasRecords(info.month) ? balancesByCat(info.month) : {};
     // 直接按用户指定的 6 类资产统计：现金 / 货币基金 / 定期存款 / 股票基金 / 黄金 / 其他
@@ -7535,6 +7549,14 @@ function openMonthlyModal(month, focus) {
 function closeMonthlyModal() {
     const modal = document.getElementById('monthlyModal');
     if (modal) modal.classList.add('hidden');
+    // 关弹窗时把期间写回（v1.39.29）。以前只关窗口不回写，所以从别的页点进来时
+    // 「弹窗停在 A 月、底层卡片还是 B 月」，关掉以后资产负债页就显示错月份了。
+    const m = getModalMonth('monthly');
+    if (!m) return;
+    const [y, mo] = m.split('-').map(Number);
+    if (state.balancePeriod === 'month' && state.balanceYear === y && state.balanceMonth === mo) return;
+    state.balancePeriod = 'month'; state.balanceYear = y; state.balanceMonth = mo;
+    try { renderBalance(); } catch (e) {}
 }
 
 function renderMonthlyEntry() {
@@ -8629,6 +8651,10 @@ function addAccount() {
     state.accounts.push({
         id: 'acc_' + uid(),
         name, kind: 'asset', group,
+        // 新建账户按分组给个默认桶（v1.39.29）：以前干脆不写 bucket，等于一建就是
+        // 「未分配」，四笔钱页提示"有 N 个资产账户未归类"、饼图多一块灰的，
+        // 而导出的四笔钱表直接把它算没了。认不出的分组就留空，用户自己在「去归类」里选。
+        bucket: (DEFAULT_ACCOUNT_BUCKET_BY_GROUP[group] || undefined),
         // 这里原来写的是 `kind === 'asset' ? 'fa-wallet' : 'fa-credit-card'`，
         // 但「资产 / 负债」下拉早就删了，kind 这个变量在本函数里根本不存在 ——
         // 于是每次点「添加」都抛 ReferenceError: kind is not defined，
@@ -8908,13 +8934,17 @@ function fundActualByBucket() {
 function fundActualByBucketFor(member) {
     const month = fundLatestMonth();
     const cells = month ? balanceCellsAtMonth(month, member) : {};
-    const out = { cash: 0, steady: 0, growth: 0 };
+    const out = { cash: 0, steady: 0, growth: 0, unassigned: 0 };
     state.accounts.filter(a => a.kind === 'asset').forEach(a => {
-        if (out[a.bucket] === undefined) return;
         const per = cells[a.id] || {};
         let v = 0;
         sheetAssetCats().forEach(c => { v += (per[c.key] || 0); });
-        out[a.bucket] += v;
+        // ⚠️ 没归桶的账户必须归到 unassigned（v1.39.29）。原来是
+        // `if (out[a.bucket] === undefined) return;` 整条丢掉：屏幕上的四笔钱走
+        // fundActualByBucket()，那边没桶的进 unassigned 并加回总额，唯独这里漏，
+        // 于是导出的「四笔钱」工作表会比屏幕上少一截。两个口径必须一致。
+        if (a.bucket && out[a.bucket] !== undefined) out[a.bucket] += v;
+        else out.unassigned += v;
     });
     return out;
 }
