@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.27';
+const APP_VERSION = '1.39.28';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -9633,7 +9633,7 @@ function renameBalanceMember(old) {
 }
 
 // 把 from 成员的记录并入 to 成员：同账户同月已存在则金额相加，否则直接改归属
-function _mergeMemberRows(list, from, to) {
+function _mergeMemberRows(list, from, to, kind) {
     const byId = {};
     list.forEach(r => { byId[r.id] = r; });
     const dropIds = [];
@@ -9645,6 +9645,10 @@ function _mergeMemberRows(list, from, to) {
         if (tgt && tgt !== r) {
             tgt.amount = (Number(tgt.amount) || 0) + (Number(r.amount) || 0);
             tgt.updatedAt = Date.now();
+            // ⚠️ 被吃掉的那条必须写墓碑（v1.39.28）。以前只是静默从数组里滤掉：
+            //   本地看是"少了一条"，但墓碑不存在 → 别的设备一合并，这条又被搬回来，
+            //   同月同账户同类别变成两条，那格金额直接翻倍。
+            if (kind) addTombstone(kind, r.id);
             dropIds.push(r.id);
         } else {
             r.member = to;
@@ -9658,8 +9662,8 @@ function _mergeMemberRows(list, from, to) {
 
 // 把某个成员名下的余额 / 收益记录整体挪到另一个成员名下（同月同账户撞车时以接手的那位为准）
 function transferMemberRecords(from, to) {
-    state.balances = _mergeMemberRows(state.balances, from, to);
-    state.returns = _mergeMemberRows(state.returns, from, to);
+    state.balances = _mergeMemberRows(state.balances, from, to, 'balances');
+    state.returns = _mergeMemberRows(state.returns, from, to, 'returns');
 }
 
 // 真正移除一个"名下已经没有记录"的成员。删除和撤销都走这里，别处不要自己改数组。
