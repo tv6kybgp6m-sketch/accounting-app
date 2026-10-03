@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.23';
+const APP_VERSION = '1.39.24';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7793,6 +7793,120 @@ function renderMonthlyEntry() {
         + `<div class="mw-sort-hint">按住<b>账户名</b>或<b>列头</b>约半秒，就能拖动调整这一行 / 这一列的顺序。</div>`;
     bindMonthlyEntry();
     syncMwSticky(list);
+    fitMonthlyColWidths();
+}
+
+// ============================================================
+//  月度账单列宽自适应 —— 平时是固定宽，金额长到装不下才把那一列撑宽一点（v1.39.24）
+// ============================================================
+// 列宽默认由 CSS 定死（手机窄屏压到 66px、桌面等分），好处是整张表不会乱跳；
+// 但录进去的金额一大（比如「1,447,000」）就会被输入框裁掉半截、看不全。
+// 这里量一下每一列里最宽的那串字，比列宽大就把它撑开：
+//   · 先吃「比下限还宽」的那些列富余出来的像素（桌面端 9 列每列能匀出 8px）；
+//   · 还不够就整体等比缩到下限（下限 = CSS 里那一列的最小宽，桌面 72px / 手机 66px）；
+//   · 再不够才让表格整体横向变长（手机上本来就要横滑，不拦；桌面几乎碰不到）。
+// 每次输入都会跑一次，所以删掉大数之后列宽会自己收回去。
+let _mwFitCtx = null;
+function fitMonthlyColWidths() {
+    const grid = document.querySelector('.mw-grid');
+    if (!grid || !grid.children.length) return;
+    // 基准列宽（样式表给的、没被撑宽之前那条）要缓存在元素上。
+    // ⚠️ 不能每次先清空 inline 再读 getComputedStyle：实测清空后立刻读，
+    // 读回来的还是上一次撑宽后的值（Chromium 这里不重新算），
+    // 结果基准越来越宽、列宽一路老鼠塔式涨上去 —— 只在表格宽度变了时才重取。
+    if (!grid.__mwBaseTracks || grid.__mwBaseW !== grid.clientWidth) {
+        grid.style.gridTemplateColumns = '';
+        grid.__mwBaseTracks = String(getComputedStyle(grid).gridTemplateColumns);
+        grid.__mwBaseW = grid.clientWidth;
+        // 手机端表格本来就比屏幕宽（最小宽度 max-content + 横向滚动），
+        // 数字变长就该整体变长、允许再长一点；桌面端必须塞进弹窗，不准超出。
+        // ⚠️ 用「格子本身比滚动容器宽」来判断，不能拿 grid.scrollWidth 比 grid.clientWidth：
+        // 手机端 .mw-grid 是 min-width:max-content，它自己就已经比容器宽了，
+        // 这时 scrollWidth === clientWidth，判出来永远是 false（v1.39.24 修）。
+        const _sc = grid.parentElement;
+        grid.__mwAllowGrow = !!(_sc && _sc !== grid
+            && grid.getBoundingClientRect().width > _sc.clientWidth + 2);
+    }
+    const base = String(grid.__mwBaseTracks).split(' ').map(s => parseFloat(s) || 0);
+    const cols = base.length;
+    if (!cols) return;
+    // ⚠️ 网格项是「表头那些格子 + 每一行里面的格子」，不能直接拿 grid.children：
+    // .mw-tr 是 display:contents，它自己不产生盒子、只是路径，真正的格子在它里面。
+    // 量出来的顺序是「先行后列」，第 p 个格子属于第 p % cols 列。
+    const items = [];
+    Array.prototype.forEach.call(grid.querySelectorAll('.mw-h'), x => items.push(x));
+    Array.prototype.forEach.call(grid.children, tr => {
+        if (tr.classList && tr.classList.contains('mw-tr')) Array.prototype.forEach.call(tr.children, x => items.push(x));
+    });
+    if (!items.length) return;
+    const want = base.slice();
+    // 上限只能取「容器能给出的宽度」：桌面端是 clientWidth（弹窗内宽），
+    // 手机端是无限（本来就横滑，允许整体变长）。
+    // ⚠️ 别用 grid.scrollWidth：表格一旦被撑宽，scrollWidth 会跟着变长，
+    // 拿它当上限就成了自己骗自己，列宽会一路涨到出横向滚动条。
+    const avail = grid.__mwAllowGrow ? Infinity : (grid.clientWidth || 1);
+    if (!_mwFitCtx) _mwFitCtx = document.createElement('canvas').getContext('2d');
+    const ctx = _mwFitCtx;
+    // 同一列所有格子共用一套字号/内边距，各读一次就够，别每格都 getComputedStyle
+    let fontIn = '', fontB = 0, padIn = 0, padB = 0;
+    items.forEach((cell, p) => {
+        if (!cell.classList || !cell.classList.contains('mw-c')) return;   // 表头不吃这条逻辑
+        const i = p % cols;
+        let measured = false;
+        cell.querySelectorAll('input, b').forEach(el => {
+            const isInp = el.tagName === 'INPUT';
+            const txt = isInp ? el.value : (el.textContent || '');
+            if (!txt) return;
+            if (isInp) {
+                if (!fontIn) {
+                    const cs = getComputedStyle(el);
+                    fontIn = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+                    padIn = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight)
+                          + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth) + 2;
+                }
+                ctx.font = fontIn;
+                const w = ctx.measureText(String(txt)).width + padIn;
+                if (w > want[i]) { want[i] = w; measured = true; }
+            } else if (el.hasAttribute('data-tval') || el.hasAttribute('data-pval') || el.hasAttribute('data-wsum')) {
+                if (!fontB) {
+                    const cs = getComputedStyle(el);
+                    fontB = parseFloat(cs.fontSize) || 12;
+                    padB = 2;
+                }
+                // 等宽数字：字宽约等于字号 × 0.58，够准且不用再读一次样式
+                const w = String(txt).length * fontB * 0.58 + padB;
+                if (w > want[i]) { want[i] = w; measured = true; }
+            }
+        });
+        void measured;
+    });
+    // 下限：非首尾列（金额列）最多收到 CSS 最小宽，首尾两列（账户名 / 小计）不让收
+    const floorOf = i => (i > 0 && i < cols - 1) ? Math.min(72, base[i] || 72) : (base[i] || want[i]);
+    const sum = a => a.reduce((x, y) => x + (y || 0), 0);
+    const cs = getComputedStyle(grid);
+    const gapTotal = (parseFloat(cs.columnGap) || 0) * (cols - 1);
+    const total = () => sum(want) + gapTotal;
+    let over = total() - avail;
+    if (over > 2) {
+        // 先让「不需要变宽」的列把富余让出来（收到 CSS 最小宽为止；
+        // 已经撑宽的那些列一个像素都不缩，否则刚变宽又会被切掉）。
+        for (let pass = 0; pass < 12 && over > 2; pass++) {
+            let moved = 0;
+            for (let i = 1; i < cols - 1; i++) {
+                if (want[i] > base[i]) continue;
+                const room = want[i] - floorOf(i);
+                if (room <= 0) continue;
+                const take = Math.min(room, over - moved);
+                if (take <= 0) continue;
+                want[i] -= take; moved += take; over -= take;
+                if (over <= 2) break;
+            }
+            if (moved === 0) break;
+        }
+        // 让不动了就到此为止：宁可表格整体长一点、出个横向滚动条，
+        // 也绝不把装着大数那一列压回原宽把数字切掉 —— 用户要的正是「数字要看得全」。
+    }
+    grid.style.gridTemplateColumns = want.map(w => Math.max(0, Math.ceil(w)) + 'px').join(' ');
 }
 
 // ---- 月度账单「列」管理：改名 / 删除 / 新增 / 拖拽排序 ----
@@ -8357,6 +8471,8 @@ function updateMonthlyDerived() {
             b.textContent = v ? (v / netTotal * 100).toFixed(1) + '%' : '—';
         });
     }
+    // 5) 列宽自适应：合计/小计一旦算出大数，宽度跟着长一截，别把数字切掉
+    fitMonthlyColWidths();
 }
 
 function clearMonthlyInputs() {
