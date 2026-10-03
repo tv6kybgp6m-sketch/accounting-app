@@ -4301,11 +4301,36 @@ table.bill-stats {
    这时才允许横向滚动，并把钱包名列钉在左边不跟着滚。 */
 @media (max-width: 760px) {
     .mw-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    /* 手机上把每张行压缩到原来的一半：账户名列 / 每一格的宽度、以及行间距（gap）都减半。
+       gap 原来是 1px（行）/ 4px（列），1px 已经到像素极限不能再砍，所以列间距砍半到 2px，
+       行间距靠把单元格最小高度 28px → 14px 来让出来（视觉上的"行距"实际是这个高度）。 */
+    /* 列宽必须用固定值而不是 minmax(n,1fr)：容器是 min-width:max-content，
+       1fr 会被金额输入框的固有宽度（约 133px）顶回去，写 39px 根本不生效。
+       66px ≈ 原来每格 133px 的一半，这样一格能看清 6~7 位数字。 */
     .mw-grid {
         width: auto; min-width: max-content;
-        grid-template-columns: 72px repeat(var(--mw-cols, 7), minmax(78px, 1fr)) 124px;
+        /* 三段的宽度都是桌面端的 50%：账户名列 132→66、每一格 133→66、小计列 156→78。
+           中间那列必须是固定 66px 而不是 minmax(66px,1fr)：容器 min-width:max-content，
+           1fr 会被金额输入框的固有宽度顶回 133px（这个坑踩过一次）。 */
+        grid-template-columns: var(--mw-name-w, 66px) repeat(var(--mw-cols, 7), var(--mw-cw, 66px)) var(--mw-sum-w, 78px);
+        gap: 1px 2px;
     }
     .mw-corner, .mw-rowname { position: sticky; left: 0; z-index: 2; background: var(--bg-modal); }
-    .mw-rowname { min-height: 28px; }
-    .mw-c { min-height: 28px; }
+    .mw-rowname { min-height: 14px; padding: 0 2px 0 1px; }
+    .mw-c { min-height: 14px; }
+    /* 列变窄后字号必须跟着减，否则 6 位数金额和列名直接溢出成省略号 */
+    .mw-h, .mw-corner { font-size: 11px; padding: 0 1px 1px; }
+    .mw-name, .mw-col-label { font-size: 11px; padding-bottom: 0; }
+    .mw-c .text-input { padding: 2px 3px; font-size: 11px; }
+    /* 整张表的行高其实是被最后一列「小计」顶起来的：它竖着叠了「小计数字 + 对账单总额输入框 + 差额提示」三样，
+       在手机这么窄的列里就是 50px，带的每一行都跟着变 50px（grid 的行高=该行最高的那个格子）。
+       手机上一行只留「小计」一行小字 + 一个贴边的对账输入框，差额提示空着时不占位，
+       行高 50px → 26px 左右，正好是原来的一半。 */
+    .mw-sumcol { gap: 0; padding: 0; }
+    .mw-sumcol .mw-rownet { font-size: 9px; line-height: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mw-sumcol .mw-total { padding: 0 2px; font-size: 9px; height: 13px; text-align: left; }
+    .mw-sumcol .mw-diff { font-size: 9px; line-height: 11px; }
+    .mw-sumcol .mw-diff:empty { display: none; }
+    /* 账户名列只剩 36px，改名输入框同步收窄，不然改名字时弹的框会顶到邻居 */
+    .mw-col-input { width: 34px; font-size: 11px !important; padding: 1px 2px !important; }
 }
