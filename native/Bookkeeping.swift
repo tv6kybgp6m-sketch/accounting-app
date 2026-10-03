@@ -104,7 +104,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.39.20"
+        webView.customUserAgent = "BookkeepingMacApp/1.39.27"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"
@@ -112,6 +112,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         window.center()
         window.delegate = self
         window.makeKeyAndOrderFront(nil)
+        // 关掉「窗口/会话恢复」（v1.39.26 修，关键）。
+        // macOS 的 App State Restore 会把上一轮的窗口连同 WKWebView 的页面文档一起还原，
+        // 那一轮里 document 早就 complete、DOMContentLoaded 早 fire 完了 —— 网页的
+        // DOMContentLoaded 监听器永远不触发，init() 一次都跑不起来，
+        // 表现成「更新了新版本、界面看着正常，但数据逻辑全没启动」。
+        // 关掉恢复，每次启动都是干净的一次加载。
+        window.isRestorable = false
 
         let startURL = URL(string: "http://127.0.0.1:\(port)/index.html")!
         webView.load(URLRequest(url: startURL))

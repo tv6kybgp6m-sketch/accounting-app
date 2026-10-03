@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.25';
+const APP_VERSION = '1.39.27';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -218,6 +218,7 @@ let state = {
     balanceMembers: ['本人'],   // 家庭资产负债表的成员名单
     memberAddedAt: {},        // 成员名 -> 添加时间（名字就是身份，同支付方式的做法）
     balanceOwner: 'all',       // 当前筛选：'all' 或某成员
+    purgeSampleDone: false,   // 示例数据残留已清过一次（v1.39.26），只清一次就不再清
     balClassTags: Object.assign({}, BAL_CLASS_TAG_DEFAULT),  // 每个资产类别归到哪一类（固定资产/流动资产/长期投资/其他投资）
     sheetCols: DEFAULT_SHEET_COLS.map(c => ({ ...c })),       // 月度账单/资产负债页共用的自定义列（见下方 helper）
     reportMetric: 'expense',
@@ -299,6 +300,7 @@ function saveGeneratedFile(blob, filename) {
 
 function saveStateNow() {
     const data = {
+        purgeSampleDone: state.purgeSampleDone,
         transactions: state.transactions,
         categories: state.categories,
         budgets: state.budgets,
@@ -2888,6 +2890,7 @@ function loadState() {
             ensureAccountOrder();
             state.balances = Array.isArray(data.balances) ? data.balances : [];
             state.returns = Array.isArray(data.returns) ? data.returns : [];
+            state.purgeSampleDone = !!data.purgeSampleDone;
             // 资产归类：现金/货币基金/定期存款/股票基金/黄金/其他 各自归到
             // 固定资产 / 流动资产 / 长期投资 / 其他投资，由用户自己定；负债单独算
             state.balClassTags = Object.assign({}, BAL_CLASS_TAG_DEFAULT, data.balClassTags || {});
@@ -5811,145 +5814,6 @@ function importData(event) {
     finish();
 }
 
-function loadSampleData() {
-    // 这道确认是后补的：这个函数历史上会先把 state.balances 清空再写示例（已改成只补空格），
-    // 万一点错了就是「真实余额全丢」，加一句明确的话比事后抢救省事。
-    if (!confirm('要往账本里加一批「演示用」的示例数据吗？\n\n'
-        + '现在：交易 ' + state.transactions.length + ' 笔、余额 ' + state.balances.length + ' 条\n'
-        + '- 示例只会补你还没填的格子，不会覆盖、也不会删掉你已有的数\n'
-        + '- 示例自己是演示值（流水/余额/预算），看腻了用「清空数据」去掉\n\n'
-        + '确定点「确定」就加载。')) return;
-    const now = new Date();
-    const samples = [];
-    const expenseCats = DEFAULT_EXPENSE_CATEGORIES;
-    const incomeCats = DEFAULT_INCOME_CATEGORIES;
-
-    // Generate 3 months of data
-    for (let m = 2; m >= 0; m--) {
-        const monthDate = new Date(now.getFullYear(), now.getMonth() - m, 1);
-        const daysInMonth = getDaysInMonth(monthDate.getFullYear(), monthDate.getMonth() + 1);
-        const maxDay = m === 0 ? now.getDate() : daysInMonth;
-
-        // Monthly salary
-        if (m < 2) {
-            samples.push({
-                id: uid(), type: 'income', amount: 12000 + Math.floor(Math.random() * 2000),
-                categoryId: 'i_xinzi', date: `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}-01`,
-                note: '月度工资', createdAt: Date.now() - m * 1000000,
-            });
-        }
-
-        // Random expenses
-        for (let d = 1; d <= maxDay; d++) {
-            const numTxns = Math.floor(Math.random() * 4);
-            for (let i = 0; i < numTxns; i++) {
-                const cat = expenseCats[Math.floor(Math.random() * expenseCats.length)];
-                let amount;
-                if (cat.id === 'e_housing') amount = 3000 + Math.random() * 500;
-                else if (cat.id === 'e_food') amount = 15 + Math.random() * 80;
-                else if (cat.id === 'e_transport') amount = 5 + Math.random() * 50;
-                else if (cat.id === 'e_shopping') amount = 50 + Math.random() * 300;
-                else amount = 10 + Math.random() * 100;
-
-                samples.push({
-                    id: uid(), type: 'expense', amount: Math.round(amount * 100) / 100,
-                    categoryId: cat.id,
-                    date: `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
-                    note: '', createdAt: Date.now() - m * 1000000 + d * 1000 + i,
-                });
-            }
-        }
-
-        // Occasional income
-        if (m === 0 && Math.random() > 0.5) {
-            samples.push({
-                id: uid(), type: 'income', amount: 500 + Math.floor(Math.random() * 1000),
-                categoryId: 'i_zhuanqian', date: `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}-15`,
-                note: '项目奖金', createdAt: Date.now() - 500000,
-            });
-        }
-    }
-
-    // 资产负债示例：最近 6 个月，每月给主要账户记一次余额
-    const balSeed = {
-        a_wechat:   [3200, 2900, 3500, 3100, 3600, 3800],
-        a_alipay:   [5600, 6100, 5800, 6400, 6700, 7200],
-        a_cash:     [1200, 980, 1500, 1100, 1350, 1600],
-        a_icbc:     [42000, 43800, 45100, 46200, 47900, 49100],
-        a_boc:      [18000, 19200, 20500, 19800, 21300, 22600],
-        a_pingan:   [12500, 13200, 12800, 14100, 15600, 16200],
-        a_ccb:      [33000, 34200, 35100, 36900, 37800, 39200],
-        a_abc:      [15000, 15800, 16200, 17100, 16900, 17800],
-        a_eastmoney:[86000, 82300, 87600, 91200, 88900, 95400],
-        a_ttjj:     [54000, 52300, 57600, 61200, 58900, 65400],
-        a_morgan:   [38000, 36300, 37600, 41200, 38900, 45400],
-        a_huaan:    [29000, 28300, 29600, 31200, 29900, 33400],
-        a_house:    [2850000, 2850000, 2850000, 2850000, 2850000, 2850000],
-        l_loan:     [50000, 48500, 47000, 45200, 43800, 42000],
-    };
-    const balMonths = [];
-    for (let i = 5; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        balMonths.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-    }
-    // 家庭演示：账户类型共用，成员维度落在余额上。房贷/车/房归「家人」，其余归「本人」。
-    if (!Array.isArray(state.balanceMembers) || !state.balanceMembers.length) state.balanceMembers = ['本人'];
-    if (!state.balanceMembers.includes('家人')) state.balanceMembers.push('家人');
-    const memberForAccount = (accountId) => (['a_house'].includes(accountId) ? '家人' : '本人');
-    // ⚠️ 这里过去是 `state.balances = []`：等于「点一次『加载示例数据』就把你所有真实余额清空」，
-    // 只留示例。用户 2026-10-03 反馈的「支付宝那笔负债更新后不见了、10-02 才从备份导回来」就是这么来的。
-    // 现在只补空格：这一格已经有数就绝不碰它 —— 示例数据既不能覆盖也不能删用户的真实数据（v1.39.25 修）。
-    const existingBal = new Set(state.balances.map(b => String(b.id)));
-    Object.entries(balSeed).forEach(([accountId, series]) => {
-        if (!state.accounts.some(a => a.id === accountId)) return;
-        const member = memberForAccount(accountId);
-        const cat = balanceCatOf({ accountId });
-        balMonths.forEach((month, idx) => {
-            // 余额 id 必须是四段（成员 + 账户 + 类别 + 月），跟 _rebalanceId 保持一致。
-            // 过去这里拼成三段，写出来的示例记录和用户自己存的四段记录并存 → 同一格变成两条 →
-            // 资产负债表重复统计（「东方资产翻倍」就是这么来的）。
-            const id = _rebalanceId(member, accountId, month, cat);
-            if (existingBal.has(id)) return;
-            state.balances.push({
-                id, member, accountId, month, cat, amount: series[idx],
-                createdAt: Date.now(), updatedAt: Date.now(),
-            });
-        });
-    });
-
-    state.transactions = samples;
-
-    // 投资收益示例：与余额同样的 6 个月，含亏损月份
-    const retSeed = {
-        a_eastmoney: [1200, -800, 2400, 3100, -1500, 2600],
-        a_ttjj:      [800, 600, 950, 1100, -400, 1300],
-        a_morgan:    [600, 500, 720, 880, -300, 950],
-        a_huaan:     [400, 350, 480, 520, -200, 600],
-    };
-    state.returns = [];
-    Object.entries(retSeed).forEach(([accountId, series]) => {
-        if (!state.accounts.some(a => a.id === accountId)) return;
-        const member = memberForAccount(accountId);
-        balMonths.forEach((month, idx) => {
-            state.returns.push({
-                id: `${member}__${accountId}__${month}`, member, accountId, month, amount: series[idx],
-                createdAt: Date.now(), updatedAt: Date.now(),
-            });
-        });
-    });
-
-    // 预算同样不覆盖：用户自己设过的分类留着，示例只补他没有的（否则点一次就多出四条重复的）
-    const haveBud = new Set(state.budgets.map(b => b.categoryId));
-    state.budgets = state.budgets.concat([
-        { id: uid(), categoryId: 'e_food', amount: 2000 },
-        { id: uid(), categoryId: 'e_transport', amount: 500 },
-        { id: uid(), categoryId: 'e_shopping', amount: 1500 },
-        { id: uid(), categoryId: 'e_entertain', amount: 800 },
-    ].filter(b => !haveBud.has(b.categoryId)));
-    saveState();
-    renderView(state.currentView);
-    showToast('示例数据已加载', 'success');
-}
 
 function clearAllData() {
     if (!confirm('确定要清空所有数据吗？此操作不可恢复。')) return;
@@ -9640,6 +9504,7 @@ function _rebalanceId(member, accountId, month, cat) {
 //      表现成「某月某一格的数莫名少了一条」。
 function normalizeBalanceIds() {
     if (!Array.isArray(state.balances)) state.balances = [];
+    const balBackup = state.balances.slice();      // 出事时要能整批还原
     const primary = (state.balanceMembers && state.balanceMembers[0]) || '本人';
     const seen = new Set();
     let changed = false;
@@ -9648,12 +9513,28 @@ function normalizeBalanceIds() {
         if (!b.member) b.member = primary;
         const cat = b.cat || balanceCatOf(b);          // 老数据补上类别，id 才稳定
         b.cat = cat;
-        const newId = `${b.member}__${b.accountId}__${cat}__${b.month}`;
-        if (b.id !== newId) { b.id = newId; changed = true; }
-        if (seen.has(b.id)) b.__dup = true; else seen.add(b.id);
+        // ⚠️ 认不出类别时绝对不要去改 id（v1.39.27 防回归）：
+        //   一旦把四段降级成三段 `member__account__month`，同一格（比如支付宝同时是
+        //   货基 1674.82 和信用卡 30.35）就会撞成同一个 id，下面 seen 去重会把后一条
+        //   当成"重复"**无声删掉**——不打墓碑、不留痕，用户只看到"8 月资产没了"。
+        //   宁可留着这条格式奇怪的记录，也不能自己制造撞车。
+        const segs = String(b.id == null ? '' : b.id).split('__');
+        if (cat && segs.length < 4) {
+            const newId = `${b.member}__${b.accountId}__${cat}__${b.month}`;
+            if (b.id !== newId) { b.id = newId; changed = true; }
+        }
+        if (cat && seen.has(b.id)) b.__dup = true; else seen.add(b.id);
     });
+    // 去重前的守门绳：一次"整理"要是把余额一次性抹掉一大半，多半是逻辑写错了
+    // （而不是用户真删了那么多）。这时候宁可整批回滚，保住数据再说。
+    const balCountBefore = state.balances.length;
     if (state.balances.some(b => b.__dup)) changed = true;
     state.balances = state.balances.filter(b => !b.__dup);
+    if (balCountBefore >= 8 && state.balances.length < balCountBefore * 0.5) {
+        try { localStorage.setItem('bookkeeping_app_diag', 'bal-abort|' + balCountBefore + '->' + state.balances.length + '|' + Date.now()); } catch (e) {}
+        state.balances = balBackup;   // 整批还原，一条都不能少
+        return false;                 // 返回 false → 上层不会 saveState
+    }
     // 三段「影子」清理：只删「同一格已经有一条四段记录」的那种老格式残留
     // （member__account__month），别的一律留着。删掉的要打墓碑，
     // 否则下次从别的设备合并时，这条影子又被搬回来、翻倍的老毛病再犯。
@@ -9676,6 +9557,52 @@ function normalizeBalanceIds() {
         }
     }
     return changed;
+}
+
+// 定点清掉「加载示例数据」留下来的痕迹（v1.39.26）。
+// 示例数据和真实数据长得一模一样，用户根本分不出哪条能删，所以功能本身已经拿掉了；
+// 已经混进账本的这次顺手动手清，只认两个死签名，别的记录一笔都不碰：
+//  ① 2026-09-30 08:29:36 ~ 08:30:40 这一批（示例 131 笔挤在这 6 秒里，真实流水不可能这样）；
+//  ② 4 条示例预算（e_food 2000 / e_transport 500 / e_shopping 1500 / e_entertain 800）。
+// 跑过一次就写 state.purgeSampleDone = true，以后再也不会误删新记的账。
+function purgeSampleData() {
+    try {
+        const hit = (state.transactions || []).filter(t => t && t.createdAt >= 1790728170000 && t.createdAt <= 1790728250000).length;
+        localStorage.setItem('bookkeeping_app_diag',
+            'done=' + state.purgeSampleDone + ',tx=' + (state.transactions || []).length + ',hit=' + hit + '|' + Date.now());
+    } catch (e) { /* 诊断标记，失败无所谓 */ }
+    if (state.purgeSampleDone) return 0;
+    const SAMPLE_TX_WINDOW = [1790728170000, 1790728250000];   // 上面那 6 秒
+    const SAMPLE_BUDGETS = { e_food: 2000, e_transport: 500, e_shopping: 1500, e_entertain: 800 };
+    let n = 0;
+
+    if (Array.isArray(state.transactions)) {
+        const dropTx = state.transactions
+            .filter(t => t && t.createdAt >= SAMPLE_TX_WINDOW[0] && t.createdAt <= SAMPLE_TX_WINDOW[1])
+            .map(t => t.id);
+        if (dropTx.length) {
+            state.transactions = state.transactions.filter(t => dropTx.indexOf(t.id) < 0);
+            // 打墓碑：别的设备 / 下次合并时别把示例又搬回来
+            dropTx.forEach(id => { try { addTombstone('transactions', id); } catch (e) { /* 只本地删 */ } });
+            n += dropTx.length;
+        }
+    }
+
+    if (Array.isArray(state.budgets)) {
+        const dropB = state.budgets.filter(b =>
+            SAMPLE_BUDGETS[b.categoryId] !== undefined && Number(b.amount) === SAMPLE_BUDGETS[b.categoryId]
+        ).map(b => b.id);
+        if (dropB.length) {
+            state.budgets = state.budgets.filter(b => dropB.indexOf(b.id) < 0);
+            dropB.forEach(id => { try { addTombstone('budgets', id); } catch (e) { /* 只本地删 */ } });
+            n += dropB.length;
+        }
+    }
+
+    state.purgeSampleDone = true;
+    try { localStorage.setItem('bookkeeping_app_diag', n + '|' + Date.now()); } catch (e) { /* 诊断标记，失败无所谓 */ }
+    if (n) saveState();
+    return n;
 }
 
 function renameBalanceMember(old) {
@@ -11248,13 +11175,17 @@ function initEventListeners() {
 
 // ---- Init ----
 async function init() {
+    try { localStorage.setItem('bk_init', 'start|' + Date.now()); } catch (e) { /* 排障标记，失败无所谓 */ }
     loadRemoteSyncConfig();
     loadState();
     // 兜底：老账本 / 旧备份里的余额 id 统一成四段并清掉重复格。
     // 清理过就立刻落盘 —— 不然显示在是对的，导出的备份里还带着影子、别的设备一合并又翻倍。
     if (normalizeBalanceIds()) saveState();
+    // 顺手把「加载示例数据」留下的 131 笔假账 + 4 条示例预算清掉（只跑一次，见函数里的签名说明）
+    const _purged = purgeSampleData();
     pruneTombstones();
     applyTombstones();
+    if (_purged) showToast('已清掉 ' + _purged + ' 条示例数据', 'success');
     document.documentElement.setAttribute('data-theme', state.settings.theme);
     initEventListeners();
     initCategoryInteractions();
@@ -11265,6 +11196,8 @@ async function init() {
     if (isElectron()) {
         await initICloudSync();
         normalizeBalanceIds();   // 同步拉下来的账本可能是老格式，收一遍口子再渲染
+        const _p2 = purgeSampleData();   // iCloud 合并发来的账本里也可能带着示例残留
+        if (_p2) showToast('已清掉 ' + _p2 + ' 条示例数据', 'success');
         applyTombstones();
         renderView(state.currentView);
         updateSidebarSummary();
@@ -11276,12 +11209,9 @@ async function init() {
         if (document.visibilityState === 'hidden' && __saveTimer) flushState();
     });
 
-    // Auto-load sample data on first visit
-    const hasAnything = state.transactions.length > 0 || state.balances.length > 0 || state.returns.length > 0;
-    if (!hasAnything && !localStorage.getItem(STORAGE_KEY + '_visited')) {
-        localStorage.setItem(STORAGE_KEY + '_visited', '1');
-        loadSampleData();
-    }
+    // 首访自动播种示例数据这条已经整个拿掉了（v1.39.26）：示例数据会和真实数据混在一起，
+    // 用户根本分不清哪条是演示的、哪条是自己记的，清理还容易误删真数据。
+    // 空账本就是空账本，想试软件直接自己记一笔即可。
 
     // Auto-open transaction modal on launch if enabled
     if (state.settings.autoOpenAdd) {
@@ -11319,4 +11249,14 @@ document.addEventListener('wheel', function (e) {
     }
 }, { passive: false });
 
-document.addEventListener('DOMContentLoaded', init);
+// ⚠️ 致命坑（v1.39.26 修）：只挂 DOMContentLoaded 是不够的。
+// 原生壳（WKWebView）在「会话恢复」场景下会把上一轮的页面文档直接还原 ——
+// 那时 document 早已 readyState==='complete'、DOMContentLoaded 早就 fire 完了，
+// 这个监听器永远等不到 → init() 一次都不跑 → 页面看着在、但所有数据逻辑全部没启动
+// （连「清示例数据」这类启动时该做的事都跳过）。
+// 所以必须补一次 readyState 判断：已经好了就直接动手，别再干等。
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}

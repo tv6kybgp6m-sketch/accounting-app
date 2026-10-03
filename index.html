@@ -733,13 +733,7 @@
                                 </button>
                             </div>
                             <div class="settings-row">
-                                <div class="settings-label">加载示例数据</div>
-                                <button class="secondary-btn" onclick="loadSampleData()">
-                                    <i class="fa-solid fa-flask"></i> 加载示例
-                                </button>
-                            </div>
-                            <div class="settings-row">
-                                <div class="settings-label">清空所有数据</div>
+                                <div class="settings-label">清空所有数据<div class="settings-sublabel">会把账本恢复到空白状态，删掉的所有记录都会保留删除标记、同步到其它设备</div></div>
                                 <button class="danger-btn" onclick="clearAllData()">
                                     <i class="fa-solid fa-trash"></i> 清空
                                 </button>
@@ -1301,7 +1295,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.25').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.27').catch(() => {});
             });
         }
     </script>

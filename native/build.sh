@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 APP_NAME=Bookkeeping
-VERSION=1.39.20
+VERSION=1.39.27
 APP_DIR="dist/$APP_NAME.app"
 CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
@@ -45,7 +45,9 @@ echo "==> 写入 Info.plist..."
 cp native/Info.plist "$CONTENTS/Info.plist"
 
 echo "==> Ad-hoc 签名..."
-codesign --force --sign - "$APP_DIR"
+# dist 只是中间产物，装到 /Applications 时还会再签一次；
+# 这里签不上（沙箱/权限偶发 Operation not permitted）不该让整次构建中断。
+codesign --force --sign - "$APP_DIR" || echo "（dist 签名跳过，安装时再签）"
 
 echo "==> 校验..."
 test -x "$MACOS/$APP_NAME" && echo "executable OK"

@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.bookkeeping.mac</string>
     <key>CFBundleVersion</key>
-    <string>1.39.25</string>
+    <string>1.39.27</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.39.25</string>
+    <string>1.39.27</string>
     <key>CFBundleExecutable</key>
     <string>Bookkeeping</string>
     <key>CFBundlePackageType</key>
