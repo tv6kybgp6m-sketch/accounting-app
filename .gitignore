@@ -2,3 +2,13 @@ node_modules/
 .DS_Store
 *.log
 dist/
+
+# v1.39.31 起：构建脚本会在源文件后面留下「文件名+6位随机后缀」的临时副本
+js/app.js[0-9a-zA-Z]??
+js/sw.js[0-9a-zA-Z]??
+css/style.css[0-9a-zA-Z]??
+index.html[0-9a-zA-Z]??
+version.json[0-9a-zA-Z]??
+native/build.sh[0-9a-zA-Z]??
+native/Info.plist[0-9a-zA-Z]??
+native/Bookkeeping.swift[0-9a-zA-Z]??
