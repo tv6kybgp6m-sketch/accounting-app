@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.24';
+const APP_VERSION = '1.39.25';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1462,6 +1462,9 @@ function mergeRemoteData(remoteData) {
     state.accounts = Array.from(accMap.values());
     state.balances = Array.from(balMap.values());
     state.returns = Array.from(retMap.values());
+    // 云端副本可能是老版本写的，里面的余额 id 是三段式；不收一遍就会和本地四段并存、
+    // 同一格算两遍（「东方资产翻倍」）。放在 prune/apply 之前，墓碑判定才拿得到正确 id。
+    normalizeBalanceIds();
     pruneTombstones();
     applyTombstones();
     ensureAccountOrder();   // 云端旧副本没有 order 字段，合并后要补齐
@@ -2368,6 +2371,9 @@ async function applyImportedJSON(text, opts) {
     // 覆盖恢复 = 以备份为准，所以备份里有的记录不能留着旧的删除标记
     if (replace) clearTombstonesFor(parsed.data);
     mergeRemoteData(parsed);
+    // 导入的这份备份可能是老版本导出的，里面余额 id 是三段式。
+    // 不走这一步就会和本地的四段记录并存 → 同一格算两遍（「东方资产翻倍」那种）。
+    normalizeBalanceIds();
     applyTheme(state.settings.theme);
     renderView(state.currentView);
     updateSidebarSummary();
@@ -2924,20 +2930,8 @@ function loadState() {
             //      ② 降级后的 id 会撞上 saveMonthly 写下的删除墓碑（墓碑正是按降级后的 id 记的），
             //         applyTombstones 就把它当"用户删过"直接抹掉 —— 表现成"更新后某月某成员的数据没了"。
             //    id 的拼法必须和 saveMonthly / normalizeBalanceCats 完全一致。
-            (function migrateBalancesToMember() {
-                const primary = state.balanceMembers[0] || '本人';
-                const seen = new Set();
-                state.balances.forEach(b => {
-                    if (b.owner !== undefined) delete b.owner;
-                    if (!b.member) b.member = primary;
-                    if (!b.cat) b.cat = balanceCatOf(b);   // 老数据补上类别，id 才稳定
-                    const newId = `${b.member}__${b.accountId}__${b.cat}__${b.month}`;
-                    if (b.id !== newId) b.id = newId;
-                    if (seen.has(b.id)) { b.__dup = true; } else { seen.add(b.id); }
-                });
-                state.balances = state.balances.filter(b => !b.__dup);
-                state.accounts.forEach(a => { if (a.owner !== undefined) delete a.owner; });
-            })();
+            normalizeBalanceIds();
+            state.accounts.forEach(a => { if (a.owner !== undefined) delete a.owner; });
 
             // 交易记录补 member 字段：旧数据/导入未带成员，统一归到首要成员，
             // 否则净资产桥在「按成员筛选」时无法把流水正确归属到具体成员。
@@ -5818,6 +5812,13 @@ function importData(event) {
 }
 
 function loadSampleData() {
+    // 这道确认是后补的：这个函数历史上会先把 state.balances 清空再写示例（已改成只补空格），
+    // 万一点错了就是「真实余额全丢」，加一句明确的话比事后抢救省事。
+    if (!confirm('要往账本里加一批「演示用」的示例数据吗？\n\n'
+        + '现在：交易 ' + state.transactions.length + ' 笔、余额 ' + state.balances.length + ' 条\n'
+        + '- 示例只会补你还没填的格子，不会覆盖、也不会删掉你已有的数\n'
+        + '- 示例自己是演示值（流水/余额/预算），看腻了用「清空数据」去掉\n\n'
+        + '确定点「确定」就加载。')) return;
     const now = new Date();
     const samples = [];
     const expenseCats = DEFAULT_EXPENSE_CATEGORIES;
@@ -5895,13 +5896,22 @@ function loadSampleData() {
     if (!Array.isArray(state.balanceMembers) || !state.balanceMembers.length) state.balanceMembers = ['本人'];
     if (!state.balanceMembers.includes('家人')) state.balanceMembers.push('家人');
     const memberForAccount = (accountId) => (['a_house'].includes(accountId) ? '家人' : '本人');
-    state.balances = [];
+    // ⚠️ 这里过去是 `state.balances = []`：等于「点一次『加载示例数据』就把你所有真实余额清空」，
+    // 只留示例。用户 2026-10-03 反馈的「支付宝那笔负债更新后不见了、10-02 才从备份导回来」就是这么来的。
+    // 现在只补空格：这一格已经有数就绝不碰它 —— 示例数据既不能覆盖也不能删用户的真实数据（v1.39.25 修）。
+    const existingBal = new Set(state.balances.map(b => String(b.id)));
     Object.entries(balSeed).forEach(([accountId, series]) => {
         if (!state.accounts.some(a => a.id === accountId)) return;
         const member = memberForAccount(accountId);
+        const cat = balanceCatOf({ accountId });
         balMonths.forEach((month, idx) => {
+            // 余额 id 必须是四段（成员 + 账户 + 类别 + 月），跟 _rebalanceId 保持一致。
+            // 过去这里拼成三段，写出来的示例记录和用户自己存的四段记录并存 → 同一格变成两条 →
+            // 资产负债表重复统计（「东方资产翻倍」就是这么来的）。
+            const id = _rebalanceId(member, accountId, month, cat);
+            if (existingBal.has(id)) return;
             state.balances.push({
-                id: `${member}__${accountId}__${month}`, member, accountId, month, amount: series[idx],
+                id, member, accountId, month, cat, amount: series[idx],
                 createdAt: Date.now(), updatedAt: Date.now(),
             });
         });
@@ -5928,12 +5938,14 @@ function loadSampleData() {
         });
     });
 
-    state.budgets = [
+    // 预算同样不覆盖：用户自己设过的分类留着，示例只补他没有的（否则点一次就多出四条重复的）
+    const haveBud = new Set(state.budgets.map(b => b.categoryId));
+    state.budgets = state.budgets.concat([
         { id: uid(), categoryId: 'e_food', amount: 2000 },
         { id: uid(), categoryId: 'e_transport', amount: 500 },
         { id: uid(), categoryId: 'e_shopping', amount: 1500 },
         { id: uid(), categoryId: 'e_entertain', amount: 800 },
-    ];
+    ].filter(b => !haveBud.has(b.categoryId)));
     saveState();
     renderView(state.currentView);
     showToast('示例数据已加载', 'success');
@@ -7797,7 +7809,7 @@ function renderMonthlyEntry() {
 }
 
 // ============================================================
-//  月度账单列宽自适应 —— 平时是固定宽，金额长到装不下才把那一列撑宽一点（v1.39.24）
+//  月度账单列宽自适应 —— 平时是固定宽，金额长到装不下才把那一列撑宽一点（v1.39.25）
 // ============================================================
 // 列宽默认由 CSS 定死（手机窄屏压到 66px、桌面等分），好处是整张表不会乱跳；
 // 但录进去的金额一大（比如「1,447,000」）就会被输入框裁掉半截、看不全。
@@ -7822,7 +7834,7 @@ function fitMonthlyColWidths() {
         // 数字变长就该整体变长、允许再长一点；桌面端必须塞进弹窗，不准超出。
         // ⚠️ 用「格子本身比滚动容器宽」来判断，不能拿 grid.scrollWidth 比 grid.clientWidth：
         // 手机端 .mw-grid 是 min-width:max-content，它自己就已经比容器宽了，
-        // 这时 scrollWidth === clientWidth，判出来永远是 false（v1.39.24 修）。
+        // 这时 scrollWidth === clientWidth，判出来永远是 false（v1.39.25 修）。
         const _sc = grid.parentElement;
         grid.__mwAllowGrow = !!(_sc && _sc !== grid
             && grid.getBoundingClientRect().width > _sc.clientWidth + 2);
@@ -9617,6 +9629,55 @@ function _rebalanceId(member, accountId, month, cat) {
     return cat ? `${member}__${accountId}__${cat}__${month}` : `${member}__${accountId}__${month}`;
 }
 
+// 把 state.balances 收一遍口：补 member / cat、把 id 统一成四段、同格只留一条。
+//
+// ⚠️ 三条必须一起做，单做任何一条都会出事（v1.39.25 把这整块抽出来，
+//    loadState 和「导入 / 合并」都要走它）：
+//   ① 老数据/旧备份里 id 可能是三段 `member__account__month`，不补齐类别就重写 id 会撞车；
+//   ② 三段和四段若同时存在，同一格就变成两条记录，资产负债表会把这一格算两遍
+//      （用户 2026-10-03 反馈的「东方资产翻倍」）；
+//   ③ 只改 id 不去重也不行 —— 改写后两条的 id 相同，seen 去重会把后写的那条丢掉，
+//      表现成「某月某一格的数莫名少了一条」。
+function normalizeBalanceIds() {
+    if (!Array.isArray(state.balances)) state.balances = [];
+    const primary = (state.balanceMembers && state.balanceMembers[0]) || '本人';
+    const seen = new Set();
+    let changed = false;
+    state.balances.forEach(b => {
+        if (b.owner !== undefined) delete b.owner;
+        if (!b.member) b.member = primary;
+        const cat = b.cat || balanceCatOf(b);          // 老数据补上类别，id 才稳定
+        b.cat = cat;
+        const newId = `${b.member}__${b.accountId}__${cat}__${b.month}`;
+        if (b.id !== newId) { b.id = newId; changed = true; }
+        if (seen.has(b.id)) b.__dup = true; else seen.add(b.id);
+    });
+    if (state.balances.some(b => b.__dup)) changed = true;
+    state.balances = state.balances.filter(b => !b.__dup);
+    // 三段「影子」清理：只删「同一格已经有一条四段记录」的那种老格式残留
+    // （member__account__month），别的一律留着。删掉的要打墓碑，
+    // 否则下次从别的设备合并时，这条影子又被搬回来、翻倍的老毛病再犯。
+    const three = state.balances.filter(b => String(b.id).split('__').length === 3);
+    if (three.length) {
+        const dropIds = new Set();
+        three.forEach(b => {
+            const [m, acct, mo] = String(b.id).split('__');
+            const hit = state.balances.some(x => {
+                const q = String(x.id).split('__');
+                return q.length === 4 && q[0] === m && q[1] === acct && q[3] === mo
+                    && (x.cat || balanceCatOf(x)) === b.cat;
+            });
+            if (hit) dropIds.add(b.id);
+        });
+        if (dropIds.size) {
+            state.balances = state.balances.filter(b => !dropIds.has(b.id));
+            dropIds.forEach(id => { try { addTombstone('balances', id); } catch (e) { /* 墓碑不可用时就只本地删 */ } });
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 function renameBalanceMember(old) {
     const name = prompt('修改成员姓名', old);
     if (!name || !name.trim() || name.trim() === old) return;
@@ -11189,6 +11250,9 @@ function initEventListeners() {
 async function init() {
     loadRemoteSyncConfig();
     loadState();
+    // 兜底：老账本 / 旧备份里的余额 id 统一成四段并清掉重复格。
+    // 清理过就立刻落盘 —— 不然显示在是对的，导出的备份里还带着影子、别的设备一合并又翻倍。
+    if (normalizeBalanceIds()) saveState();
     pruneTombstones();
     applyTombstones();
     document.documentElement.setAttribute('data-theme', state.settings.theme);
@@ -11200,6 +11264,8 @@ async function init() {
     // 否则新机器上示例数据会和真实数据混在一起。
     if (isElectron()) {
         await initICloudSync();
+        normalizeBalanceIds();   // 同步拉下来的账本可能是老格式，收一遍口子再渲染
+        applyTombstones();
         renderView(state.currentView);
         updateSidebarSummary();
     }
