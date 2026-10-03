@@ -4042,7 +4042,12 @@ table.bill-stats {
    行距同理减半 —— 决定行高的是最后一列 .mw-sumcol（下面一起压），不是这些普通格子。 */
 .mw-grid {
     display: grid;
-    grid-template-columns: var(--mw-name-w, 132px) repeat(var(--mw-cols, 7), minmax(72px, 1fr)) var(--mw-sum-w, 156px);
+    /* v1.39.31：第一列「账户 / 渠道」缩窄 30%（132px → 92px）。
+       省下的 40px 不用手动分 —— 后面那几列是 minmax(72px, 1fr)，1fr 会自动把多出来的
+       空间整份吃掉，资产类别列跟着变宽，金额更好读。手机上不动（见 4333 行那条 media query）：
+       手机第一列本来就只有 66px，再缩到 46px 账户名只剩两个字的空，反而看不清。 */
+    --mw-name-w: 92px;
+    grid-template-columns: var(--mw-name-w) repeat(var(--mw-cols, 7), minmax(72px, 1fr)) var(--mw-sum-w, 156px);
     gap: 1px 4px; align-items: center;
     width: 100%;
 }
@@ -4054,6 +4059,26 @@ table.bill-stats {
     position: sticky; top: 0; z-index: 6; background: var(--bg-modal);
 }
 .mw-corner { text-align: left; padding-left: 2px; font-size: 13px; font-weight: 600; }
+
+/* ---- v1.39.31：「已核对」勾 ----
+   只在点过「沿用上期」（进入核对模式）之后才出现；没点沿用上期就是现在这个样子，
+   一格勾都没有，也不占任何位置。
+   勾是用 background 画的（不是 DOM 里塞一个 icon）：格子还是原来的宽和高，
+   手机上挤成那样也塞得下，行高不会被顶起来。
+   注意语义 —— 勾 = 「这一格我看过了、数填进去了」，不是「这格数是对的」。 */
+.mw-checking input.mw-chk {
+    background-color: #e8f6ec;
+    background-image: url("data:image/svg+xml;charset=utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M3.2 8.4l3.1 3.1L12.8 5' fill='none' stroke='%231D9E75' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 3px center;
+    background-size: 13px 13px;
+}
+/* 核对模式下，条带里那行「已核对 X / Y 格」的小账 */
+.mw-chkcount {
+    font-size: 12px; color: #0F6E56; background: #e8f6ec;
+    padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+}
+.mw-chkcount[hidden] { display: none; }
 /* 月度格子里的金额输入框：去掉原生的上下三角箭头（不需要用） */
 .mw-grid input[type="number"]::-webkit-outer-spin-button,
 .mw-grid input[type="number"]::-webkit-inner-spin-button {

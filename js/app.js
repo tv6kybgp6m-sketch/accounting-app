@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.30';
+const APP_VERSION = '1.39.31';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7484,6 +7484,38 @@ const monthlyFlowOpen = new Set();           // 本次打开里展开过「净�
 let monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
 let monthlyDirty = false;                    // 只有真敲过字才需要收草稿，否则会把上一次打开的旧 DOM 又捡回来
 
+// ---- v1.39.31：「已核对」勾 ----
+// 勾只在点过「沿用上期」之后才出现（核对模式），不点沿用上期就是原来那个样子，一格勾都没有。
+// 勾是「这格我看过了、数填进去了」，不是「这格数是对的」—— 所以它只记状态、绝不参与任何计算。
+// 勾记在一个独立的小本子里（草稿级），不进 state、不进同步文件：另一台机器不会因为勾而跟这边抢数据。
+const MW_CHK_KEY = 'bookkeeping_app_mwchk';
+let monthlyCheckMode = false;                // 本次打开里点过「沿用上期」= true
+let monthlyChecked = {};                     // { 格子 key: 1 }
+let monthlyUndo = null;                      // { month, member, snap }：撤销「上次修改」用
+
+function mwChkRead() {
+    try { return JSON.parse(localStorage.getItem(MW_CHK_KEY) || '{}') || {}; } catch (e) { return {}; }
+}
+function mwChkPersist() {
+    try {
+        const all = mwChkRead();
+        const k = monthlyMonthKey();
+        if (!k) return;
+        all[k] = monthlyChecked;
+        localStorage.setItem(MW_CHK_KEY, JSON.stringify(all));
+    } catch (e) { /* 存不下就算了：勾丢了不影响任何账 */ }
+}
+// 一格 = 一个 key：data-bal 是「账户__类别」，data-ret / data-flow-in 是账户 id
+function mwCellKeyOf(inp) {
+    if (inp.dataset.cell) return inp.dataset.cell;
+    return inp.dataset.ret || inp.dataset.flowIn || '';
+}
+function monthlyMonthKey() {
+    const m = getModalMonth('monthly');
+    if (!m) return '';
+    return m + '|' + monthlyMember();
+}
+
 function captureMonthlyInputs() {
     const list = document.getElementById('monthlyEntryList');
     if (!list) return;
@@ -7534,12 +7566,17 @@ function openMonthlyModal(month, focus) {
     monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
     monthlyFlowOpen.clear();
     monthlyDirty = false;
+    monthlyCheckMode = false;   // v1.39.31：重开弹窗不继承上次的勾，要勾得再点一次「沿用上期」
     paintModalMonth('monthly', month || monthlyDefaultMonth());
     const ms = document.getElementById('monthlyMemberSelect');
     if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
     modal.classList.remove('hidden');
     raiseOverlay('monthlyModal');
     renderMonthlyEntry();
+    // v1.39.31：进这页先拍一张「进来时的样子」，给「撤销上次修改」留后路。
+    // 只拍这一张（最后一次打开时的）就够了 —— 账本要的是「能退一步」，不是时光机。
+    snapshotMonthlyOnOpen();
+    updateUndoBtn();
     if (monthlyFocus === 'ret') {
         const first = document.querySelector('#monthlyEntryList [data-ret]');
         if (first) setTimeout(() => { first.scrollIntoView({ behavior: 'smooth', block: 'center' }); first.focus(); }, 120);
@@ -8126,8 +8163,16 @@ function mwAddAccount(raw) {
 function bindMonthlyEntry() {
     const list = document.getElementById('monthlyEntryList');
     if (!list) return;
-    list.querySelectorAll('[data-bal],[data-ret],[data-flow-in]').forEach(inp =>
-        inp.addEventListener('input', () => { monthlyDirty = true; updateMonthlyDerived(); }));
+    list.querySelectorAll('[data-bal],[data-ret],[data-flow-in]').forEach(inp => {
+        inp.addEventListener('input', () => { monthlyDirty = true; updateMonthlyDerived(); });
+        // v1.39.31：勾的来路和去路都挂在这两个事件上 ——
+        // 敲完按 Tab / 点下一格（blur）= 这格看过了，勾上；回头点进这一格（focus）= 摘掉勾（表示又动它了），
+        // 改完跳走再自动勾回来。核对模式下才生效，没点「沿用上期」时这两个监听什么也不做。
+        inp.addEventListener('blur', () => {
+            if (!monthlyCheckMode) return;
+            toggleChk(inp, String(inp.value).trim() !== '');
+        });
+    });
     list.querySelectorAll('[data-wallet-total]').forEach(inp =>
         inp.addEventListener('input', () => { monthlyDirty = true; updateMonthlyDerived(); }));
     bindMonthlyRowOps(list);
@@ -8371,6 +8416,8 @@ function updateMonthlyDerived() {
     }
     // 5) 列宽自适应：合计/小计一旦算出大数，宽度跟着长一截，别把数字切掉
     fitMonthlyColWidths();
+    // v1.39.31：核对模式下实时刷新「已核对 X / Y 格」（勾随敲随变）
+    if (typeof syncChkCount === 'function') syncChkCount();
 }
 
 function clearMonthlyInputs() {
@@ -8380,7 +8427,97 @@ function clearMonthlyInputs() {
         if (i.dataset.walletTotal !== undefined || i.dataset.bal !== undefined
             || i.dataset.ret !== undefined || i.dataset.flowIn !== undefined) i.value = '';
     });
+    // v1.39.31：数都擦了，勾也跟着收 —— 不然「已核对 8 / 0 格」挂在那儿更让人糊涂
+    monthlyChecked = {};
+    document.querySelectorAll('#monthlyEntryList .mw-chk').forEach(i => i.classList.remove('mw-chk'));
+    const k = monthlyMonthKey();
+    if (k) { try { const all = mwChkRead(); delete all[k]; localStorage.setItem(MW_CHK_KEY, JSON.stringify(all)); } catch (e) {} }
     updateMonthlyDerived();
+}
+
+// ---- v1.39.31：核对模式（勾）的开关 ----
+// 勾只在这几步里出现：点「沿用上期」进核对模式 → 敲完跳走自己勾 → 点保存收工。
+function enterCheckMode() {
+    const list = document.getElementById('monthlyEntryList');
+    monthlyCheckMode = true;
+    const k = monthlyMonthKey();
+    monthlyChecked = k ? (mwChkRead()[k] || {}) : {};
+    if (list) list.classList.remove('mw-checking');
+    // 挂上 .mw-checking 之后重画一次，勾的样式才跟已有值一起出来
+    if (list) list.classList.add('mw-checking');
+    if (list) list.querySelectorAll('[data-bal],[data-ret],[data-flow-in]').forEach(inp => {
+        if (monthlyChecked[mwCellKeyOf(inp)]) inp.classList.add('mw-chk');
+    });
+    updateMonthlyDerived();
+    syncChkCount();
+}
+function leaveCheckMode() {
+    const list = document.getElementById('monthlyEntryList');
+    monthlyCheckMode = false;
+    monthlyChecked = {};
+    if (list) {
+        list.classList.remove('mw-checking');
+        list.querySelectorAll('.mw-chk').forEach(i => i.classList.remove('mw-chk'));
+    }
+    const k = monthlyMonthKey();
+    if (k) { try { const all = mwChkRead(); delete all[k]; localStorage.setItem(MW_CHK_KEY, JSON.stringify(all)); } catch (e) {} }
+    syncChkCount();
+}
+// 勾的两种来路：敲完跳走（blur，值非空就勾上）；回头改数（focus，先摘掉勾，改完跳走再回来）
+function toggleChk(inp, on) {
+    const key = mwCellKeyOf(inp);
+    if (!key) return;
+    if (on) monthlyChecked[key] = 1; else delete monthlyChecked[key];
+    inp.classList.toggle('mw-chk', on);
+    mwChkPersist();
+    syncChkCount();
+}
+function syncChkCount() {
+    const el = document.getElementById('mwChkCount');
+    if (!el) return;
+    if (!monthlyCheckMode) { el.hidden = true; return; }
+    const list = document.getElementById('monthlyEntryList');
+    const all = list ? list.querySelectorAll('[data-bal],[data-ret],[data-flow-in]') : [];
+    let filled = 0;
+    all.forEach(i => { if (String(i.value).trim() !== '') filled++; });
+    let done = 0;
+    Object.keys(monthlyChecked).forEach(k => { if (monthlyChecked[k]) done++; });
+    el.hidden = false;
+    el.textContent = `已核对 ${done} / ${filled}`;
+}
+
+// ---- v1.39.31：撤销「打开这页之后做的修改」----
+// 防的是误触：月份没切对、数字填错、手快点了保存 —— 撤销一下就回到刚打开这页的样子。
+function snapshotMonthlyOnOpen() {
+    const month = getModalMonth('monthly');
+    if (!month) return;
+    const member = monthlyMember();
+    const cp = arr => (arr || []).filter(x => x.month === month && x.member === member).map(x => Object.assign({}, x));
+    monthlyUndo = { month, member, balances: cp(state.balances), returns: cp(state.returns) };
+}
+function updateUndoBtn() {
+    const b = document.getElementById('mwUndoBtn');
+    if (b) b.hidden = !monthlyUndo;
+}
+function undoLastMonthlySave() {
+    if (!monthlyUndo) { showToast('没有可以撤销的修改', 'info'); return; }
+    if (!confirm('撤销后，这一个月的余额和收益会回到你刚打开这页时的样子\n（后来改过、保存过的都会退回来）。\n要撤销吗？')) return;
+    const { month, member, balances, returns } = monthlyUndo;
+    const wantBal = new Set(balances.map(b => b.id));
+    const wantRet = new Set(returns.map(r => r.id));
+    // 快照里没有、现在还躺着的：先打墓碑再删，别的设备同步时才不会又把旧账并回来
+    (state.balances || []).forEach(b => { if (b.month === month && b.member === member && !wantBal.has(b.id)) addTombstone('balances', b.id); });
+    (state.returns || []).forEach(r => { if (r.month === month && r.member === member && !wantRet.has(r.id)) addTombstone('returns', r.id); });
+    state.balances = (state.balances || []).filter(b => !(b.month === month && b.member === member));
+    state.returns = (state.returns || []).filter(r => !(r.month === month && r.member === member));
+    balances.forEach(b => state.balances.push(Object.assign({}, b)));
+    returns.forEach(r => state.returns.push(Object.assign({}, r)));
+    saveState();
+    leaveCheckMode();
+    renderMonthlyEntry();          // 重画一次，输入框里就是撤销后的值
+    monthlyUndo = null;
+    updateUndoBtn();
+    showToast('已撤销，回到打开这页时的样子', 'success');
 }
 
 function copyLastMonthBalances() {
@@ -8390,6 +8527,12 @@ function copyLastMonthBalances() {
     if (!prev) { showToast('没有上个月的记录', 'info'); return; }
     const member = monthlyMember();
     const prevCells = balanceCellsAtMonth(prev, member);
+    // v1.39.31：这月已经有数了就先问一句。沿用上期本来就只填空着的格子（下面那个 if 兜着），
+    // 但万一月份没切对、或者手快误触，一键下去会动到不该动的格子 —— 问了再填最稳。
+    const exist = [...document.querySelectorAll('#monthlyEntryList [data-bal],[data-ret],[data-flow-in]')]
+        .filter(i => String(i.value).trim() !== '').length;
+    if (exist > 0
+        && !confirm(`这个月已经填了 ${exist} 格了。\n继续「沿用上期」只会把空着的格子补上，已经填过的不会被覆盖。\n要继续吗？`)) return;
     let filled = 0;
     document.querySelectorAll('#monthlyEntryList [data-bal]').forEach(inp => {
         if (String(inp.value).trim() !== '') return;
@@ -8400,6 +8543,7 @@ function copyLastMonthBalances() {
     if (!filled) { showToast('上个月也没有记余额', 'info'); return; }
     monthlyDirty = true;
     updateMonthlyDerived();
+    enterCheckMode();   // v1.39.31：填完就进核对模式，格子开始长勾
     showToast(`已带入上期 ${filled} 格的数，改成这个月的数就行`, 'success');
 }
 
@@ -8491,6 +8635,7 @@ function saveMonthly() {
     // 老数据（一个账户一个月只有一个数、没有类别）顺手升级成新口径，老的那条作废
     normalizeBalanceCats();
     saveState();
+    leaveCheckMode();          // v1.39.31：保存 = 这个月的账定稿了，勾收起来（下次重新走一遍）
     closeMonthlyModal();
     const [y, m] = month.split('-').map(Number);
     state.balancePeriod = 'month'; state.balanceYear = y; state.balanceMonth = m;

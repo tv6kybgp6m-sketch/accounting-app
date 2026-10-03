@@ -1007,6 +1007,9 @@
                     <div class="bal-entry-actions">
                         <button class="secondary-btn" onclick="copyLastMonthBalances()"><i class="fa-solid fa-copy"></i> 沿用上期</button>
                         <button class="secondary-btn" onclick="clearMonthlyInputs()"><i class="fa-solid fa-eraser"></i> 清空</button>
+                        <span class="mw-chkcount" id="mwChkCount" hidden>已核对 0 / 0</span>
+                        <button class="secondary-btn" id="mwUndoBtn" onclick="undoLastMonthlySave()" hidden>
+                            <i class="fa-solid fa-rotate-left"></i> 撤销上次修改</button>
                         <span class="ret-tip">余额填期末数；收益只填市值变动、亏损填负数；净入金点「＋」填</span>
                     </div>
                     <div id="monthlyEntryList" class="balance-entry-list"></div>
@@ -1295,7 +1298,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.30').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.31').catch(() => {});
             });
         }
     </script>
