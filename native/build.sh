@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 APP_NAME=Bookkeeping
-VERSION=1.39.31
+VERSION=1.39.32
 APP_DIR="dist/$APP_NAME.app"
 CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
@@ -22,6 +22,10 @@ swiftc -target arm64-apple-macosx12.0 -O \
 echo "==> 复制网页资源..."
 cp index.html "$RES/"
 cp version.json "$RES/"
+# sw.js 漏过一次（v1.39.31 手动塞进 /Applications 才补上）：
+# 原生壳跑在 http://127.0.0.1，页面照样注册 service worker，站点缓存名就在这文件里。
+# 少了它 —— 打出来的 .app 和 DMG 里 SW 是空的，PWA 离线缓存整个失效。
+cp sw.js "$RES/"
 cp -R css js vendor icons "$RES/"
 
 echo "==> 生成应用图标..."
@@ -53,6 +57,7 @@ echo "==> 校验..."
 test -x "$MACOS/$APP_NAME" && echo "executable OK"
 test -f "$RES/index.html"  && echo "index.html OK"
 test -f "$RES/AppIcon.icns" && echo "icon OK"
+test -f "$RES/sw.js" && grep -q "CACHE_NAME" "$RES/sw.js" && echo "sw.js OK"
 spctl -a -vv "$APP_DIR" 2>/dev/null | head -3 || true
 
 echo ""

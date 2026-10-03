@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.31';
+const APP_VERSION = '1.39.32';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7484,7 +7484,7 @@ const monthlyFlowOpen = new Set();           // 本次打开里展开过「净�
 let monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
 let monthlyDirty = false;                    // 只有真敲过字才需要收草稿，否则会把上一次打开的旧 DOM 又捡回来
 
-// ---- v1.39.31：「已核对」勾 ----
+// ---- v1.39.32：「已核对」勾 ----
 // 勾只在点过「沿用上期」之后才出现（核对模式），不点沿用上期就是原来那个样子，一格勾都没有。
 // 勾是「这格我看过了、数填进去了」，不是「这格数是对的」—— 所以它只记状态、绝不参与任何计算。
 // 勾记在一个独立的小本子里（草稿级），不进 state、不进同步文件：另一台机器不会因为勾而跟这边抢数据。
@@ -7566,16 +7566,16 @@ function openMonthlyModal(month, focus) {
     monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
     monthlyFlowOpen.clear();
     monthlyDirty = false;
-    monthlyCheckMode = false;   // v1.39.31：重开弹窗不继承上次的勾，要勾得再点一次「沿用上期」
+    monthlyCheckMode = false;   // v1.39.32：重开弹窗不继承上次的勾，要勾得再点一次「沿用上期」
     paintModalMonth('monthly', month || monthlyDefaultMonth());
     const ms = document.getElementById('monthlyMemberSelect');
     if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
     modal.classList.remove('hidden');
     raiseOverlay('monthlyModal');
     renderMonthlyEntry();
-    // v1.39.31：进这页先拍一张「进来时的样子」，给「撤销上次修改」留后路。
-    // 只拍这一张（最后一次打开时的）就够了 —— 账本要的是「能退一步」，不是时光机。
-    snapshotMonthlyOnOpen();
+    // v1.39.32：进这页先拍一张「进来时的样子」，给「撤销」留后路（撤销「改了没保存就全丢掉」）。
+    // 真正撤「刚保存那一次」的快照是 saveMonthly 里拍的，那张会盖掉这张。
+    snapshotMonthlyForUndo();
     updateUndoBtn();
     if (monthlyFocus === 'ret') {
         const first = document.querySelector('#monthlyEntryList [data-ret]');
@@ -8165,7 +8165,7 @@ function bindMonthlyEntry() {
     if (!list) return;
     list.querySelectorAll('[data-bal],[data-ret],[data-flow-in]').forEach(inp => {
         inp.addEventListener('input', () => { monthlyDirty = true; updateMonthlyDerived(); });
-        // v1.39.31：勾的来路和去路都挂在这两个事件上 ——
+        // v1.39.32：勾的来路和去路都挂在这两个事件上 ——
         // 敲完按 Tab / 点下一格（blur）= 这格看过了，勾上；回头点进这一格（focus）= 摘掉勾（表示又动它了），
         // 改完跳走再自动勾回来。核对模式下才生效，没点「沿用上期」时这两个监听什么也不做。
         inp.addEventListener('blur', () => {
@@ -8416,7 +8416,7 @@ function updateMonthlyDerived() {
     }
     // 5) 列宽自适应：合计/小计一旦算出大数，宽度跟着长一截，别把数字切掉
     fitMonthlyColWidths();
-    // v1.39.31：核对模式下实时刷新「已核对 X / Y 格」（勾随敲随变）
+    // v1.39.32：核对模式下实时刷新「已核对 X / Y 格」（勾随敲随变）
     if (typeof syncChkCount === 'function') syncChkCount();
 }
 
@@ -8427,7 +8427,7 @@ function clearMonthlyInputs() {
         if (i.dataset.walletTotal !== undefined || i.dataset.bal !== undefined
             || i.dataset.ret !== undefined || i.dataset.flowIn !== undefined) i.value = '';
     });
-    // v1.39.31：数都擦了，勾也跟着收 —— 不然「已核对 8 / 0 格」挂在那儿更让人糊涂
+    // v1.39.32：数都擦了，勾也跟着收 —— 不然「已核对 8 / 0 格」挂在那儿更让人糊涂
     monthlyChecked = {};
     document.querySelectorAll('#monthlyEntryList .mw-chk').forEach(i => i.classList.remove('mw-chk'));
     const k = monthlyMonthKey();
@@ -8435,7 +8435,7 @@ function clearMonthlyInputs() {
     updateMonthlyDerived();
 }
 
-// ---- v1.39.31：核对模式（勾）的开关 ----
+// ---- v1.39.32：核对模式（勾）的开关 ----
 // 勾只在这几步里出现：点「沿用上期」进核对模式 → 敲完跳走自己勾 → 点保存收工。
 function enterCheckMode() {
     const list = document.getElementById('monthlyEntryList');
@@ -8486,23 +8486,68 @@ function syncChkCount() {
     el.textContent = `已核对 ${done} / ${filled}`;
 }
 
-// ---- v1.39.31：撤销「打开这页之后做的修改」----
-// 防的是误触：月份没切对、数字填错、手快点了保存 —— 撤销一下就回到刚打开这页的样子。
-function snapshotMonthlyOnOpen() {
+// ---- v1.39.32：撤销「月度账单的一次保存」----
+// 快照记的是「最近一次会动 state 之前的样子」，在两处拍：
+//   ① 打开这页时 —— 撤销「进来了、填了一通、还没点保存就想全丢掉」
+//   ② 每次点保存之前 —— 撤销「刚保存的那一次」，这才是防误触的主场（保存完弹窗就关了，
+//      撤销入口得在弹窗外面，所以保存后给一条带「撤销」按钮的提示条，见 showMonthlyUndoToast）
+// 原来只在打开时拍一张，导致「记了 → 保存 → 再打开 → 撤销」撤了个寂寞：
+// 快照拍到的就是刚保存完的样子，撤回到等于没撤。
+function snapshotMonthlyForUndo() {
     const month = getModalMonth('monthly');
     if (!month) return;
     const member = monthlyMember();
     const cp = arr => (arr || []).filter(x => x.month === month && x.member === member).map(x => Object.assign({}, x));
     monthlyUndo = { month, member, balances: cp(state.balances), returns: cp(state.returns) };
 }
+// 快照跟现在一模一样 = 白撤一场，直接明说，别让用户对着没变的数字发懵
+function monthlySnapDiffers(snap) {
+    if (!snap) return false;
+    const { month, member } = snap;
+    const curB = (state.balances || []).filter(b => b.month === month && b.member === member);
+    const curR = (state.returns || []).filter(r => r.month === month && r.member === member);
+    if (snap.balances.length !== curB.length) return true;
+    if (snap.returns.length !== curR.length) return true;
+    const mapB = new Map(curB.map(b => [b.id, b]));
+    for (const a of snap.balances) {
+        const c = mapB.get(a.id);
+        if (!c || c.amount !== a.amount || c.updatedAt !== a.updatedAt) return true;
+    }
+    const mapR = new Map(curR.map(r => [r.id, r]));
+    for (const a of snap.returns) {
+        const c = mapR.get(a.id);
+        if (!c || c.amount !== a.amount || c.updatedAt !== a.updatedAt) return true;
+    }
+    return false;
+}
 function updateUndoBtn() {
     const b = document.getElementById('mwUndoBtn');
     if (b) b.hidden = !monthlyUndo;
 }
+// 保存后弹窗会自动关掉，撤销按钮要能在弹窗外面点得到 —— 挂一条带「撤销」的提示条。
+// 复用删除操作那套 .toast.undo 样式（它带 pointer-events:auto，不会穿透点到底下的列表）。
+function showMonthlyUndoToast(snap) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = 'toast undo';
+    toast.innerHTML = `<i class="fa-solid fa-floppy-disk"></i> 已保存 ${_esc(snap.month)}｜${_esc(snap.member)} 的月度账单`
+        + `<button class="toast-undo-btn" type="button">撤销这次保存</button>`;
+    const btn = toast.querySelector('.toast-undo-btn');
+    if (btn) btn.addEventListener('click', () => { toast.remove(); undoLastMonthlySave(); });
+    container.appendChild(toast);
+    setTimeout(() => { toast.classList.add('fade-out'); setTimeout(() => toast.remove(), 300); }, 20000);
+}
 function undoLastMonthlySave() {
-    if (!monthlyUndo) { showToast('没有可以撤销的修改', 'info'); return; }
-    if (!confirm('撤销后，这一个月的余额和收益会回到你刚打开这页时的样子\n（后来改过、保存过的都会退回来）。\n要撤销吗？')) return;
-    const { month, member, balances, returns } = monthlyUndo;
+    if (!monthlyUndo) { showToast('没有可以撤销的保存', 'info'); return; }
+    const snap = monthlyUndo;
+    if (!monthlySnapDiffers(snap)) {
+        showToast(`${snap.month}｜${snap.member} 没改过什么，没什么可撤销的`, 'info');
+        return;
+    }
+    if (!confirm(`撤销后，${snap.month}｜${snap.member} 的余额和收益会回到「上次点保存之前」的样子：\n`
+        + `这次保存新记的数会退掉、改过的变回去、清空掉的会回来。\n要撤销吗？`)) return;
+    const { month, member, balances, returns } = snap;
     const wantBal = new Set(balances.map(b => b.id));
     const wantRet = new Set(returns.map(r => r.id));
     // 快照里没有、现在还躺着的：先打墓碑再删，别的设备同步时才不会又把旧账并回来
@@ -8514,10 +8559,12 @@ function undoLastMonthlySave() {
     returns.forEach(r => state.returns.push(Object.assign({}, r)));
     saveState();
     leaveCheckMode();
-    renderMonthlyEntry();          // 重画一次，输入框里就是撤销后的值
+    renderMonthlyEntry();                    // 重画一次：弹窗开着，格子里的数立刻变回撤销后的值
+    if (state.currentView === 'balance') renderBalance();     // 关着的话，当前页也得跟着变
+    if (state.currentView === 'returns') renderReturns();
     monthlyUndo = null;
     updateUndoBtn();
-    showToast('已撤销，回到打开这页时的样子', 'success');
+    showToast(`已撤销：${month}｜${member} 回到上次保存前的样子`, 'success');
 }
 
 function copyLastMonthBalances() {
@@ -8527,7 +8574,7 @@ function copyLastMonthBalances() {
     if (!prev) { showToast('没有上个月的记录', 'info'); return; }
     const member = monthlyMember();
     const prevCells = balanceCellsAtMonth(prev, member);
-    // v1.39.31：这月已经有数了就先问一句。沿用上期本来就只填空着的格子（下面那个 if 兜着），
+    // v1.39.32：这月已经有数了就先问一句。沿用上期本来就只填空着的格子（下面那个 if 兜着），
     // 但万一月份没切对、或者手快误触，一键下去会动到不该动的格子 —— 问了再填最稳。
     const exist = [...document.querySelectorAll('#monthlyEntryList [data-bal],[data-ret],[data-flow-in]')]
         .filter(i => String(i.value).trim() !== '').length;
@@ -8543,7 +8590,7 @@ function copyLastMonthBalances() {
     if (!filled) { showToast('上个月也没有记余额', 'info'); return; }
     monthlyDirty = true;
     updateMonthlyDerived();
-    enterCheckMode();   // v1.39.31：填完就进核对模式，格子开始长勾
+    enterCheckMode();   // v1.39.32：填完就进核对模式，格子开始长勾
     showToast(`已带入上期 ${filled} 格的数，改成这个月的数就行`, 'success');
 }
 
@@ -8554,6 +8601,9 @@ function saveMonthly() {
     const list = document.getElementById('monthlyEntryList');
     if (!list) return;
     let savedBal = 0, savedRet = 0, removed = 0;
+    // v1.39.32 修掉的坑：撤销快照只在打开弹窗时拍，于是「记了 → 保存 → 再打开 → 撤销」撤了个寂寞
+    // ——快照里装的就是刚保存完的样子。快照必须在这里拍：动 state 之前的那一张，才撤得掉这次保存。
+    snapshotMonthlyForUndo();
     // 先把这个成员这个月、这些账户的旧余额整批清掉，再按格子写回去。
     // 不清的话同一笔数会同时留着「老的一条（没有类别）」和「新的一条（有类别）」，
     // 下一次读出来直接翻倍 —— 这是改口径时最容易踩的坑。
@@ -8635,7 +8685,7 @@ function saveMonthly() {
     // 老数据（一个账户一个月只有一个数、没有类别）顺手升级成新口径，老的那条作废
     normalizeBalanceCats();
     saveState();
-    leaveCheckMode();          // v1.39.31：保存 = 这个月的账定稿了，勾收起来（下次重新走一遍）
+    leaveCheckMode();          // v1.39.32：保存 = 这个月的账定稿了，勾收起来（下次重新走一遍）
     closeMonthlyModal();
     const [y, m] = month.split('-').map(Number);
     state.balancePeriod = 'month'; state.balanceYear = y; state.balanceMonth = m;
@@ -8652,6 +8702,8 @@ function saveMonthly() {
     if (savedRet) parts.push(`${savedRet} 笔收益`);
     if (removedRet) parts.push(`删除 ${removedRet} 笔收益`);
     showToast('已保存' + parts.join('、'), 'success');
+    // 保存完弹窗就关了，撤销入口放这儿（弹窗里那个按钮跟着关窗一起没影了）
+    if (monthlyUndo && monthlySnapDiffers(monthlyUndo)) showMonthlyUndoToast(monthlyUndo);
 }
 
 // 老口径的余额（一个账户一个月只有一个数、没有 cat 字段）升级成新口径：
