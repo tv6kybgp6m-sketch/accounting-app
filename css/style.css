@@ -3447,9 +3447,15 @@ table.bill-stats {
 .ins-member-wrap .ins-member { border-radius: 12px 4px 4px 12px; padding-right: 6px; }
 .ins-member-wrap i[data-insact] {
     cursor: pointer; color: var(--text-tertiary); font-size: 10px; padding: 2px 1px;
+    /* v1.39.30：改名 / 删除这两个小图标以前一直挂在每个成员右边，一排人底下两个小叉，
+       视觉很吵。现在默认彻底不占位，点一下该成员才浮出来（.editing），点别处收起。 */
+    display: none;
 }
+.ins-member-wrap.editing i[data-insact] { display: inline-block; }
 .ins-member-wrap i[data-insact]:hover { color: var(--accent); }
 .ins-member-wrap i[data-insact="del"]:hover { color: var(--expense); }
+/* 展开态：小图标浮现在右上，像 macOS 列表行 hover 出来的操作位 */
+.ins-member-wrap.editing { background: var(--bg-input); border-radius: 8px; padding: 0 2px; }
 
 /* ---- 记余额/记收益：成员+月份同行；余额分资产/负债两段 ---- */
 .bal-entry-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 4px; }

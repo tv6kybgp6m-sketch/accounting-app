@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.29';
+const APP_VERSION = '1.39.30';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -9156,12 +9156,17 @@ function reorderInsuranceMember(from, to) {
 }
 
 // ---- 保险保障：成员 + 8 险种清单 ----
+// 当前展开「改名 / 删除」图标的保险成员名（v1.39.30）。点成员 chip 才浮出那两个小图标，
+// 点别处收起。这里存名字而不是事后补 class：renderInsuranceSection 每次重建 innerHTML，
+// 用变量在渲染时带上 editing 才不会被重绘冲掉。
+let insActionsFor = null;
+
 function renderInsuranceSection() {
     const membersBox = document.getElementById('insMembers');
     const listBox = document.getElementById('insList');
     if (!membersBox || !listBox) return;
     membersBox.innerHTML = state.insuranceMembers.map(m =>
-        `<span class="ins-member-wrap" draggable="true" data-inswrap="${_esc(m)}" title="按住拖动可调整成员顺序"><button class="ins-member ${m === fundEditMember ? 'active' : ''}" data-insmember="${_esc(m)}" title="${_esc(m)} 的年保费">${_esc(m)}<span class="im-prem">${memberPremiumText(m)}</span></button>` +
+        `<span class="ins-member-wrap ${insActionsFor === m ? 'editing' : ''}" draggable="true" data-inswrap="${_esc(m)}" title="按住拖动可调整成员顺序"><button class="ins-member ${m === fundEditMember ? 'active' : ''}" data-insmember="${_esc(m)}" title="${_esc(m)} 的年保费">${_esc(m)}<span class="im-prem">${memberPremiumText(m)}</span></button>` +
         `<i class="fa-solid fa-pen" draggable="false" data-insact="rename" data-insmember="${_esc(m)}" title="改名"></i>` +
         `<i class="fa-solid fa-xmark" draggable="false" data-insact="del" data-insmember="${_esc(m)}" title="删除"></i></span>`
     ).join('') + `<button class="ins-member ins-add" data-insadd="1"><i class="fa-solid fa-plus"></i> 成员</button>`
@@ -9198,13 +9203,26 @@ function renderInsuranceSection() {
 
     if (!membersBox.$wired) {
         membersBox.$wired = true;
+        // 点保险区以外的地方就收起浮出来的图标（v1.39.30）。membersBox 自己的点击
+        // 下一行还会冒泡上来，但那时 closest('.ins-member-wrap') 命中，会被下面的早退挡掉。
+        document.addEventListener('click', e => {
+            if (e.target.closest && e.target.closest('.ins-member-wrap')) return;
+            if (insActionsFor === null) return;
+            insActionsFor = null;
+            membersBox.querySelectorAll('.ins-member-wrap.editing').forEach(w => w.classList.remove('editing'));
+        });
         membersBox.addEventListener('click', e => {
             const el = e.target.closest ? e.target.closest('[data-insmember],[data-insadd]') : null;
             if (!el) return;
             if (el.dataset.insadd) { addInsMember(); return; }
             const name = el.dataset.insmember;
             if (name === undefined) return;
-            if (el.tagName === 'BUTTON') { setInsMember(name); return; }
+            if (el.tagName === 'BUTTON') {
+                // 再点一下同一个成员就把图标收回去（v1.39.30）
+                insActionsFor = (insActionsFor === name) ? null : name;
+                setInsMember(name);
+                return;
+            }
             if (el.dataset.insact === 'rename') renameInsuranceMember(name);
             else if (el.dataset.insact === 'del') deleteInsuranceMember(name);
         });
