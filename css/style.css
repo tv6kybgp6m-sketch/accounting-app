@@ -4206,7 +4206,7 @@ table.bill-stats {
     border: 1px solid var(--border); background: transparent; color: var(--text-secondary);
 }
 .mw-chip:hover { border-color: var(--border-strong); color: var(--text-primary); }
-.mw-c { display: flex; align-items: center; justify-content: center; min-height: 25px; min-width: 0; }
+.mw-c { position: relative; display: flex; align-items: center; justify-content: center; min-height: 25px; min-width: 0; }
 .mw-c .text-input { width: 100%; min-width: 0; padding: 4px 6px; font-size: 13px; text-align: center; }
 /* 一个钱包里同类资产有好几个账户时，格子纵向叠，每个前面挂一个极小的账户名 */
 .mw-tag {
@@ -4314,6 +4314,37 @@ table.bill-stats {
     outline: none; border-color: var(--accent); background: var(--bg-modal);
     box-shadow: 0 0 0 3px rgba(10, 122, 255, .18);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+/* v1.39.35：月度账单「账户 × 渠道」开关。锁定的格不能填，灰显 + 斜纹；
+   右上角小锁按钮点开 / 锁定。所有渠道都保留，哪个账户真在那个渠道有钱时再打开。 */
+.mw-lockbtn {
+    position: absolute; top: 1px; right: 2px; z-index: 3;
+    width: 16px; height: 16px; padding: 0; margin: 0; border: none; border-radius: 4px;
+    background: transparent; cursor: pointer; font-size: 10px; line-height: 16px;
+    opacity: .35; color: var(--text-tertiary);
+    transition: opacity .12s, background .12s;
+}
+.mw-c:hover .mw-lockbtn { opacity: .9; }
+.mw-cell-locked .mw-lockbtn { opacity: .7; }
+.mw-lockbtn:hover { opacity: 1; background: var(--bg-card-hover); }
+.mw-c:has(.mw-lockbtn) .text-input { padding-right: 17px; }
+.mw-cell-locked {
+    background: repeating-linear-gradient(45deg, transparent 0 5px, rgba(128,128,128,.06) 5px 10px);
+    border-radius: 8px;
+}
+.mw-cell-locked .text-input,
+.mw-cell-locked .text-input:hover {
+    background: var(--bg-card-hover); color: var(--text-tertiary);
+    border-color: var(--border); cursor: not-allowed; box-shadow: none;
+}
+.mw-cell-locked .text-input:focus { outline: none; box-shadow: none; border-color: var(--border); }
+[data-theme="dark"] .mw-cell-locked {
+    background: repeating-linear-gradient(45deg, transparent 0 5px, rgba(255,255,255,.04) 5px 10px);
+}
+[data-theme="dark"] .mw-cell-locked .text-input,
+[data-theme="dark"] .mw-cell-locked .text-input:hover {
+    background: rgba(255,255,255,.05); color: var(--text-tertiary);
 }
 
 /* 行 hover 高亮（.mw-tr 是 display:contents，对每格单独上色） */

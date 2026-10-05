@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.34';
+const APP_VERSION = '1.39.35';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -231,6 +231,7 @@ let state = {
     purgeSampleDone: false,   // 示例数据残留已清过一次（v1.39.26），只清一次就不再清
     balClassTags: Object.assign({}, BAL_CLASS_TAG_DEFAULT),  // 每个资产类别归到哪一类（固定资产/流动资产/长期投资/其他投资）
     sheetCols: DEFAULT_SHEET_COLS.map(c => ({ ...c })),       // 月度账单/资产负债页共用的自定义列（见下方 helper）
+    monthlyOpen: {},              // 月度账单「账户×渠道」开关：开=能填，锁=不能填（见 isChannelOpen / setChannelOpen）
     reportMetric: 'expense',
     breakdownExpanded: false,
     reportChartType: 'line',
@@ -334,6 +335,7 @@ function saveStateNow() {
         // 不存的话刷新一次，被跳过的那期又会冒出来，等于跳过没生效。
         pendingRecurring: state.pendingRecurring || [],
         recurringSkipped: state.recurringSkipped || {},
+        monthlyOpen: state.monthlyOpen || {},  // 月度账单「账户×渠道」开关状态（本地 UI，不进 iCloud 同步）
         // 成员筛选和三个页面的时间档：以前每次打开都回到"全部 + 月报"，
         // 天天看同一本账的人等于每天重新点一遍。
         uiPrefs: {
@@ -2908,6 +2910,8 @@ function loadState() {
             state.sheetCols = Array.isArray(data.sheetCols) && data.sheetCols.length
                 ? data.sheetCols.map(c => ({ ...c }))
                 : DEFAULT_SHEET_COLS.map(c => ({ ...c }));
+            // 月度账单「账户×渠道」开关：首次打开时把历史上记过数的组合自动打开，其余锁住
+            seedMonthlyOpen();
             state.recurring = Array.isArray(data.recurring) ? data.recurring : [];
             state.pendingRecurring = Array.isArray(data.pendingRecurring) ? data.pendingRecurring : [];
             state.recurringSkipped = (data.recurringSkipped && typeof data.recurringSkipped === 'object')
@@ -7440,6 +7444,37 @@ function balanceCatOf(b) {
     return assetClassOf(a);
 }
 
+// ---- 月度账单「账户 × 渠道」开关（v1.39.35）----
+// 一个账户在某一类资产/负债上可能根本没钱，网格却为每账户列出全部渠道，渠道一多就容易填错格。
+// 加一个开关：不开（锁住）就不能填，开了才能填；所有渠道都保留着，哪个账户真在那个渠道有钱时再点开。
+// 结构：monthlyOpen[accountId][cat] = true 表示开；没记 = 锁（默认 false）。
+function isChannelOpen(accountId, cat) {
+    const m = state.monthlyOpen;
+    return !!(m && m[accountId] && m[accountId][cat]);
+}
+function setChannelOpen(accountId, cat, on) {
+    if (!state.monthlyOpen) state.monthlyOpen = {};
+    if (!state.monthlyOpen[accountId]) state.monthlyOpen[accountId] = {};
+    if (on) state.monthlyOpen[accountId][cat] = true;
+    else {
+        delete state.monthlyOpen[accountId][cat];
+        if (!Object.keys(state.monthlyOpen[accountId]).length) delete state.monthlyOpen[accountId];
+    }
+}
+// 首次打开（还没有任何开关记录）时，把「历史上记过数」的 (账户×渠道) 组合自动打开，其余默认锁。
+// 老用户已有的真实余额零影响，空渠道不会误填。只跑一次（已有记录就不再重跑），
+// 之后用户手动锁/开是唯一真相来源，不被历史数据覆盖。
+function seedMonthlyOpen() {
+    if (!state.monthlyOpen) state.monthlyOpen = {};
+    if (Object.keys(state.monthlyOpen).length) return;
+    const mark = (accountId, cat) => {
+        if (!accountId || !cat) return;
+        if (!state.monthlyOpen[accountId]) state.monthlyOpen[accountId] = {};
+        state.monthlyOpen[accountId][cat] = true;
+    };
+    state.balances.forEach(b => mark(b.accountId, balanceCatOf(b)));
+}
+
 // 没设过钱包的账户按名字猜一个初始值，省得几十个点要一个个填
 function guessWalletFromName(name) {
     const n = String(name || '');
@@ -7649,9 +7684,17 @@ function renderMonthlyEntry() {
     const retCell = a => val('ret', a.id, retAt[a.id]);
     const flowCell = a => val('flow', a.id, flowAt[a.id]);
 
-    const balInput = (a, cat, cls) => `<input type="text" inputmode="decimal" class="text-input be-field${cls || ''}"
+    // 单格 = 账户 × 渠道。开了（默认有历史数据的组合已开）是普通输入框；
+    // 锁了 = 输入框禁用 + 灰显 + 斜纹，右上角小锁按钮点一下就能打开。所有渠道都保留，不删。
+    const balInput = (a, cat, cls) => {
+        const open = isChannelOpen(a.id, cat);
+        const lockBtn = `<button class="mw-lockbtn" type="button" data-lock-acct="${a.id}" data-lock-cat="${cat}"
+            title="${open ? '点一下锁定这一格（不再填写）' : '点开才能填写这一格'}" aria-label="${open ? '锁定' : '点开'}">${open ? '🔓' : '🔒'}</button>`;
+        const inp = `<input type="text" inputmode="decimal" class="text-input be-field${cls || ''}${open ? '' : ' mw-locked'}"
              data-bal="${a.id}" data-cat="${cat}" data-cell="${a.id}__${cat}"
-             value="${_esc(cellVal(a, cat))}" placeholder="—" title="${_esc(a.name)} · ${balanceCatName(cat)}">`;
+             value="${_esc(cellVal(a, cat))}" placeholder="—" title="${_esc(a.name)} · ${balanceCatName(cat)}"${open ? '' : ' disabled'}>`;
+        return `<div class="mw-c${open ? '' : ' mw-cell-locked'}">${lockBtn}${inp}</div>`;
+    };
 
     const rows = rowsOf.map((a, i) => {
         const net = assetCats.reduce((t, c) => t + num(cellVal(a, c.key)), 0)
@@ -7667,8 +7710,8 @@ function renderMonthlyEntry() {
                 ${like ? `<span class="mw-badge" data-rename="${a.id}" title="这个名字是资产类别，建议改成放钱的地方">类别名</span>` : ''}
                 <button class="mw-more" data-row-more="${a.id}" draggable="false" title="更多操作（修改 / 删除）"><i class="fa-solid fa-ellipsis"></i></button>
             </div>
-            ${assetCats.map(c => `<div class="mw-c">${balInput(a, c.key)}</div>`).join('')}
-            ${liabCats.map(c => `<div class="mw-c">${balInput(a, c.key, ' mw-liab')}</div>`).join('')}
+            ${assetCats.map(c => balInput(a, c.key)).join('')}
+            ${liabCats.map(c => balInput(a, c.key, ' mw-liab')).join('')}
             ${retCol ? `<div class="mw-c mw-ret"><span class="be-rate" data-rate-for="${a.id}"></span><input type="text" inputmode="decimal" class="text-input be-field" data-ret="${a.id}"
                  value="${_esc(retCell(a))}" placeholder="—" title="${_esc(a.name)} · ${_esc(retCol.label)}"></div>` : ''}
             <div class="mw-c"><input type="text" inputmode="decimal" class="text-input be-flow" data-flow-in="${a.id}"
@@ -7725,7 +7768,7 @@ function renderMonthlyEntry() {
             资产填对应的类别列，欠款（信用卡、花呗、房贷）填「负债」列 —— 账户本身不再分资产还是负债。
             像「信用卡」「花呗」这种单独的行，可以直接把数填进所属银行那一行的负债列，再用行尾的 × 删掉它。</span></div>`
         // 手机上没有光标、也没有 hover，拖拽得靠长按，必须显式说一句，否则没人猜得到
-        + `<div class="mw-sort-hint">按住<b>账户名</b>或<b>列头</b>约半秒，就能拖动调整这一行 / 这一列的顺序。</div>`;
+        + `<div class="mw-sort-hint">按住<b>账户名</b>或<b>列头</b>约半秒，就能拖动调整这一行 / 这一列的顺序。灰色带 🔒 的格是「锁住」状态，点右上角小锁才能填写——只开你常用的渠道，不容易填错。</div>`;
     bindMonthlyEntry();
     syncMwSticky(list);
     fitMonthlyColWidths();
@@ -8173,6 +8216,19 @@ function bindMonthlyEntry() {
             toggleChk(inp, String(inp.value).trim() !== '');
         });
     });
+    // v1.39.35：「账户 × 渠道」开关：点小锁按钮锁住 / 打开这一格（锁住 = 不能填）
+    list.querySelectorAll('[data-lock-acct]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.preventDefault(); e.stopPropagation();
+            const accountId = btn.dataset.lockAcct;
+            const cat = btn.dataset.lockCat;
+            const opening = !isChannelOpen(accountId, cat);
+            setChannelOpen(accountId, cat, opening);
+            saveState();
+            renderMonthlyEntry();
+            showToast(opening ? '已打开这一格，可以填写了' : '已锁定这一格', 'info');
+        });
+    });
     list.querySelectorAll('[data-wallet-total]').forEach(inp =>
         inp.addEventListener('input', () => { monthlyDirty = true; updateMonthlyDerived(); }));
     bindMonthlyRowOps(list);
@@ -8582,6 +8638,7 @@ function copyLastMonthBalances() {
         && !confirm(`这个月已经填了 ${exist} 格了。\n继续「沿用上期」只会把空着的格子补上，已经填过的不会被覆盖。\n要继续吗？`)) return;
     let filled = 0;
     document.querySelectorAll('#monthlyEntryList [data-bal]').forEach(inp => {
+        if (inp.disabled) return;   // 锁定的格不沿用上期，保持原样
         if (String(inp.value).trim() !== '') return;
         const v = (prevCells[inp.dataset.bal] || {})[inp.dataset.cat];
         if (v === undefined) return;
@@ -8610,6 +8667,7 @@ function saveMonthly() {
     const touched = new Set();
     const entries = [];
     list.querySelectorAll('[data-bal]').forEach(inp => {
+        if (inp.disabled) return;   // 锁定的格不处理：保留它已有的余额，不删不写
         const accountId = inp.dataset.bal;
         const cat = inp.dataset.cat || 'other';
         touched.add(accountId);
@@ -8619,9 +8677,13 @@ function saveMonthly() {
         if (!isFinite(amount) || amount < 0) return;
         entries.push({ id: `${member}__${accountId}__${cat}__${month}`, accountId, cat, amount });
     });
+    // 锁定的格：即使它所在账户这个月被整体重算，也保留原余额（不删不写）
+    const lockedCells = new Set();
+    list.querySelectorAll('[data-bal][disabled]').forEach(inp => lockedCells.add(inp.dataset.bal + '__' + (inp.dataset.cat || 'other')));
     const willWrite = new Set(entries.map(e => e.id));
     state.balances = state.balances.filter(b => {
         if (b.month !== month || b.member !== member || !touched.has(b.accountId)) return true;
+        if (lockedCells.has(b.accountId + '__' + (b.cat || balanceCatOf(b)))) return true;  // 锁定的格：保留
         if (willWrite.has(b.id)) return true;      // 这条马上就被覆盖，先留着
         addTombstone('balances', b.id);            // 留个删除标记，别处同步时这条才不会再被并回来
         removed++;
