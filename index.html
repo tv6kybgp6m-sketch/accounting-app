@@ -1007,6 +1007,8 @@
                     <div class="bal-entry-actions">
                         <button class="secondary-btn" onclick="copyLastMonthBalances()"><i class="fa-solid fa-copy"></i> 沿用上期</button>
                         <button class="secondary-btn" onclick="clearMonthlyInputs()"><i class="fa-solid fa-eraser"></i> 清空</button>
+                        <button class="primary-btn" id="mwEditBtn" onclick="toggleMonthlyViewMode()" style="display:none"><i class="fa-solid fa-pen"></i> <span id="mwEditBtnLabel">编辑</span></button>
+                        <span class="mw-viewtag" id="mwViewTag" style="display:none">（只读查看）</span>
                         <span class="mw-chkcount" id="mwChkCount" hidden>已核对 0 / 0</span>
                         <button class="secondary-btn" id="mwUndoBtn" onclick="undoLastMonthlySave()"
                                 title="把这一页填的东西全撤掉，回到你刚打开这页的样子（已经保存过的数不受影响）" hidden>
@@ -1299,7 +1301,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.37').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.38').catch(() => {});
             });
         }
     </script>

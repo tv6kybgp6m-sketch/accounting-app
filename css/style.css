@@ -4348,6 +4348,36 @@ table.bill-stats {
     background: rgba(255,255,255,.05); color: var(--text-tertiary);
 }
 
+/* v1.39.38：月度账单「查看 / 编辑」模式 —— 查看模式下整张表只读、隐藏一切会改数据的入口 */
+.mw-viewtag { margin-left: 8px; font-size: 12px; color: var(--text-tertiary); align-self: center; }
+.mw-viewmode .bal-entry-actions .secondary-btn { display: none; }              /* 隐藏沿用上期 / 清空 / 撤销 */
+.mw-viewmode .modal-footer .primary-btn { display: none; }                    /* 查看模式没有「保存」可点 */
+.mw-viewmode .add-account-inline,
+.mw-viewmode .mw-addrow,
+.mw-viewmode .re-hidden-note,
+.mw-viewmode .mw-sort-hint { display: none; }                                /* 隐藏加账户 / 加列 / 说明 */
+.mw-viewmode .mw-name[data-rename],
+.mw-viewmode .mw-more,
+.mw-viewmode .mw-badge,
+.mw-viewmode .mw-rowname { pointer-events: none; cursor: default; }          /* 行名改名 / 拖拽 / ⋯菜单失效 */
+.mw-viewmode .mw-h { pointer-events: none; }                                 /* 列头拖动 / 删除失效 */
+.mw-viewmode input[data-bal],
+.mw-viewmode input[data-ret],
+.mw-viewmode input[data-flow-in],
+.mw-viewmode input[data-wallet-total] {                                      /* 只读格：淡底 + 禁改光标，明确「看得到改不了」 */
+    background: var(--bg-card-hover); color: var(--text-primary);
+    cursor: default; box-shadow: none; border-color: var(--border);
+}
+.mw-viewmode input[data-bal]:focus,
+.mw-viewmode input[data-ret]:focus,
+.mw-viewmode input[data-flow-in]:focus,
+.mw-viewmode input[data-wallet-total]:focus { outline: none; box-shadow: none; }
+[data-theme="dark"] .mw-viewmode input[data-bal],
+[data-theme="dark"] .mw-viewmode input[data-ret],
+[data-theme="dark"] .mw-viewmode input[data-flow-in],
+[data-theme="dark"] .mw-viewmode input[data-wallet-total] { background: rgba(255,255,255,.05); }
+
+
 /* 行 hover 高亮（.mw-tr 是 display:contents，对每格单独上色） */
 .mw-rowname { transition: background .12s; }
 .mw-tr:hover .mw-c, .mw-tr:hover .mw-rowname { background: var(--bg-card-hover); }

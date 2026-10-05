@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.37';
+const APP_VERSION = '1.39.38';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7527,6 +7527,8 @@ const MW_CHK_KEY = 'bookkeeping_app_mwchk';
 let monthlyCheckMode = false;                // 本次打开里点过「沿用上期」= true
 let monthlyChecked = {};                     // { 格子 key: 1 }
 let monthlyUndo = null;                      // { month, member, snap }：撤销「上次修改」用
+let monthlyViewMode = false;                 // v1.39.38：有数据的月份默认「查看模式」（只读防误触），点「编辑」才进编辑
+let monthlyHasData = false;                  // 当前月份（含成员）是否已有保存数据 —— 决定要不要显示「编辑 / 完成」切换
 
 function mwChkRead() {
     try { return JSON.parse(localStorage.getItem(MW_CHK_KEY) || '{}') || {}; } catch (e) { return {}; }
@@ -7605,6 +7607,7 @@ function openMonthlyModal(month, focus) {
     paintModalMonth('monthly', month || monthlyDefaultMonth());
     const ms = document.getElementById('monthlyMemberSelect');
     if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
+    refreshMonthlyViewMode();   // v1.39.38：有数据的月份默认「查看模式」（只读防误触）
     modal.classList.remove('hidden');
     raiseOverlay('monthlyModal');
     renderMonthlyEntry();
@@ -7629,6 +7632,50 @@ function closeMonthlyModal() {
     if (state.balancePeriod === 'month' && state.balanceYear === y && state.balanceMonth === mo) return;
     state.balancePeriod = 'month'; state.balanceYear = y; state.balanceMonth = mo;
     try { renderBalance(); } catch (e) {}
+}
+
+// v1.39.38：月度账单「查看 / 编辑」模式
+// 有数据的月份默认进「查看模式」：整张表只读、隐藏一切会改数据的按钮，只留一个「编辑」入口，
+// 避免「只是想看一眼、手一抖点到格子改了数」这种误触。点「编辑」才解锁。
+function monthHasSavedData(month, member) {
+    if (!month) return false;
+    if (member === 'all') {
+        return state.balances.some(b => b.month === month) || state.returns.some(r => r.month === month);
+    }
+    return state.balances.some(b => b.month === month && b.member === member)
+        || state.returns.some(r => r.month === month && r.member === member);
+}
+function refreshMonthlyViewMode() {
+    monthlyHasData = monthHasSavedData(getModalMonth('monthly'), monthlyMember());
+    monthlyViewMode = monthlyHasData;   // 有数据默认查看（只读）；没数据默认编辑（要填）
+}
+function applyMonthlyViewMode(list) {
+    const modal = document.getElementById('monthlyModal');
+    if (modal) modal.classList.toggle('mw-viewmode', monthlyViewMode);
+    updateMonthlyEditBtn();
+    if (!monthlyViewMode || !list) return;
+    // 查看模式：所有输入框只读、隐藏单格小锁、去掉锁格斜纹，呈现一张干净的只读表
+    list.querySelectorAll('.mw-lockbtn').forEach(b => b.remove());
+    list.querySelectorAll('input[data-bal],input[data-ret],input[data-flow-in],input[data-wallet-total]')
+        .forEach(inp => { inp.setAttribute('readonly', ''); inp.classList.remove('mw-locked'); });
+    list.querySelectorAll('.mw-cell-locked').forEach(c => c.classList.remove('mw-cell-locked'));
+}
+function updateMonthlyEditBtn() {
+    const btn = document.getElementById('mwEditBtn');
+    const label = document.getElementById('mwEditBtnLabel');
+    const tag = document.getElementById('mwViewTag');
+    if (!btn) return;
+    if (!monthlyHasData) { btn.style.display = 'none'; if (tag) tag.style.display = 'none'; return; }
+    btn.style.display = '';
+    if (label) label.textContent = monthlyViewMode ? '编辑' : '完成';
+    const ic = btn.querySelector('i');
+    if (ic) ic.className = monthlyViewMode ? 'fa-solid fa-pen' : 'fa-solid fa-check';
+    if (tag) tag.style.display = monthlyViewMode ? '' : 'none';
+}
+function toggleMonthlyViewMode() {
+    monthlyViewMode = !monthlyViewMode;
+    renderMonthlyEntry();
+    showToast(monthlyViewMode ? '已切到查看模式（只读，防误触）' : '已进入编辑模式', 'info');
 }
 
 function renderMonthlyEntry() {
@@ -7772,6 +7819,7 @@ function renderMonthlyEntry() {
     bindMonthlyEntry();
     syncMwSticky(list);
     fitMonthlyColWidths();
+    applyMonthlyViewMode(list);   // v1.39.38：查看模式要在重画后套只读 + 隐藏改数据按钮
 }
 
 // ============================================================
@@ -8986,9 +9034,9 @@ function initBalanceListeners() {
         state.balanceMonth = parseInt(e.target.value);
         renderBalance();
     });
-    bindModalMonth('monthly', renderMonthlyEntry);
+    bindModalMonth('monthly', () => { refreshMonthlyViewMode(); renderMonthlyEntry(); });
     const monthlyMemberSel = document.getElementById('monthlyMemberSelect');
-    if (monthlyMemberSel) monthlyMemberSel.addEventListener('change', renderMonthlyEntry);
+    if (monthlyMemberSel) monthlyMemberSel.addEventListener('change', () => { refreshMonthlyViewMode(); renderMonthlyEntry(); });
     // 账户不再有「资产 / 负债」下拉，分组选项固定给资产那套（分组只是展示用）
     const newGroupSel = document.getElementById('newAccountGroup');
     if (newGroupSel) newGroupSel.innerHTML = ASSET_GROUPS.map(g => `<option>${g}</option>`).join('');
