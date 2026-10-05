@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.36';
+const APP_VERSION = '1.39.37';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7768,7 +7768,7 @@ function renderMonthlyEntry() {
             资产填对应的类别列，欠款（信用卡、花呗、房贷）填「负债」列 —— 账户本身不再分资产还是负债。
             像「信用卡」「花呗」这种单独的行，可以直接把数填进所属银行那一行的负债列，再用行尾的 × 删掉它。</span></div>`
         // 手机上没有光标、也没有 hover，拖拽得靠长按，必须显式说一句，否则没人猜得到
-        + `<div class="mw-sort-hint">按住<b>账户名</b>或<b>列头</b>约半秒，就能拖动调整这一行 / 这一列的顺序。灰色带 🔒 的格是「锁住」状态，点右上角小锁才能填写——只开你常用的渠道，不容易填错。</div>`;
+        + `<div class="mw-sort-hint">按住<b>账户名</b>或<b>列头</b>约半秒，就能拖动调整这一行 / 这一列的顺序。灰色带 🔒 的格是「锁住」状态（只读，框里的数照样计入资产负债）；点右上角小锁能打开填写——只开你常用的渠道，不容易填错。</div>`;
     bindMonthlyEntry();
     syncMwSticky(list);
     fitMonthlyColWidths();
@@ -8667,7 +8667,6 @@ function saveMonthly() {
     const touched = new Set();
     const entries = [];
     list.querySelectorAll('[data-bal]').forEach(inp => {
-        if (inp.disabled) return;   // 锁定的格不处理：保留它已有的余额，不删不写
         const accountId = inp.dataset.bal;
         const cat = inp.dataset.cat || 'other';
         touched.add(accountId);
@@ -8677,13 +8676,12 @@ function saveMonthly() {
         if (!isFinite(amount) || amount < 0) return;
         entries.push({ id: `${member}__${accountId}__${cat}__${month}`, accountId, cat, amount });
     });
-    // 锁定的格：即使它所在账户这个月被整体重算，也保留原余额（不删不写）
-    const lockedCells = new Set();
-    list.querySelectorAll('[data-bal][disabled]').forEach(inp => lockedCells.add(inp.dataset.bal + '__' + (inp.dataset.cat || 'other')));
+    // v1.39.37：锁 = 只读，不影响数据。框里显示什么数就存什么数、算什么数；
+    // 锁住的格也照常走上面的写入逻辑（disabled 的 input 仍带着显示值）。只有框里是空的才按 0（这渠道这个月没数）。
+    // 绝不因"锁"而把已填的数弄丢 / 漏算 —— 锁只是"防手滑改"，不是"不记"。
     const willWrite = new Set(entries.map(e => e.id));
     state.balances = state.balances.filter(b => {
         if (b.month !== month || b.member !== member || !touched.has(b.accountId)) return true;
-        if (lockedCells.has(b.accountId + '__' + (b.cat || balanceCatOf(b)))) return true;  // 锁定的格：保留
         if (willWrite.has(b.id)) return true;      // 这条马上就被覆盖，先留着
         addTombstone('balances', b.id);            // 留个删除标记，别处同步时这条才不会再被并回来
         removed++;
