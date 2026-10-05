@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.38';
+const APP_VERSION = '1.39.39';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -8849,10 +8849,41 @@ function clearReturnInputs() { return clearMonthlyInputs(); }
 function bindReturnRatePreview() { return updateMonthlyDerived(); }
 
 // ---------------- 账户管理弹窗 ----------------
+// v1.39.39：账户管理「查看 / 编辑」模式
+// 账户和家庭成员都是「建好就不太动」的东西，平时打开账户管理多半只是想看看有哪些账户；
+// 但这里的交互全是「一点就改」——点账户名就改名、拖一下就换顺序、成员旁边 ✕ 一点就删人（连带合并数据）。
+// 所以默认进查看模式：已有的东西全锁住防误触；只有「新增账户」还留着（新增是主动加东西，不是误改）。
+let accountsViewMode = false;
+let accountsHasData = false;
+function refreshAccountsViewMode() {
+    accountsHasData = (state.accounts || []).length > 0;
+    accountsViewMode = accountsHasData;   // 有账户默认查看（只读防误触）；一个都没有就直接编辑（要加）
+}
+function applyAccountsViewMode() {
+    const modal = document.getElementById('accountsModal');
+    if (modal) modal.classList.toggle('acc-viewmode', accountsViewMode);
+    const btn = document.getElementById('accEditBtn');
+    const label = document.getElementById('accEditBtnLabel');
+    const tag = document.getElementById('accViewTag');
+    if (!btn) { if (tag) tag.style.display = 'none'; return; }
+    if (!accountsHasData) { btn.style.display = 'none'; if (tag) tag.style.display = 'none'; return; }
+    btn.style.display = '';
+    if (label) label.textContent = accountsViewMode ? '编辑' : '完成';
+    const ic = btn.querySelector('i');
+    if (ic) ic.className = accountsViewMode ? 'fa-solid fa-pen' : 'fa-solid fa-check';
+    if (tag) tag.style.display = accountsViewMode ? '' : 'none';
+}
+function toggleAccountsViewMode() {
+    accountsViewMode = !accountsViewMode;
+    renderAccountManageList();
+    showToast(accountsViewMode ? '已切到查看模式（只读，防误触）' : '已进入编辑模式', 'info');
+}
+
 function openAccountsModal() {
     // 不再有「资产 / 负债」下拉，新增账户一律按资产分类给选项（分组只是展示用，不影响计算）
     const sel = document.getElementById('newAccountGroup');
     if (sel) sel.innerHTML = ASSET_GROUPS.map(g => `<option>${g}</option>`).join('');
+    refreshAccountsViewMode();   // v1.39.39：有账户时默认「查看模式」（只读防误触）
     renderAccountManageList();
     document.getElementById('accountsModal').classList.remove('hidden');
     raiseOverlay('accountsModal');
@@ -8942,6 +8973,8 @@ function renderAccountManageList() {
             else if (el.dataset.act === 'del') deleteBalanceMember(name);
         });
     }
+
+    applyAccountsViewMode();   // v1.39.39：查看模式要在重画后套只读 + 隐藏改数据的入口
 }
 
 function addAccount() {

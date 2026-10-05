@@ -1041,6 +1041,8 @@
                         <input type="text" class="text-input" id="newAccountName" placeholder="放钱的地方，如 中国银行 / 支付宝">
                         <select class="text-input" id="newAccountGroup"></select>
                         <button class="primary-btn" onclick="addAccount()"><i class="fa-solid fa-plus"></i> 添加</button>
+                        <button class="primary-btn" id="accEditBtn" onclick="toggleAccountsViewMode()" style="display:none"><i class="fa-solid fa-pen"></i> <span id="accEditBtnLabel">编辑</span></button>
+                        <span class="acc-viewtag" id="accViewTag" style="display:none">（只读查看）</span>
                     </div>
                     <div id="accountManageList"></div>
                 </div>
@@ -1301,7 +1303,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.38').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.39').catch(() => {});
             });
         }
     </script>

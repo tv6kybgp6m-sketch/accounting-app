@@ -4348,7 +4348,18 @@ table.bill-stats {
     background: rgba(255,255,255,.05); color: var(--text-tertiary);
 }
 
-/* v1.39.38：月度账单「查看 / 编辑」模式 —— 查看模式下整张表只读、隐藏一切会改数据的入口 */
+/* v1.39.39：账户管理「查看 / 编辑」模式 —— 查看模式下已有的账户 / 成员全锁住防误触，
+   只保留顶部「添加」行（新增是主动加东西，不是误改） */
+.acc-viewtag { margin-left: 8px; font-size: 12px; color: var(--text-tertiary); align-self: center; }
+.acc-viewmode .fam-chip i { display: none; }              /* 成员改名 ✎ / 删人 ✕（删人连带合并数据，最危险）*/
+.acc-viewmode .fam-add { display: none; }                 /* 添加成员 */
+.acc-viewmode .ar-name { pointer-events: none; cursor: default; }  /* 单击改名 + 拖拽改序 */
+.acc-viewmode .acct-group-select { pointer-events: none; opacity: .65; }  /* 改分类 */
+.acc-viewmode .bh-edit,
+.acc-viewmode .bh-delete { display: none; }               /* 编辑 / 删除账户 */
+.acc-viewmode .acct-order-hint { display: none; }         /* 拖拽提示 */
+
+
 .mw-viewtag { margin-left: 8px; font-size: 12px; color: var(--text-tertiary); align-self: center; }
 .mw-viewmode .bal-entry-actions .secondary-btn { display: none; }              /* 隐藏沿用上期 / 清空 / 撤销 */
 .mw-viewmode .modal-footer .primary-btn { display: none; }                    /* 查看模式没有「保存」可点 */
