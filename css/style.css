@@ -66,7 +66,14 @@
 
     --text-primary: #f5f5f7;
     --text-secondary: #98989d;
-    --text-tertiary: #636366;
+    /* v1.39.33：原 #636366 在深色卡片上对比只有 2.3:1，表头/标签/提示都糊成一片 */
+    --text-tertiary: #8e8e93;
+
+    --accent: #0a84ff;
+    --accent-hover: #409cff;
+    --accent-light: rgba(10, 132, 255, 0.18);
+    --income: #30d158;
+    --expense: #ff453a;
 
     --border: rgba(255, 255, 255, 0.1);
     --border-strong: rgba(255, 255, 255, 0.15);
@@ -87,6 +94,7 @@
 body {
     font-family: var(--font);
     background: linear-gradient(135deg, #d1d1d6 0%, #aeaeb2 100%);
+    color: var(--text-primary);
     min-height: 100vh;
     display: flex;
     align-items: center;
@@ -4194,6 +4202,9 @@ table.bill-stats {
     text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .mw-c input::placeholder { color: var(--text-quaternary, var(--text-tertiary)); opacity: .5; }
+/* v1.39.33：深色下三级灰再叠 0.5 透明度 ≈ 1.5:1，「对账单总额」这类占位符等于看不见 */
+[data-theme="dark"] .mw-c input::placeholder,
+[data-theme="dark"] .amount-input::placeholder { color: var(--text-secondary); opacity: .8; }
 .mw-off { background: repeating-linear-gradient(45deg, transparent 0 5px, rgba(128,128,128,.06) 5px 10px); border-radius: 8px; }
 .mw-stack { flex-direction: column; gap: 3px; align-items: stretch; padding: 3px 0; }
 .mw-stack .be-rate { display: block; font-size: 9.5px; text-align: center; min-height: 11px; line-height: 11px; }

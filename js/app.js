@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.32';
+const APP_VERSION = '1.39.33';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7484,7 +7484,7 @@ const monthlyFlowOpen = new Set();           // 本次打开里展开过「净�
 let monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
 let monthlyDirty = false;                    // 只有真敲过字才需要收草稿，否则会把上一次打开的旧 DOM 又捡回来
 
-// ---- v1.39.32：「已核对」勾 ----
+// ---- v1.39.33：「已核对」勾 ----
 // 勾只在点过「沿用上期」之后才出现（核对模式），不点沿用上期就是原来那个样子，一格勾都没有。
 // 勾是「这格我看过了、数填进去了」，不是「这格数是对的」—— 所以它只记状态、绝不参与任何计算。
 // 勾记在一个独立的小本子里（草稿级），不进 state、不进同步文件：另一台机器不会因为勾而跟这边抢数据。
@@ -7566,14 +7566,14 @@ function openMonthlyModal(month, focus) {
     monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
     monthlyFlowOpen.clear();
     monthlyDirty = false;
-    monthlyCheckMode = false;   // v1.39.32：重开弹窗不继承上次的勾，要勾得再点一次「沿用上期」
+    monthlyCheckMode = false;   // v1.39.33：重开弹窗不继承上次的勾，要勾得再点一次「沿用上期」
     paintModalMonth('monthly', month || monthlyDefaultMonth());
     const ms = document.getElementById('monthlyMemberSelect');
     if (ms) ms.value = state.balanceOwner !== 'all' ? state.balanceOwner : (state.balanceMembers[0] || '本人');
     modal.classList.remove('hidden');
     raiseOverlay('monthlyModal');
     renderMonthlyEntry();
-    // v1.39.32：进这页先拍一张「进来时的样子」，给「撤销」留后路（撤销「改了没保存就全丢掉」）。
+    // v1.39.33：进这页先拍一张「进来时的样子」，给「撤销」留后路（撤销「改了没保存就全丢掉」）。
     // 真正撤「刚保存那一次」的快照是 saveMonthly 里拍的，那张会盖掉这张。
     snapshotMonthlyForUndo();
     updateUndoBtn();
@@ -8165,7 +8165,7 @@ function bindMonthlyEntry() {
     if (!list) return;
     list.querySelectorAll('[data-bal],[data-ret],[data-flow-in]').forEach(inp => {
         inp.addEventListener('input', () => { monthlyDirty = true; updateMonthlyDerived(); });
-        // v1.39.32：勾的来路和去路都挂在这两个事件上 ——
+        // v1.39.33：勾的来路和去路都挂在这两个事件上 ——
         // 敲完按 Tab / 点下一格（blur）= 这格看过了，勾上；回头点进这一格（focus）= 摘掉勾（表示又动它了），
         // 改完跳走再自动勾回来。核对模式下才生效，没点「沿用上期」时这两个监听什么也不做。
         inp.addEventListener('blur', () => {
@@ -8416,7 +8416,7 @@ function updateMonthlyDerived() {
     }
     // 5) 列宽自适应：合计/小计一旦算出大数，宽度跟着长一截，别把数字切掉
     fitMonthlyColWidths();
-    // v1.39.32：核对模式下实时刷新「已核对 X / Y 格」（勾随敲随变）
+    // v1.39.33：核对模式下实时刷新「已核对 X / Y 格」（勾随敲随变）
     if (typeof syncChkCount === 'function') syncChkCount();
 }
 
@@ -8427,7 +8427,7 @@ function clearMonthlyInputs() {
         if (i.dataset.walletTotal !== undefined || i.dataset.bal !== undefined
             || i.dataset.ret !== undefined || i.dataset.flowIn !== undefined) i.value = '';
     });
-    // v1.39.32：数都擦了，勾也跟着收 —— 不然「已核对 8 / 0 格」挂在那儿更让人糊涂
+    // v1.39.33：数都擦了，勾也跟着收 —— 不然「已核对 8 / 0 格」挂在那儿更让人糊涂
     monthlyChecked = {};
     document.querySelectorAll('#monthlyEntryList .mw-chk').forEach(i => i.classList.remove('mw-chk'));
     const k = monthlyMonthKey();
@@ -8435,7 +8435,7 @@ function clearMonthlyInputs() {
     updateMonthlyDerived();
 }
 
-// ---- v1.39.32：核对模式（勾）的开关 ----
+// ---- v1.39.33：核对模式（勾）的开关 ----
 // 勾只在这几步里出现：点「沿用上期」进核对模式 → 敲完跳走自己勾 → 点保存收工。
 function enterCheckMode() {
     const list = document.getElementById('monthlyEntryList');
@@ -8486,7 +8486,7 @@ function syncChkCount() {
     el.textContent = `已核对 ${done} / ${filled}`;
 }
 
-// ---- v1.39.32：撤销「月度账单的一次保存」----
+// ---- v1.39.33：撤销「月度账单的一次保存」----
 // 快照记的是「最近一次会动 state 之前的样子」，在两处拍：
 //   ① 打开这页时 —— 撤销「进来了、填了一通、还没点保存就想全丢掉」
 //   ② 每次点保存之前 —— 撤销「刚保存的那一次」，这才是防误触的主场（保存完弹窗就关了，
@@ -8574,7 +8574,7 @@ function copyLastMonthBalances() {
     if (!prev) { showToast('没有上个月的记录', 'info'); return; }
     const member = monthlyMember();
     const prevCells = balanceCellsAtMonth(prev, member);
-    // v1.39.32：这月已经有数了就先问一句。沿用上期本来就只填空着的格子（下面那个 if 兜着），
+    // v1.39.33：这月已经有数了就先问一句。沿用上期本来就只填空着的格子（下面那个 if 兜着），
     // 但万一月份没切对、或者手快误触，一键下去会动到不该动的格子 —— 问了再填最稳。
     const exist = [...document.querySelectorAll('#monthlyEntryList [data-bal],[data-ret],[data-flow-in]')]
         .filter(i => String(i.value).trim() !== '').length;
@@ -8590,7 +8590,7 @@ function copyLastMonthBalances() {
     if (!filled) { showToast('上个月也没有记余额', 'info'); return; }
     monthlyDirty = true;
     updateMonthlyDerived();
-    enterCheckMode();   // v1.39.32：填完就进核对模式，格子开始长勾
+    enterCheckMode();   // v1.39.33：填完就进核对模式，格子开始长勾
     showToast(`已带入上期 ${filled} 格的数，改成这个月的数就行`, 'success');
 }
 
@@ -8601,7 +8601,7 @@ function saveMonthly() {
     const list = document.getElementById('monthlyEntryList');
     if (!list) return;
     let savedBal = 0, savedRet = 0, removed = 0;
-    // v1.39.32 修掉的坑：撤销快照只在打开弹窗时拍，于是「记了 → 保存 → 再打开 → 撤销」撤了个寂寞
+    // v1.39.33 修掉的坑：撤销快照只在打开弹窗时拍，于是「记了 → 保存 → 再打开 → 撤销」撤了个寂寞
     // ——快照里装的就是刚保存完的样子。快照必须在这里拍：动 state 之前的那一张，才撤得掉这次保存。
     snapshotMonthlyForUndo();
     // 先把这个成员这个月、这些账户的旧余额整批清掉，再按格子写回去。
@@ -8685,7 +8685,7 @@ function saveMonthly() {
     // 老数据（一个账户一个月只有一个数、没有类别）顺手升级成新口径，老的那条作废
     normalizeBalanceCats();
     saveState();
-    leaveCheckMode();          // v1.39.32：保存 = 这个月的账定稿了，勾收起来（下次重新走一遍）
+    leaveCheckMode();          // v1.39.33：保存 = 这个月的账定稿了，勾收起来（下次重新走一遍）
     closeMonthlyModal();
     const [y, m] = month.split('-').map(Number);
     state.balancePeriod = 'month'; state.balanceYear = y; state.balanceMonth = m;
