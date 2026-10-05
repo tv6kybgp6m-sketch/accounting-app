@@ -30,6 +30,10 @@
     --warning-light: rgba(255, 149, 0, 0.12);
     --purple: #af52de;
     --purple-light: rgba(175, 82, 222, 0.12);
+
+    /* v1.39.34：「已核对」勾选格的配色，随主题变 */
+    --chk-bg: #e8f6ec;
+    --chk-fg: #0F6E56;
     --teal: #5ac8fa;
     --pink: #ff2d55;
     --indigo: #5856d6;
@@ -78,6 +82,10 @@
     --border: rgba(255, 255, 255, 0.1);
     --border-strong: rgba(255, 255, 255, 0.15);
     --divider: rgba(255, 255, 255, 0.08);
+
+    /* v1.39.34：深色下勾选格用深绿底 + 亮绿字/对勾，避免白字白底看不见 */
+    --chk-bg: rgba(48, 209, 88, 0.18);
+    --chk-fg: #30d158;
 
     --shadow-window: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.1);
 }
@@ -4075,15 +4083,19 @@ table.bill-stats {
    手机上挤成那样也塞得下，行高不会被顶起来。
    注意语义 —— 勾 = 「这一格我看过了、数填进去了」，不是「这格数是对的」。 */
 .mw-checking input.mw-chk {
-    background-color: #e8f6ec;
+    background-color: var(--chk-bg, #e8f6ec);
     background-image: url("data:image/svg+xml;charset=utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M3.2 8.4l3.1 3.1L12.8 5' fill='none' stroke='%231D9E75' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
     background-repeat: no-repeat;
     background-position: right 3px center;
     background-size: 13px 13px;
 }
+/* v1.39.34：深色下对勾描边换成亮绿，否则深绿勾在深绿底上几乎看不见 */
+[data-theme="dark"] .mw-checking input.mw-chk {
+    background-image: url("data:image/svg+xml;charset=utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M3.2 8.4l3.1 3.1L12.8 5' fill='none' stroke='%2330d158' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+}
 /* 核对模式下，条带里那行「已核对 X / Y 格」的小账 */
 .mw-chkcount {
-    font-size: 12px; color: #0F6E56; background: #e8f6ec;
+    font-size: 12px; color: var(--chk-fg, #0F6E56); background: var(--chk-bg, #e8f6ec);
     padding: 3px 8px; border-radius: 999px; white-space: nowrap;
 }
 .mw-chkcount[hidden] { display: none; }
