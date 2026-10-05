@@ -4320,13 +4320,14 @@ table.bill-stats {
    右上角小锁按钮点开 / 锁定。所有渠道都保留，哪个账户真在那个渠道有钱时再打开。 */
 .mw-lockbtn {
     position: absolute; top: 1px; right: 2px; z-index: 3;
+    display: flex; align-items: center; justify-content: center;
     width: 16px; height: 16px; padding: 0; margin: 0; border: none; border-radius: 4px;
     background: transparent; cursor: pointer; font-size: 10px; line-height: 16px;
-    opacity: .35; color: var(--text-tertiary);
-    transition: opacity .12s, background .12s;
+    color: var(--income); opacity: .8;            /* 开了的锁 = 绿色，明显 */
+    transition: opacity .12s, background .12s, color .12s;
 }
-.mw-c:hover .mw-lockbtn { opacity: .9; }
-.mw-cell-locked .mw-lockbtn { opacity: .7; }
+.mw-c:hover .mw-lockbtn { opacity: 1; }
+.mw-cell-locked .mw-lockbtn { color: var(--text-tertiary); opacity: .7; }  /* 锁住的锁 = 灰 */
 .mw-lockbtn:hover { opacity: 1; background: var(--bg-card-hover); }
 .mw-c:has(.mw-lockbtn) .text-input { padding-right: 17px; }
 .mw-cell-locked {

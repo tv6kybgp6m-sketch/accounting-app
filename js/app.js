@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.35';
+const APP_VERSION = '1.39.36';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7689,7 +7689,7 @@ function renderMonthlyEntry() {
     const balInput = (a, cat, cls) => {
         const open = isChannelOpen(a.id, cat);
         const lockBtn = `<button class="mw-lockbtn" type="button" data-lock-acct="${a.id}" data-lock-cat="${cat}"
-            title="${open ? '点一下锁定这一格（不再填写）' : '点开才能填写这一格'}" aria-label="${open ? '锁定' : '点开'}">${open ? '🔓' : '🔒'}</button>`;
+            title="${open ? '点一下锁定这一格（不再填写）' : '点开才能填写这一格'}" aria-label="${open ? '锁定' : '点开'}">${open ? '<i class="fa-solid fa-lock-open"></i>' : '<i class="fa-solid fa-lock"></i>'}</button>`;
         const inp = `<input type="text" inputmode="decimal" class="text-input be-field${cls || ''}${open ? '' : ' mw-locked'}"
              data-bal="${a.id}" data-cat="${cat}" data-cell="${a.id}__${cat}"
              value="${_esc(cellVal(a, cat))}" placeholder="—" title="${_esc(a.name)} · ${balanceCatName(cat)}"${open ? '' : ' disabled'}>`;
