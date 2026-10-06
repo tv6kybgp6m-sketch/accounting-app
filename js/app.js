@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.39';
+const APP_VERSION = '1.39.40';  // v1.39.40：月度账单「收益 / 净入金」两列各自加独立单格锁（分开锁，非一个锁管两格）
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7466,13 +7466,25 @@ function setChannelOpen(accountId, cat, on) {
 // 之后用户手动锁/开是唯一真相来源，不被历史数据覆盖。
 function seedMonthlyOpen() {
     if (!state.monthlyOpen) state.monthlyOpen = {};
-    if (Object.keys(state.monthlyOpen).length) return;
+    const m = state.monthlyOpen;
     const mark = (accountId, cat) => {
         if (!accountId || !cat) return;
-        if (!state.monthlyOpen[accountId]) state.monthlyOpen[accountId] = {};
-        state.monthlyOpen[accountId][cat] = true;
+        if (!m[accountId]) m[accountId] = {};
+        m[accountId][cat] = true;
     };
-    state.balances.forEach(b => mark(b.accountId, balanceCatOf(b)));
+    // 余额：整本子为空（新用户 / 还没种子过）才跑一次，之后手动锁/开是唯一真相来源，不被历史数据覆盖
+    if (!Object.keys(m).length) {
+        state.balances.forEach(b => mark(b.accountId, balanceCatOf(b)));
+    }
+    // 收益 / 净入金（v1.39.40 新增）：单独一次性种子，绝不回写、不覆盖任何手动锁。
+    // 历史上记过收益 / 净入金的账户自动开（不挡每月记），其余默认锁（防误填）。收益、净入金分开种子。
+    if (!m.__rfSeeded) {
+        state.returns.forEach(r => {
+            if (r.amount !== undefined && r.amount !== null && r.amount !== '') mark(r.accountId, '__ret__');
+            if (r.flow !== undefined && r.flow !== null && r.flow !== '') mark(r.accountId, '__flow__');
+        });
+        m.__rfSeeded = true;
+    }
 }
 
 // 没设过钱包的账户按名字猜一个初始值，省得几十个点要一个个填
@@ -7742,6 +7754,24 @@ function renderMonthlyEntry() {
              value="${_esc(cellVal(a, cat))}" placeholder="—" title="${_esc(a.name)} · ${balanceCatName(cat)}"${open ? '' : ' disabled'}>`;
         return `<div class="mw-c${open ? '' : ' mw-cell-locked'}">${lockBtn}${inp}</div>`;
     };
+    // 收益 / 净入金（v1.39.40）：和余额格一样，每个账户独立的小锁；默认只有历史上记过数的账户才开。
+    // 锁 = 只读防误改，框里有数照样存照样算（语义同 v1.39.37）；空框按 0。收益、净入金分开锁。
+    const retInput = (a) => {
+        const open = isChannelOpen(a.id, '__ret__');
+        const lockBtn = `<button class="mw-lockbtn" type="button" data-lock-acct="${a.id}" data-lock-cat="__ret__"
+            title="${open ? '点一下锁定收益这一格（不再填写）' : '点开才能填写收益'}" aria-label="${open ? '锁定' : '点开'}">${open ? '<i class="fa-solid fa-lock-open"></i>' : '<i class="fa-solid fa-lock"></i>'}</button>`;
+        const inp = `<input type="text" inputmode="decimal" class="text-input be-field${open ? '' : ' mw-locked'}"
+             data-ret="${a.id}" value="${_esc(retCell(a))}" placeholder="—" title="${_esc(a.name)} · ${_esc(retCol.label)}"${open ? '' : ' disabled'}>`;
+        return `<div class="mw-c mw-ret${open ? '' : ' mw-cell-locked'}">${lockBtn}<span class="be-rate" data-rate-for="${a.id}"></span>${inp}</div>`;
+    };
+    const flowInput = (a) => {
+        const open = isChannelOpen(a.id, '__flow__');
+        const lockBtn = `<button class="mw-lockbtn" type="button" data-lock-acct="${a.id}" data-lock-cat="__flow__"
+            title="${open ? '点一下锁定净入金这一格（不再填写）' : '点开才能填写净入金'}" aria-label="${open ? '锁定' : '点开'}">${open ? '<i class="fa-solid fa-lock-open"></i>' : '<i class="fa-solid fa-lock"></i>'}</button>`;
+        const inp = `<input type="text" inputmode="decimal" class="text-input be-flow${open ? '' : ' mw-locked'}"
+             data-flow-in="${a.id}" value="${_esc(flowCell(a))}" placeholder="—" title="${_esc(a.name)} · 本月净入金（买进的钱）"${open ? '' : ' disabled'}>`;
+        return `<div class="mw-c${open ? '' : ' mw-cell-locked'}">${lockBtn}${inp}</div>`;
+    };
 
     const rows = rowsOf.map((a, i) => {
         const net = assetCats.reduce((t, c) => t + num(cellVal(a, c.key)), 0)
@@ -7759,10 +7789,8 @@ function renderMonthlyEntry() {
             </div>
             ${assetCats.map(c => balInput(a, c.key)).join('')}
             ${liabCats.map(c => balInput(a, c.key, ' mw-liab')).join('')}
-            ${retCol ? `<div class="mw-c mw-ret"><span class="be-rate" data-rate-for="${a.id}"></span><input type="text" inputmode="decimal" class="text-input be-field" data-ret="${a.id}"
-                 value="${_esc(retCell(a))}" placeholder="—" title="${_esc(a.name)} · ${_esc(retCol.label)}"></div>` : ''}
-            <div class="mw-c"><input type="text" inputmode="decimal" class="text-input be-flow" data-flow-in="${a.id}"
-                 value="${_esc(flowCell(a))}" placeholder="—" title="${_esc(a.name)} · 本月净入金（买进的钱）"></div>
+            ${retCol ? retInput(a) : ''}
+            ${flowInput(a)}
             <div class="mw-c mw-sumcol"><span class="mw-rownet">小计 <b data-wsum>${formatCurrency(Math.round(net * 100) / 100)}</b></span>
                 <input type="text" inputmode="decimal" class="text-input mw-total" placeholder="对账单总额"
                     data-wallet-total="${a.id}" value="${_esc(monthlyInput.wt[a.id] || '')}">
