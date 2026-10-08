@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.41';  // v1.39.41：清空拆两按钮 + 重置本机墓碑修复 + 云同步面板到期提示/步骤弹窗 + 新建同步库两步确认
+const APP_VERSION = '1.39.42';  // v1.39.42：云同步 Token 到期日填写 + 倒计时高亮提醒 + 到期日多设备同步
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1207,6 +1207,9 @@ function buildSyncPayload() {
         lastModified: Date.now(),
         deviceName: isElectron() ? ('Mac-' + DEVICE_ID.slice(-4)) : 'iPhone',
         deviceId: DEVICE_ID,
+        // Token 到期日（epoch ms，本地正午）。非机密，随同步载荷传播，
+        // 这样多台设备共用同一个 Token 时，到期提醒日期自动一致。
+        tokenExpiresAt: remoteSyncCfg.tokenExpiresAt,
         data: {
             transactions: state.transactions,
             categories: state.categories,
@@ -1360,6 +1363,13 @@ function syncFingerprint() {
 function mergeRemoteData(remoteData) {
     const remote = remoteData.data;
     if (!remote) return false;
+    // Token 到期日随同步载荷传播：没填的设备自动 adopt，已填的不会被没填的设备覆盖，
+    // 但任一设备更新日期后其他设备会同步到新值（共用同一 Token 时日期本应一致）。
+    const _re = remoteData.tokenExpiresAt;
+    if (_re && _re !== remoteSyncCfg.tokenExpiresAt) {
+        remoteSyncCfg.tokenExpiresAt = _re;
+        saveRemoteSyncConfig();
+    }
     const fingerprintBefore = syncFingerprint();
 
     // Merge transactions: union by ID, keep latest
@@ -2556,7 +2566,7 @@ async function decodeSyncPayload(str) {
     return JSON.parse(str);
 }
 
-let remoteSyncCfg = { enabled: false, token: '', gistId: '', lastSyncAt: 0 };
+let remoteSyncCfg = { enabled: false, token: '', gistId: '', lastSyncAt: 0, tokenExpiresAt: 0 };
 let __remotePushTimer = null;
 let __remotePollTimer = null;
 let __remoteVisibilityHooked = false;
@@ -2734,6 +2744,7 @@ async function remoteSyncCycle(reason) {
     __remoteBusy = true;
     try {
         const pulled = await remotePullAndMerge();
+        if (pulled) checkTokenExpiryReminder(false);   // 拉取后到期日可能已同步过来，顺势检查提醒
         if (!pulled && __remoteLastError) return false;
         const ok = await remotePush();
         if (ok && reason === 'manual') showToast('已同步到云端', 'success');
@@ -2802,6 +2813,60 @@ function remoteSaveGistId(value) {
     updateRemoteSyncUI();
 }
 
+// 把 epoch 转本地 YYYY-MM-DD（避免 toISOString 的 UTC 偏移把日期算错一天）
+function _ymd(ts) {
+    const d = new Date(ts);
+    const p = n => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+// 保存「Token 到期日」：存为本地正午的 epoch，立即刷新倒计时、给一次反馈，并推到云端让其他设备同步
+function remoteSaveExpiry(value) {
+    remoteSyncCfg.tokenExpiresAt = value ? new Date(value + 'T12:00:00').getTime() : 0;
+    saveRemoteSyncConfig();
+    updateRemoteSyncUI();
+    checkTokenExpiryReminder(true);
+    scheduleRemoteSync();
+}
+
+// 面板里那段倒计时 / 高亮文字
+function renderTokenExpiryHint() {
+    const exp = remoteSyncCfg.tokenExpiresAt;
+    if (!exp) {
+        return '<div class="settings-sublabel" style="color:#8a8a8a">未填到期日：Token 过期后同步会悄悄停止，建议填上以便提醒</div>';
+    }
+    const diffDays = Math.ceil((exp - Date.now()) / 86400000);
+    if (diffDays <= 0) {
+        return '<div class="settings-sublabel token-exp-bad">⚠ 已于 ' + _ymd(exp) + ' 过期，同步已停止：请重新生成 Token 并点「校验」</div>';
+    }
+    if (diffDays <= 14) {
+        return '<div class="settings-sublabel token-exp-warn">⚠ 还有 ' + diffDays + ' 天到期，请提前在 GitHub 重新生成 Token</div>';
+    }
+    return '<div class="settings-sublabel">将于 ' + _ymd(exp) + ' 到期（还有 ' + diffDays + ' 天）</div>';
+}
+
+// 主动提醒：过期或临近（≤14 天）时弹 toast。同一天只弹一次（force=true 时忽略，用于刚保存日期的即时反馈）
+function checkTokenExpiryReminder(force) {
+    const exp = remoteSyncCfg.tokenExpiresAt;
+    if (!exp || !remoteSyncCfg.token) return;   // 没填日期或没填 Token 就不打扰
+    const diffDays = Math.ceil((exp - Date.now()) / 86400000);
+    let msg = null, type = 'info';
+    if (diffDays <= 0) {
+        msg = '⚠ Token 已于 ' + _ymd(exp) + ' 过期，同步已停止：请到 GitHub 重新生成 Token 并点「校验」';
+        type = 'error';
+    } else if (diffDays <= 14) {
+        msg = '⚠ 同步 Token 还有 ' + diffDays + ' 天到期，请提前在 GitHub 重新生成';
+        type = 'info';
+    }
+    if (!msg) return;
+    if (!force) {
+        const today = _ymd(Date.now());
+        if (localStorage.getItem('bk_expiry_warn_' + today)) return;
+        try { localStorage.setItem('bk_expiry_warn_' + today, '1'); } catch (e) {}
+    }
+    showToast(msg, type);
+}
+
 async function remoteTestConnection() {
     showToast('正在校验…', 'info');
     const ok = await remoteValidateToken();
@@ -2857,6 +2922,13 @@ function updateRemoteSyncUI() {
                 <button class="secondary-btn" id="remoteSyncCreateBtn"><i class="fa-solid fa-wand-magic-sparkles"></i> 新建同步库</button>
             </div>
         </div>
+        <div class="settings-row settings-row-stack">
+            <div class="settings-label">Token 到期日<div class="settings-sublabel">填了会在临近时高亮提醒；多台设备共用同一个 Token 时此日期自动同步</div></div>
+            <div class="rs-inline">
+                <input type="date" class="text-input" id="remoteSyncExpiry" value="${remoteSyncCfg.tokenExpiresAt ? _ymd(remoteSyncCfg.tokenExpiresAt) : ''}">
+            </div>
+            ${renderTokenExpiryHint()}
+        </div>
         <div class="settings-row">
             <div class="settings-label">状态<div class="settings-sublabel">${statusLine}</div></div>
             <button class="secondary-btn" id="remoteSyncNowBtn" ${ready ? '' : 'disabled'}>
@@ -2875,6 +2947,8 @@ function updateRemoteSyncUI() {
     if (token) token.addEventListener('change', e => remoteSaveToken(e.target.value));
     const gist = document.getElementById('remoteSyncGist');
     if (gist) gist.addEventListener('change', e => remoteSaveGistId(e.target.value));
+    const exp = document.getElementById('remoteSyncExpiry');
+    if (exp) exp.addEventListener('change', e => remoteSaveExpiry(e.target.value));
     const testBtn = document.getElementById('remoteSyncTestBtn');
     if (testBtn) testBtn.addEventListener('click', () => { remoteSaveToken((token && token.value) || ''); remoteTestConnection(); });
     const createBtn = document.getElementById('remoteSyncCreateBtn');
@@ -11702,6 +11776,7 @@ async function init() {
     // 云同步（Gist）：iPhone / Mac / 浏览器共用同一本账
     startRemotePolling();                       // 未配置时内部直接跳过
     if (remoteSyncReady()) setTimeout(() => remoteSyncCycle('startup'), 1200);
+    setTimeout(() => checkTokenExpiryReminder(false), 3000);   // 启动后顺带检查 Token 是否临近/已过期
 
     // 周期记账补记：放在 iCloud 拉取之后，避免拿旧副本重复生成
     setTimeout(() => { try { runRecurringRules(true); } catch (e) { console.error('recurring failed', e); } }, 2500);

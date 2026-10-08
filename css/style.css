@@ -1758,6 +1758,8 @@ body.cat-dragging {
 .gist-help-steps li b { color: var(--text-primary); }
 .gist-url { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; background: var(--fill-tertiary, rgba(128,128,128,0.1)); padding: 1px 5px; border-radius: 5px; }
 .gist-warn { color: #ff9f0a; }
+.token-exp-warn { color: #ff9f0a; font-weight: 600; }
+.token-exp-bad { color: #ff453a; font-weight: 600; }
 
 /* Modal */
 .modal-overlay {
