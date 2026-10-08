@@ -733,9 +733,15 @@
                                 </button>
                             </div>
                             <div class="settings-row">
-                                <div class="settings-label">清空所有数据<div class="settings-sublabel">会把账本恢复到空白状态，删掉的所有记录都会保留删除标记、同步到其它设备</div></div>
+                                <div class="settings-label">重置本机（不影响其他设备）<div class="settings-sublabel">只清空本机账本、不打删除标记、不会传到云端或其他设备。下次同步时本机会从云端把数据重新拉回来（等于把本机还原成云端状态）</div></div>
+                                <button class="secondary-btn" onclick="resetLocalData()">
+                                    <i class="fa-solid fa-rotate-left"></i> 重置本机
+                                </button>
+                            </div>
+                            <div class="settings-row">
+                                <div class="settings-label">清空全部（删除所有设备）<div class="settings-sublabel">⚠️ 会删除本机、云端和所有同步设备上的账本，且不可恢复。删除标记会同步到其它设备</div></div>
                                 <button class="danger-btn" onclick="clearAllData()">
-                                    <i class="fa-solid fa-trash"></i> 清空
+                                    <i class="fa-solid fa-trash"></i> 清空全部
                                 </button>
                             </div>
                         </div>
@@ -1111,7 +1117,35 @@
             </div>
         </div>
 
-        <!-- Account Edit Modal -->
+        <!-- Gist 云同步设置步骤弹窗 -->
+    <div class="modal-overlay hidden" id="gistHelpModal">
+        <div class="modal balance-modal">
+            <div class="modal-header">
+                <div class="drill-title-wrap">
+                    <h2>云同步设置步骤</h2>
+                    <div class="cat-txn-sub">Token 只给 gist 权限，只存在本机，不上传</div>
+                </div>
+                <button class="modal-close" onclick="closeGistHelp()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <ol class="gist-help-steps">
+                    <li><b>生成 Token（GitHub 网页）</b><br>
+                        打开 <span class="gist-url">https://github.com/settings/tokens</span> → 点「Generate new token (classic)」→ 只勾一个 <b>gist</b> 权限 → 时间建议选 <b>1 年</b> → 生成，复制那串 token（<b>只显示一次，存好</b>）。</li>
+                    <li><b>Mac 端（记账软件）</b><br>
+                        设置 → 云同步 → 把 token 粘进「GitHub Token」框 → 点「校验」。<br>
+                        <span class="gist-warn">已经有过同步库、只是 Token 过期的用户：<b>不用点「新建同步库」</b>，校验通过即自动重连原库。</span></li>
+                    <li><b>手机端（iPhone Safari 打开网页版）</b><br>
+                        同样打开 设置 → 云同步 → 把复制的那串 token 填进「GitHub Token」框，再把 Mac 上显示的「同步库」ID 填进去 → 点「校验」即可拉取数据。</li>
+                </ol>
+                <div class="settings-note">提示：换 Token 后只需粘贴新 Token 并点「校验」，<b>不要</b>点「新建同步库」，否则会多出一个账本。到期只是同步暂停，本机和云端数据都还在。</div>
+                <div class="scope-foot">
+                    <button class="primary-btn" onclick="closeGistHelp()">知道了</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Account Edit Modal -->
         <div class="modal-overlay hidden" id="accountEditModal">
             <div class="modal balance-modal">
                 <div class="modal-header">
@@ -1303,7 +1337,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.40').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.41').catch(() => {});
             });
         }
     </script>

@@ -1743,6 +1743,21 @@ body.cat-dragging {
     color: var(--text-tertiary);
     margin-top: 2px;
 }
+.settings-note {
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-tertiary);
+    background: var(--fill-tertiary, rgba(128,128,128,0.08));
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-top: 4px;
+}
+.settings-note b { color: var(--text-secondary); }
+.gist-help-steps { margin: 0; padding-left: 20px; }
+.gist-help-steps li { font-size: 13px; line-height: 1.6; margin-bottom: 12px; color: var(--text-secondary); }
+.gist-help-steps li b { color: var(--text-primary); }
+.gist-url { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; background: var(--fill-tertiary, rgba(128,128,128,0.1)); padding: 1px 5px; border-radius: 5px; }
+.gist-warn { color: #ff9f0a; }
 
 /* Modal */
 .modal-overlay {

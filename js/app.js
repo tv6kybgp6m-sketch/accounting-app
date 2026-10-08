@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.40';  // v1.39.40：月度账单「收益 / 净入金」两列各自加独立单格锁（分开锁，非一个锁管两格）
+const APP_VERSION = '1.39.41';  // v1.39.41：清空拆两按钮 + 重置本机墓碑修复 + 云同步面板到期提示/步骤弹窗 + 新建同步库两步确认
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -2862,7 +2862,12 @@ function updateRemoteSyncUI() {
             <button class="secondary-btn" id="remoteSyncNowBtn" ${ready ? '' : 'disabled'}>
                 <i class="fa-solid fa-rotate"></i> 立即同步
             </button>
-        </div>`;
+        </div>
+        <div class="settings-row settings-row-stack">
+            <div class="settings-label">Token 到期了怎么办？<div class="settings-sublabel">到期只是同步暂停，本机和云端数据都还在。重新生成 Token 替换即可，不用新建同步库。</div></div>
+            <button class="secondary-btn" id="gistHelpBtn"><i class="fa-solid fa-circle-question"></i> 查看设置步骤</button>
+        </div>
+        <div class="settings-note">换 Token 后只需在上方粘贴新 Token 并点「校验」，<b>不要</b>点「新建同步库」（否则会多出一个账本）。手机端填同一个 Token + Mac 上显示的同步库 ID 即可。</div>`;
 
     const toggle = document.getElementById('remoteSyncToggle');
     if (toggle) toggle.addEventListener('change', e => remoteToggleEnabled(e.target.checked));
@@ -2877,11 +2882,32 @@ function updateRemoteSyncUI() {
         remoteSaveToken((token && token.value) || '');
         remoteSaveGistId((gist && gist.value) || '');
         if (!remoteSyncCfg.token) { showToast('请先填写 Token', 'error'); return; }
-        if (remoteSyncCfg.gistId) { remoteSyncCfg.enabled = true; saveRemoteSyncConfig(); await remoteSyncCycle('manual'); return; }
+        if (remoteSyncCfg.gistId) {
+            // 已有同步库：再新建会多出一个账本，必须确认
+            if (!confirm('你已经有同步库（ID: ' + remoteSyncCfg.gistId.slice(0, 8) + '…）。\n再点「新建同步库」会建一个全新的库，原来那个变成没人管的旧库（出现两份账本）。\n如果只是换 Token，点「校验」即可，不必新建。\n\n确定要新建一个全新的同步库吗？')) return;
+            await remoteCreateGist();
+            return;
+        }
+        // 没填同步库 ID：可能之前有库，可复用
+        if (!confirm('如果你之前已经有同步库，可以直接把之前的 ID 填到上方「同步库」框里复用，不必新建。\n\n确定要新建一个全新的同步库吗？')) return;
         await remoteCreateGist();
     });
     const nowBtn = document.getElementById('remoteSyncNowBtn');
     if (nowBtn) nowBtn.addEventListener('click', remoteManualSync);
+    const helpBtn = document.getElementById('gistHelpBtn');
+    if (helpBtn) helpBtn.addEventListener('click', openGistHelp);
+}
+
+// 云同步「查看设置步骤」弹窗：讲清 Token 怎么建、Mac / 手机分别怎么填
+function openGistHelp() {
+    const m = document.getElementById('gistHelpModal');
+    if (!m) return;
+    m.classList.remove('hidden');
+    raiseOverlay('gistHelpModal');
+}
+function closeGistHelp() {
+    const m = document.getElementById('gistHelpModal');
+    if (m) m.classList.add('hidden');
 }
 
 
@@ -5830,7 +5856,7 @@ function importData(event) {
 
 
 function clearAllData() {
-    if (!confirm('确定要清空所有数据吗？此操作不可恢复。')) return;
+    if (!confirm('⚠️ 清空全部并同步删除？\n\n这会删除本机、云端和所有同步设备上的账本数据，且不可恢复。\n只想清空本机、不影响其他设备，请改用「重置本机」。')) return;
 
     // 先给每条记录打删除标记，「清空」才能真的同步到别的设备。
     // 之前这里把 state.deleted 直接清空，结果另一台设备一合并就把旧账全灌回来。
@@ -5871,6 +5897,37 @@ function clearAllData() {
     renderView(state.currentView);
     refreshAccountLists();
     showToast('所有数据已清空', 'success');
+}
+
+// 重置本机（不影响其他设备）：只清本机账本，不打墓碑、不写删除标记，
+// 所以同步时不会把别的设备数据删掉。saveState() 末尾会自动排程 iCloud / Gist 同步，
+// 走「并集合并」把云端数据拉回本机 —— 等于把本机还原成云端状态，无需手动推。
+function resetLocalData() {
+    if (!confirm('重置本机数据？\n\n本机账本会被清空，但云端和其他同步设备的数据不受影响。\n（之后本机会从云端把数据重新同步回来）')) return;
+
+    state.transactions = [];
+    state.budgets = [];
+    state.balances = [];
+    state.returns = [];
+    state.accounts = DEFAULT_ACCOUNTS.map(a => ({ ...a }));
+    state.fundTargets = { cash: 0, steady: 0, growth: 0 };
+    state.balanceMembers = ['本人'];
+    state.memberAddedAt = { '本人': Date.now() };
+    state.balanceOwner = 'all';
+    state.insuranceMembers = [...DEFAULT_INSURANCE_MEMBERS];
+    state.insuranceMemberAddedAt = { '本人': Date.now() };
+    state.insurancePolicies = [];
+    state.categories = [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES];
+    state.paymentMethods = [...DEFAULT_PAYMENT_METHODS];
+    state.pmAddedAt = {};
+    // 本机重置：连本地删除标记一起清空，确保同步时不会把任何墓碑
+    //（含之前「清空全部」留下的全量墓碑、或单条删除的墓碑）传到别的设备。
+    // 之后同步从云端把共享的删除标记和账本一起拉回来，本机与其它设备一致、但绝不多删。
+    state.deleted = { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [], recurring: [], cols: [] };
+    saveState();
+    renderView(state.currentView);
+    refreshAccountLists();
+    showToast('本机数据已清空（云端与其他设备不受影响）', 'success');
 }
 
 // ==================== 资产负债 ====================
