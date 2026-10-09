@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.42';  // v1.39.42：云同步 Token 到期日填写 + 倒计时高亮提醒 + 到期日多设备同步
+const APP_VERSION = '1.39.43';  // v1.39.43：修复云同步 Token 到期日不随设备同步（指纹未含到期日导致跳过上传）
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1210,6 +1210,7 @@ function buildSyncPayload() {
         // Token 到期日（epoch ms，本地正午）。非机密，随同步载荷传播，
         // 这样多台设备共用同一个 Token 时，到期提醒日期自动一致。
         tokenExpiresAt: remoteSyncCfg.tokenExpiresAt,
+        tokenExpiresAtAt: remoteSyncCfg.tokenExpiresAtAt,
         data: {
             transactions: state.transactions,
             categories: state.categories,
@@ -1353,6 +1354,8 @@ function fingerprintOfPayload(p) {
         sig(d.recurring),
         sig(del.transactions), sig(del.balances), sig(del.returns), sig(del.accounts), sig(del.insurance),
         sig(del.recurring),
+        String((p && p.tokenExpiresAt) || 0),
+        String((p && p.tokenExpiresAtAt) || 0),
     ].join('|');
 }
 
@@ -1366,8 +1369,12 @@ function mergeRemoteData(remoteData) {
     // Token 到期日随同步载荷传播：没填的设备自动 adopt，已填的不会被没填的设备覆盖，
     // 但任一设备更新日期后其他设备会同步到新值（共用同一 Token 时日期本应一致）。
     const _re = remoteData.tokenExpiresAt;
-    if (_re && _re !== remoteSyncCfg.tokenExpiresAt) {
+    const _rea = remoteData.tokenExpiresAtAt || 0;
+    // 最后设置的设备赢（用设置时间戳比较），避免两台设备各填各的互相覆盖。
+    // 本机没填（为 0）时一定 adopt 远端；本机已填但远端更新则覆盖；本机更新则保留。
+    if (_re && (_rea > (remoteSyncCfg.tokenExpiresAtAt || 0))) {
         remoteSyncCfg.tokenExpiresAt = _re;
+        remoteSyncCfg.tokenExpiresAtAt = _rea;
         saveRemoteSyncConfig();
     }
     const fingerprintBefore = syncFingerprint();
@@ -2566,7 +2573,7 @@ async function decodeSyncPayload(str) {
     return JSON.parse(str);
 }
 
-let remoteSyncCfg = { enabled: false, token: '', gistId: '', lastSyncAt: 0, tokenExpiresAt: 0 };
+let remoteSyncCfg = { enabled: false, token: '', gistId: '', lastSyncAt: 0, tokenExpiresAt: 0, tokenExpiresAtAt: 0 };
 let __remotePushTimer = null;
 let __remotePollTimer = null;
 let __remoteVisibilityHooked = false;
@@ -2823,6 +2830,7 @@ function _ymd(ts) {
 // 保存「Token 到期日」：存为本地正午的 epoch，立即刷新倒计时、给一次反馈，并推到云端让其他设备同步
 function remoteSaveExpiry(value) {
     remoteSyncCfg.tokenExpiresAt = value ? new Date(value + 'T12:00:00').getTime() : 0;
+    remoteSyncCfg.tokenExpiresAtAt = remoteSyncCfg.tokenExpiresAt ? Date.now() : 0;
     saveRemoteSyncConfig();
     updateRemoteSyncUI();
     checkTokenExpiryReminder(true);
