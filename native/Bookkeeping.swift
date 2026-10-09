@@ -104,7 +104,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.39.45"
+        webView.customUserAgent = "BookkeepingMacApp/1.39.46"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"
@@ -294,7 +294,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = exts.compactMap { UTType(filenameExtension: $0) }
+        // 用原始扩展名过滤，而不是 UTType：系统里 .enc 没有注册 UTI，
+        // 用 allowedContentTypes + UTType(filenameExtension:) 会被 compactMap 丢掉，
+        // 导致 .xlsx.enc 这种双扩展名文件在文件框里被灰掉、选不了。
+        // allowedFileTypes 按 pathExtension 原始字符串匹配，.xlsx.enc 的扩展名是 enc，能正确放行。
+        panel.allowedFileTypes = exts
         if panel.runModal() == .OK, let url = panel.url {
             if let data = try? Data(contentsOf: url),
                let encoded = data.base64EncodedString().data(using: .utf8),
