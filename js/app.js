@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.43';  // v1.39.43：修复云同步 Token 到期日不随设备同步（指纹未含到期日导致跳过上传）
+const APP_VERSION = '1.39.44';  // v1.39.44：Excel 导出加密（.xlsx.enc，需经本 app 还原）+ 导入还原；新增多设备加密操作清单
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -5540,7 +5540,7 @@ function setAutoOpenAdd(enabled) {
 }
 
 // ---- Data Export/Import (Excel) ----
-function exportData() {
+async function exportData() {
     if (typeof XLSX === 'undefined') {
         showToast('正在加载 Excel 组件…', 'info');
         loadXlsxLib().then(() => exportData()).catch(() => showToast('Excel 组件加载失败', 'error'));
@@ -5647,8 +5647,29 @@ function exportData() {
 
         // Use XLSX.write to generate binary, then hand it to the save path
         const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+        const baseName = `记账本-${formatDateFull(new Date().toISOString())}`;
+
+        // 开启加密：把 xlsx 字节包进 app 专属加密文件 (.xlsx.enc)。
+        // 保密性和 JSON 备份一致（同一把主密钥），但 Excel/WPS 打不开，只能经本 app 还原。
+        if (LedgerCrypto.isEnabled()) {
+            try {
+                await ensureUnlocked(LedgerCrypto.keyring(), '导出需要解锁');
+                const encText = JSON.stringify(await LedgerCrypto.encryptString(uint8ToBase64(wbout)));
+                const blob = new Blob([encText], { type: 'application/octet-stream' });
+                return saveGeneratedFile(blob, baseName + '.xlsx.enc')
+                    .then(cancelled => {
+                        if (cancelled) return;
+                        markExported();
+                        showToast('数据已加密导出为 Excel (.xlsx.enc)', 'success');
+                    });
+            } catch (e) {
+                if (e && e.message !== '已取消') showToast('加密导出失败：' + e.message, 'error');
+                return;
+            }
+        }
+
         const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        return saveGeneratedFile(blob, `记账本-${formatDateFull(new Date().toISOString())}.xlsx`)
+        return saveGeneratedFile(blob, baseName + '.xlsx')
             .then(cancelled => {
                 if (cancelled) return;
                 markExported();
@@ -5712,6 +5733,48 @@ function base64ToUint8(b64) {
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return bytes;
+}
+
+// 反向：Uint8Array → base64（导出加密 Excel 时把 xlsx 字节包进密文封套用）
+function uint8ToBase64(bytes) {
+    let bin = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(bin);
+}
+
+// 从原始文件字节解出工作簿：自动识别 app 专属加密文件 (.xlsx.enc)。
+// 加密文件本质是一段 JSON 封套（含 enc:"BKE1"），解开后里面是 xlsx 的 base64；
+// 普通 xlsx 是二进制 PK 头，直接交给 XLSX 读。解密需要口令/恢复码时按"这轮最多弹一次"规则问。
+async function readWorkbookFromBytes(bytes) {
+    // 先试探头部是不是 JSON 信封（加密文件是纯文本 JSON，xlsx 是二进制 PK 头，第一个字节就是 'P'）
+    let head = '';
+    try { head = new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, 256)); } catch (e) { head = ''; }
+    if (head && head.charCodeAt(0) === 123 /* '{' */) {
+        try {
+            const obj = JSON.parse(new TextDecoder('utf-8').decode(bytes));
+            if (LedgerCrypto.looksEncrypted(obj)) {
+                let plain;
+                try {
+                    plain = await LedgerCrypto.decryptEnvelope(obj, null);
+                } catch (e) {
+                    if (e && (e.message === 'NEED_SECRET' || e.message === 'WRONG_KEY')) {
+                        // 本机没密钥或存的密钥开不了这份数据：问口令/恢复码，解开后覆盖本机缓存
+                        await ensureUnlocked(obj.keyring || LedgerCrypto.keyring(), '导入加密 Excel 需要解锁', e.message === 'WRONG_KEY');
+                        plain = await LedgerCrypto.decryptEnvelope(obj, null);
+                    } else {
+                        throw e;
+                    }
+                }
+                return XLSX.read(base64ToUint8(plain), { type: 'array', cellDates: true });
+            }
+        } catch (e) {
+            // 不是合法 JSON 信封（极少见的巧合），当普通 xlsx 继续处理
+        }
+    }
+    return XLSX.read(bytes, { type: 'array', cellDates: true });
 }
 
 function base64ToText(b64) {
@@ -5893,18 +5956,19 @@ async function importExcelFile() {
         try { await loadXlsxLib(); }
         catch (e) { showToast('Excel 组件加载失败', 'error'); return; }
     }
-    const picked = await pickLocalFile(['xlsx', 'xls']);
+    const picked = await pickLocalFile(['xlsx', 'xls', 'enc']);
     if (!picked) return;
     if (picked.error) { showToast(picked.error, 'error'); return; }
     try {
-        const wb = XLSX.read(base64ToUint8(picked.base64), { type: 'array', cellDates: true });
+        const wb = await readWorkbookFromBytes(base64ToUint8(picked.base64));
         const res = applyWorkbook(wb) || {};
         const summary = `新增 ${res.txnAdded || 0} 笔、更新 ${res.txnUpdated || 0} 笔`;
         showToast(res.unmatched ? `${summary}，${res.unmatched} 行账户名没对上已跳过` : summary,
             res.unmatched ? 'error' : 'success');
     } catch (err) {
         console.error('Import error:', err);
-        showToast('导入失败，文件不是有效的 Excel', 'error');
+        const msg = (err && err.message && err.message !== '已取消') ? err.message : '';
+        showToast('导入失败：' + (msg || '文件不是有效的 Excel，或密码不正确'), 'error');
     }
 }
 
@@ -5914,15 +5978,16 @@ function importData(event) {
     if (!file) return;
     const finish = () => {
         const reader = new FileReader();
-        reader.onload = (e) => {
+        reader.onload = async (e) => {
             try {
-                const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
+                const wb = await readWorkbookFromBytes(new Uint8Array(e.target.result));
                 const res = applyWorkbook(wb) || {};
                 showToast(res.unmatched ? `${res.unmatched} 行账户名没对上已跳过` : 'Excel 数据已导入',
                     res.unmatched ? 'error' : 'success');
             } catch (err) {
                 console.error('Import error:', err);
-                showToast('导入失败，文件格式错误', 'error');
+                const msg = (err && err.message && err.message !== '已取消') ? ('（' + err.message + '）') : '';
+                showToast('导入失败，文件格式错误' + msg, 'error');
             }
             event.target.value = '';
         };
