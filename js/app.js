@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.47';  // v1.39.47：修复加密 Excel 导出被保存面板强行追加成 .xlsx.enc.json（Swift saveFile 改用 allowedFileTypes）；并让「导入数据」入口也能选 .json 后缀的加密文件
+const APP_VERSION = '1.39.48';  // v1.39.48：关闭加密前必须先输入加密口令（与同步/导出同一道），防止他人直接关闭后导出明文
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -2031,6 +2031,11 @@ function copyRecoveryCode() {
     } else fallback();
 }
 async function disableEncryptionClick() {
+    // 关掉加密 = 解除整份账本的保密，必须先证明知道加密口令（与同步/导出同一道口令），
+    // 否则任何人打开 app 点一下就能关掉再导出明文。
+    try {
+        await ensureUnlocked(LedgerCrypto.keyring(), '关闭加密需要解锁');
+    } catch (e) { showToast('关闭已取消：' + (e && e.message || e), 'info'); return; }
     if (!confirm('关闭加密？之后的备份与同步退回明文。已经导出的加密文件仍需口令或恢复码才能打开。')) return;
     try {
         await LedgerCrypto.disable();
