@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.48';  // v1.39.48：关闭加密前必须先输入加密口令（与同步/导出同一道），防止他人直接关闭后导出明文
+const APP_VERSION = '1.39.49';  // v1.39.49：新增「查看 Excel（不导入）」——解密后表格预览、绝不写账本，想导入再点「导入这份」
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -5981,6 +5981,51 @@ async function importExcelFile() {
         const msg = (err && err.message && err.message !== '已取消') ? err.message : '';
         showToast('导入失败：' + (msg || '文件不是有效的 Excel，或密码不正确'), 'error');
     }
+}
+
+// 查看 Excel（不导入）：解密后把表格列出来，绝不写账本
+let __previewWb = null;
+async function previewExcelFile() {
+    if (typeof XLSX === 'undefined') {
+        showToast('正在加载 Excel 组件…', 'info');
+        try { await loadXlsxLib(); } catch (e) { showToast('Excel 组件加载失败', 'error'); return; }
+    }
+    const picked = await pickLocalFile(['xlsx', 'xls', 'enc', 'json']);
+    if (!picked) return;
+    if (picked.error) { showToast(picked.error, 'error'); return; }
+    try {
+        const wb = await readWorkbookFromBytes(base64ToUint8(picked.base64));
+        __previewWb = wb;
+        let html = '';
+        for (const name of wb.SheetNames) {
+            const ws = wb.Sheets[name];
+            const tbl = XLSX.utils.sheet_to_html(ws, { editable: false });
+            html += `<div class="excel-preview-sheet"><div class="excel-preview-sheet-title">${escapeHtml(name)}</div><div class="excel-preview-table-wrap">${tbl}</div></div>`;
+        }
+        document.getElementById('excelPreviewBody').innerHTML = html;
+        document.getElementById('excelPreviewName').textContent = picked.name;
+        document.getElementById('excelPreviewModal').classList.remove('hidden');
+    } catch (err) {
+        console.error('Preview error:', err);
+        const msg = (err && err.message && err.message !== '已取消') ? err.message : '';
+        showToast('预览失败：' + (msg || '文件不是有效的 Excel，或密码不正确'), 'error');
+    }
+}
+
+function closeExcelPreview() {
+    const m = document.getElementById('excelPreviewModal');
+    if (m) m.classList.add('hidden');
+    document.getElementById('excelPreviewBody').innerHTML = '';
+    __previewWb = null;
+}
+
+async function importPreviewedExcel() {
+    if (!__previewWb) return;
+    const wb = __previewWb;
+    closeExcelPreview();
+    const res = applyWorkbook(wb) || {};
+    const summary = `新增 ${res.txnAdded || 0} 笔、更新 ${res.txnUpdated || 0} 笔`;
+    showToast(res.unmatched ? `${summary}，${res.unmatched} 行账户名没对上已跳过` : summary, res.unmatched ? 'error' : 'success');
 }
 
 // 旧入口：隐藏 input 的 onchange 仍可用

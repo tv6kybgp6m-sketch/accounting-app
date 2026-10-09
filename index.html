@@ -703,6 +703,12 @@
                                 </button>
                             </div>
                             <div class="settings-row">
+                                <div class="settings-label">查看 Excel（不导入）<div class="settings-sublabel">解密后把表格列出来给你看，<b>绝不改动账本</b>；想导入再点「导入这份」</div></div>
+                                <button class="secondary-btn" onclick="previewExcelFile()">
+                                    <i class="fa-solid fa-eye"></i> 查看
+                                </button>
+                            </div>
+                            <div class="settings-row">
                                 <div class="settings-label">导出备份<div class="settings-sublabel">存一份带日期的完整账本（交易 / 余额 / 收益 / 成员 / 删除标记），文件名带当天日期，可以攒很多份。开了加密的话存出去就是密文</div></div>
                                 <button class="secondary-btn" onclick="exportSyncJSON()">
                                     <i class="fa-solid fa-file-arrow-down"></i> 导出
@@ -1117,7 +1123,27 @@
             </div>
         </div>
 
-        <!-- Gist 云同步设置步骤弹窗 -->
+        <!-- Excel 查看（不导入）弹窗 -->
+    <div class="modal-overlay hidden" id="excelPreviewModal">
+        <div class="modal excel-preview-modal">
+            <div class="modal-header">
+                <div class="drill-title-wrap">
+                    <h2>查看 Excel（不导入）</h2>
+                    <div class="cat-txn-sub">这只是预览，<b>不会改动你的账本</b>。文件名：<span id="excelPreviewName"></span></div>
+                </div>
+                <button class="modal-close" onclick="closeExcelPreview()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div id="excelPreviewBody" class="excel-preview-body"></div>
+            </div>
+            <div class="scope-foot">
+                <button class="secondary-btn" onclick="closeExcelPreview()">关闭</button>
+                <button class="primary-btn" onclick="importPreviewedExcel()"><i class="fa-solid fa-upload"></i> 导入这份</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Gist 云同步设置步骤弹窗 -->
     <div class="modal-overlay hidden" id="gistHelpModal">
         <div class="modal balance-modal">
             <div class="modal-header">
@@ -1337,7 +1363,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.48').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.49').catch(() => {});
             });
         }
     </script>

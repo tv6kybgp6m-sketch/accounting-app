@@ -4490,3 +4490,14 @@ table.bill-stats {
     /* 账户名列只剩 36px，改名输入框同步收窄，不然改名字时弹的框会顶到邻居 */
     .mw-col-input { width: 34px; font-size: 11px !important; padding: 1px 2px !important; }
 }
+
+/* ===== Excel 查看（不导入）预览弹窗 ===== */
+.excel-preview-modal { max-width: 720px; width: 92%; }
+.excel-preview-body { max-height: 64vh; overflow-y: auto; padding: 4px 2px; }
+.excel-preview-sheet { margin-bottom: 18px; }
+.excel-preview-sheet-title { font-weight: 600; font-size: 14px; color: #2d3436; margin: 6px 2px; }
+.excel-preview-table-wrap { overflow-x: auto; border: 1px solid #dfe6e9; border-radius: 8px; }
+.excel-preview-table-wrap table { border-collapse: collapse; width: 100%; font-size: 12px; color: #2d3436; }
+.excel-preview-table-wrap th, .excel-preview-table-wrap td { border: 1px solid #ecf0f1; padding: 4px 8px; white-space: nowrap; }
+.excel-preview-table-wrap thead th { background: #f1f5f9; position: sticky; top: 0; }
+.excel-preview-table-wrap tbody tr:nth-child(even) { background: #fafbfc; }
