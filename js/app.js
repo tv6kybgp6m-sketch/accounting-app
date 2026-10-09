@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.44';  // v1.39.44：Excel 导出加密（.xlsx.enc，需经本 app 还原）+ 导入还原；新增多设备加密操作清单
+const APP_VERSION = '1.39.45';  // v1.39.45：修复云同步「上次同步」时间只在推送写库时刷新，导致只拉不推的设备(浏览器/手机)时间停在建库那天；改为拉到或推成功都刷新
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -2755,6 +2755,12 @@ async function remoteSyncCycle(reason) {
         if (!pulled && __remoteLastError) return false;
         const ok = await remotePush();
         if (ok && reason === 'manual') showToast('已同步到云端', 'success');
+        // 只要这次真的和云端对上了（拉到新数据，或推成功/确认已一致），就刷新"上次同步"时间。
+        // 之前只在 remotePush 真正写库时才更新，于是只拉不推的设备（浏览器/手机）时间永远停在建库那天。
+        if (pulled || ok) {
+            remoteSyncCfg.lastSyncAt = Date.now();
+            saveRemoteSyncConfig();
+        }
         return ok;
     } finally {
         __remoteBusy = false;
