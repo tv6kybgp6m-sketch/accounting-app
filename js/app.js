@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.49';  // v1.39.49：新增「查看 Excel（不导入）」——解密后表格预览、绝不写账本，想导入再点「导入这份」
+const APP_VERSION = '1.39.50';  // v1.39.50：修复「查看 Excel（不导入）」点「导入这份」后停留设置页看不到内容——导入后自动跳到对应账本页，并加错误提示
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -5904,6 +5904,7 @@ function applyWorkbook(wb) {
 
             // 预算：一个分类一条，按 categoryId upsert
             const ws3 = wb.Sheets['预算'];
+            let budAdded = 0;
             if (ws3) {
                 const budRows = XLSX.utils.sheet_to_json(ws3);
                 budRows.forEach(row => {
@@ -5912,7 +5913,7 @@ function applyWorkbook(wb) {
                     const amount = parseFloat(row['预算金额']) || 0;
                     const existing = state.budgets.find(b => b.categoryId === categoryId);
                     if (existing) { existing.amount = amount; }
-                    else { state.budgets.push({ id: uid(), categoryId, amount }); }
+                    else { state.budgets.push({ id: uid(), categoryId, amount }); budAdded++; }
                 });
             }
 
@@ -5922,6 +5923,8 @@ function applyWorkbook(wb) {
                 state.accounts.find(a => a.name === name && a.kind === kind) ||
                 state.accounts.find(a => a.name === name);
             let unmatched = 0;
+            let balAdded = 0;
+            let retAdded = 0;
 
             const readRows = (sheetName, apply) => {
                 const ws = wb.Sheets[sheetName];
@@ -5939,7 +5942,7 @@ function applyWorkbook(wb) {
                 const id = `${member}__${acc.id}__${month}`;
                 const existing = state.balances.find(b => b.id === id);
                 if (existing) { existing.amount = amount; existing.updatedAt = Date.now(); }
-                else state.balances.push({ id, member, accountId: acc.id, month, amount, createdAt: Date.now(), updatedAt: Date.now() });
+                else { state.balances.push({ id, member, accountId: acc.id, month, amount, createdAt: Date.now(), updatedAt: Date.now() }); balAdded++; }
             });
 
             readRows('投资收益明细', row => {
@@ -5952,13 +5955,13 @@ function applyWorkbook(wb) {
                 const id = `${member}__${acc.id}__${month}`;
                 const existing = state.returns.find(r => r.id === id);
                 if (existing) { existing.amount = amount; existing.updatedAt = Date.now(); }
-                else state.returns.push({ id, member, accountId: acc.id, month, amount, createdAt: Date.now(), updatedAt: Date.now() });
+                else { state.returns.push({ id, member, accountId: acc.id, month, amount, createdAt: Date.now(), updatedAt: Date.now() }); retAdded++; }
             });
 
     saveState();
     applyTheme(state.settings.theme);
     renderView(state.currentView);
-    return { unmatched, txnAdded, txnUpdated };
+    return { unmatched, txnAdded, txnUpdated, balAdded, retAdded, budAdded };
 }
 
 async function importExcelFile() {
@@ -6020,12 +6023,28 @@ function closeExcelPreview() {
 }
 
 async function importPreviewedExcel() {
-    if (!__previewWb) return;
+    if (!__previewWb) { showToast('预览已关闭，请重新打开文件再导入', 'info'); return; }
     const wb = __previewWb;
     closeExcelPreview();
-    const res = applyWorkbook(wb) || {};
-    const summary = `新增 ${res.txnAdded || 0} 笔、更新 ${res.txnUpdated || 0} 笔`;
-    showToast(res.unmatched ? `${summary}，${res.unmatched} 行账户名没对上已跳过` : summary, res.unmatched ? 'error' : 'success');
+    try {
+        const res = applyWorkbook(wb) || {};
+        // 跳到能看到导入内容的地方，避免停在设置页“看不到内容”
+        const txnN = (res.txnAdded || 0) + (res.txnUpdated || 0);
+        const balN = (res.balAdded || 0) + (res.retAdded || 0);
+        if (txnN > 0) switchView('transactions');
+        else if (balN > 0) switchView('balance');
+        const summary = `新增 ${res.txnAdded || 0} 笔、更新 ${res.txnUpdated || 0} 笔`;
+        const extra = [];
+        if (res.balAdded) extra.push(`余额 ${res.balAdded}`);
+        if (res.retAdded) extra.push(`收益 ${res.retAdded}`);
+        if (res.budAdded) extra.push(`预算 ${res.budAdded}`);
+        const tail = extra.length ? `；另 ${extra.join('、')}` : '';
+        showToast(res.unmatched ? `${summary}${tail}，${res.unmatched} 行账户名没对上已跳过` : `${summary}${tail}`, res.unmatched ? 'error' : 'success');
+    } catch (err) {
+        console.error('Import previewed error:', err);
+        const msg = (err && err.message && err.message !== '已取消') ? err.message : '';
+        showToast('导入失败：' + (msg || '文件解析出错，可能表格格式不对'), 'error');
+    }
 }
 
 // 旧入口：隐藏 input 的 onchange 仍可用
