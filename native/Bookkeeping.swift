@@ -104,7 +104,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.39.46"
+        webView.customUserAgent = "BookkeepingMacApp/1.39.47"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"
@@ -271,14 +271,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         let base64 = opts["base64"] as? String ?? ""
         let panel = NSSavePanel()
         panel.nameFieldStringValue = name
-        // 按文件后缀决定允许的类型：Excel 导出是 .xlsx（内容是 zip 二进制），
-        // 绝不能把它强制成 .json，否则手机会把 zip 字节当 JSON 解析 → "不是有效的 JSON"。
+        // 用原始扩展名过滤（allowedFileTypes），不要用 allowedContentTypes(UTType)：
+        // 系统里 .enc 没有注册 UTI，allowedContentTypes 不会包含 enc，保存面板就会把
+        // 「xxx.xlsx.enc」强行追加成「xxx.xlsx.enc.json」。allowedFileTypes 按后缀原始字符串匹配可正确保留。
+        // 同时把文件名自己的后缀也加进允许列表，避免面板再追加任何东西。
         let ext = (name as NSString).pathExtension.lowercased()
-        if ext == "xlsx" {
-            panel.allowedContentTypes = [UTType(filenameExtension: "xlsx") ?? .data, UTType(filenameExtension: "json") ?? .data]
-        } else {
-            panel.allowedContentTypes = [UTType(filenameExtension: "json") ?? .data, UTType(filenameExtension: "xlsx") ?? .data]
-        }
+        var allowed = ["xlsx", "json", "enc"]
+        if !ext.isEmpty && !allowed.contains(ext) { allowed.append(ext) }
+        panel.allowedFileTypes = allowed
         if panel.runModal() == .OK, let url = panel.url, let data = Data(base64Encoded: base64) {
             try? data.write(to: url)
             respond(id: id, ok: true, result: url.path)

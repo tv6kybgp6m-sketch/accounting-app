@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.46';  // v1.39.46：修复 Mac 原生文件框把 .xlsx.enc 当未知类型灰掉、无法导入加密 Excel 的问题（Swift openFile 改用 allowedFileTypes 按原始扩展名匹配）
+const APP_VERSION = '1.39.47';  // v1.39.47：修复加密 Excel 导出被保存面板强行追加成 .xlsx.enc.json（Swift saveFile 改用 allowedFileTypes）；并让「导入数据」入口也能选 .json 后缀的加密文件
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -5962,7 +5962,7 @@ async function importExcelFile() {
         try { await loadXlsxLib(); }
         catch (e) { showToast('Excel 组件加载失败', 'error'); return; }
     }
-    const picked = await pickLocalFile(['xlsx', 'xls', 'enc']);
+    const picked = await pickLocalFile(['xlsx', 'xls', 'enc', 'json']);
     if (!picked) return;
     if (picked.error) { showToast(picked.error, 'error'); return; }
     try {
