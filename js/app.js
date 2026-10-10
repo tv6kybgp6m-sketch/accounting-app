@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.51';  // v1.39.51：预览 Excel 整体加 try/catch 不再静默失败、显示真实错误；空表格/非 Excel 文件给出明确提示
+const APP_VERSION = '1.39.52';  // v1.39.52：预览 Excel 读取加 30 秒超时兜底（不再无限卡死）；加密文件进密码框前先提示；取消密码框优雅退出
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -5773,7 +5773,8 @@ async function readWorkbookFromBytes(bytes) {
                 } catch (e) {
                     if (e && (e.message === 'NEED_SECRET' || e.message === 'WRONG_KEY')) {
                         // 本机没密钥或存的密钥开不了这份数据：问口令/恢复码，解开后覆盖本机缓存
-                        await ensureUnlocked(obj.keyring || LedgerCrypto.keyring(), '导入加密 Excel 需要解锁', e.message === 'WRONG_KEY');
+                        showToast('这个 Excel 是加密的，请在弹出的输入框里填写口令或恢复码', 'info');
+                        await ensureUnlocked(obj.keyring || LedgerCrypto.keyring(), '查看 Excel 需要解锁', e.message === 'WRONG_KEY');
                         plain = await LedgerCrypto.decryptEnvelope(obj, null);
                     } else {
                         throw e;
@@ -5998,7 +5999,19 @@ async function previewExcelFile() {
         if (!picked) return;
         if (picked.error) { showToast(picked.error, 'error'); return; }
         showToast('正在读取文件…', 'info');
-        const wb = await readWorkbookFromBytes(base64ToUint8(picked.base64));
+        let wb;
+        try {
+            wb = await Promise.race([
+                readWorkbookFromBytes(base64ToUint8(picked.base64)),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('__READ_TIMEOUT__')), 30000)),
+            ]);
+        } catch (e) {
+            if (e && e.message === '__READ_TIMEOUT__') {
+                showToast('读取超时（30 秒）。若选的是加密的 .xlsx.enc，请确认是否已弹出"输入加密口令"框并填写；也可能是文件过大或已损坏。', 'error');
+                return;
+            }
+            throw e;
+        }
         __previewWb = wb;
         const names = (wb && wb.SheetNames) || [];
         if (names.length === 0) {
@@ -6019,7 +6032,8 @@ async function previewExcelFile() {
         document.getElementById('excelPreviewModal').classList.remove('hidden');
     } catch (err) {
         console.error('Preview error:', err);
-        const msg = (err && err.message && err.message !== '已取消') ? err.message : '';
+        if (err && err.message === '已取消') { showToast('已取消预览', 'info'); return; }
+        const msg = (err && err.message) ? err.message : '';
         showToast('预览失败：' + (msg || '文件无法解析，可能损坏、不是本应用导出的 Excel，或加密口令不正确'), 'error');
     }
 }
