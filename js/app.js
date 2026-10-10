@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.50';  // v1.39.50：修复「查看 Excel（不导入）」点「导入这份」后停留设置页看不到内容——导入后自动跳到对应账本页，并加错误提示
+const APP_VERSION = '1.39.51';  // v1.39.51：预览 Excel 整体加 try/catch 不再静默失败、显示真实错误；空表格/非 Excel 文件给出明确提示
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -5989,18 +5989,27 @@ async function importExcelFile() {
 // 查看 Excel（不导入）：解密后把表格列出来，绝不写账本
 let __previewWb = null;
 async function previewExcelFile() {
-    if (typeof XLSX === 'undefined') {
-        showToast('正在加载 Excel 组件…', 'info');
-        try { await loadXlsxLib(); } catch (e) { showToast('Excel 组件加载失败', 'error'); return; }
-    }
-    const picked = await pickLocalFile(['xlsx', 'xls', 'enc', 'json']);
-    if (!picked) return;
-    if (picked.error) { showToast(picked.error, 'error'); return; }
     try {
+        if (typeof XLSX === 'undefined') {
+            showToast('正在加载 Excel 组件…', 'info');
+            try { await loadXlsxLib(); } catch (e) { showToast('Excel 组件加载失败', 'error'); return; }
+        }
+        const picked = await pickLocalFile(['xlsx', 'xls', 'enc', 'json']);
+        if (!picked) return;
+        if (picked.error) { showToast(picked.error, 'error'); return; }
+        showToast('正在读取文件…', 'info');
         const wb = await readWorkbookFromBytes(base64ToUint8(picked.base64));
         __previewWb = wb;
+        const names = (wb && wb.SheetNames) || [];
+        if (names.length === 0) {
+            document.getElementById('excelPreviewBody').innerHTML =
+                '<div class="excel-preview-empty">文件已读取，但里面没有可显示的表格。<br>请确认这是本应用导出的 Excel（.xlsx / .xlsx.enc），而不是 JSON 备份文件。</div>';
+            document.getElementById('excelPreviewName').textContent = picked.name;
+            document.getElementById('excelPreviewModal').classList.remove('hidden');
+            return;
+        }
         let html = '';
-        for (const name of wb.SheetNames) {
+        for (const name of names) {
             const ws = wb.Sheets[name];
             const tbl = XLSX.utils.sheet_to_html(ws, { editable: false });
             html += `<div class="excel-preview-sheet"><div class="excel-preview-sheet-title">${escapeHtml(name)}</div><div class="excel-preview-table-wrap">${tbl}</div></div>`;
@@ -6011,7 +6020,7 @@ async function previewExcelFile() {
     } catch (err) {
         console.error('Preview error:', err);
         const msg = (err && err.message && err.message !== '已取消') ? err.message : '';
-        showToast('预览失败：' + (msg || '文件不是有效的 Excel，或密码不正确'), 'error');
+        showToast('预览失败：' + (msg || '文件无法解析，可能损坏、不是本应用导出的 Excel，或加密口令不正确'), 'error');
     }
 }
 

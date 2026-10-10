@@ -4494,6 +4494,7 @@ table.bill-stats {
 /* ===== Excel 查看（不导入）预览弹窗 ===== */
 .excel-preview-modal { max-width: 720px; width: 92%; }
 .excel-preview-body { max-height: 64vh; overflow-y: auto; padding: 4px 2px; }
+.excel-preview-empty { padding: 24px 12px; color: #636e72; font-size: 13px; line-height: 1.7; text-align: center; }
 .excel-preview-sheet { margin-bottom: 18px; }
 .excel-preview-sheet-title { font-weight: 600; font-size: 14px; color: #2d3436; margin: 6px 2px; }
 .excel-preview-table-wrap { overflow-x: auto; border: 1px solid #dfe6e9; border-radius: 8px; }
