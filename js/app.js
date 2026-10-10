@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.53';  // v1.39.53：删除「查看 Excel（不导入）」；导出改为明文 .xlsx + 导出前须再确认加密口令；数据管理模块加折叠；云同步 Token/同步库/到期日 改为有值时只读、点编辑才可改
+const APP_VERSION = '1.39.54';  // v1.39.54：云同步/周期记账/加密模块加折叠（默认折叠、折叠状态显示状态）；数据管理默认折叠；云同步三字段改为 disabled 编辑门（修手机端 date 框可直接改的问题）；Token 过期在折叠标题显示提醒
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -854,6 +854,14 @@ function renderRecurringSection() {
             </div>
             <button class="primary-btn" id="rfAdd"><i class="fa-solid fa-plus"></i> 添加规则</button>
         </div>`;
+
+    // 折叠标题状态徽标：规则数 / 还没有周期记账
+    const rcState = document.getElementById('recurringState');
+    if (rcState) {
+        rcState.innerHTML = state.recurring.length
+            ? '<span class="cs-badge cs-on">' + state.recurring.length + ' 条规则</span>'
+            : '<span class="cs-badge cs-off">还没有周期记账</span>';
+    }
 
     const gv = id => (document.getElementById(id) || {});
     const addBtn = document.getElementById('rfAdd');
@@ -1869,6 +1877,13 @@ let __pendingRecoveryCode = '';
 function renderEncryptionSection() {
     const box = document.getElementById('encryptionSection');
     if (!box) return;
+    // 折叠标题状态徽标：已开启 / 未开启（折叠状态下也看得见）
+    const encState = document.getElementById('encryptionState');
+    if (encState) {
+        if (!LedgerCrypto.isSupported()) encState.innerHTML = '<span class="cs-badge cs-off">本浏览器不支持</span>';
+        else if (!LedgerCrypto.isEnabled()) encState.innerHTML = '<span class="cs-badge cs-off">未开启</span>';
+        else encState.innerHTML = '<span class="cs-badge cs-on">已开启</span>';
+    }
     if (!LedgerCrypto.isSupported()) {
         box.innerHTML = `<div class="settings-row"><div class="settings-label">本浏览器不支持加密
             <div class="settings-sublabel">需要 HTTPS 或本机环境下的 WebCrypto</div></div></div>`;
@@ -2992,23 +3007,33 @@ function updateRemoteSyncUI() {
     if (nowBtn) nowBtn.addEventListener('click', remoteManualSync);
     const helpBtn = document.getElementById('gistHelpBtn');
     if (helpBtn) helpBtn.addEventListener('click', openGistHelp);
-    // GitHub Token / 同步库 / 到期日：有值时只读 + 显示「编辑」按钮，点编辑才可改；空值直接可输入
+    // GitHub Token / 同步库 / 到期日：有值时禁用 + 显示「编辑」按钮，点编辑才可改；空值直接可输入
     wireEditGate(document.getElementById('remoteSyncToken'), document.getElementById('remoteSyncTokenEdit'));
     wireEditGate(document.getElementById('remoteSyncGist'), document.getElementById('remoteSyncGistEdit'));
     wireEditGate(document.getElementById('remoteSyncExpiry'), document.getElementById('remoteSyncExpiryEdit'));
+
+    // 折叠标题状态徽标：已开启/未开启 + Token 过期提醒（折叠状态下也看得见）
+    const stEl = document.getElementById('remoteSyncState');
+    if (stEl) {
+        const expired = remoteSyncCfg.tokenExpiresAt && Date.now() > remoteSyncCfg.tokenExpiresAt;
+        let html = '<span class="cs-badge ' + (remoteSyncCfg.enabled ? 'cs-on' : 'cs-off') + '">' + (remoteSyncCfg.enabled ? '已开启同步' : '未开启') + '</span>';
+        if (expired) html += ' <span class="cs-badge cs-warn">⚠ Token 已过期</span>';
+        stEl.innerHTML = html;
+    }
 }
 
-// 云同步字段只读-编辑门：防误触。有值→只读且显示「编辑」；点编辑→可改；改完失焦/change 恢复只读
+// 云同步字段只读-编辑门：防误触。有值→禁用且显示「编辑」；点编辑→可改；改完失焦/change 恢复禁用
+// 用 disabled 而非 readOnly：readOnly 在手机端 type=date 上不生效（iOS 仍能直接改），disabled 在所有浏览器/输入类型都生效
 function wireEditGate(input, editBtn) {
     if (!input) return;
     const apply = () => {
         const has = !!input.value;
-        input.readOnly = has;
+        input.disabled = has;
         if (editBtn) editBtn.classList.toggle('hidden', !has);
     };
     apply();
     if (editBtn) editBtn.addEventListener('click', () => {
-        input.readOnly = false;
+        input.disabled = false;
         editBtn.classList.add('hidden');
         input.focus();
     });
@@ -6006,13 +6031,13 @@ async function importExcelFile() {
 }
 
 // 数据管理模块折叠：点标题收起 / 展开内部各行（内容太多时方便收起）
-function toggleDataMgmt() {
-    const sec = document.getElementById('dataMgmtSection');
-    const chev = document.getElementById('dataMgmtChevron');
+// 通用折叠：切换 .collapsed，箭头旋转由 CSS 负责（所有加折叠的模块默认 collapsed）
+function toggleSettingsSection(id) {
+    const sec = document.getElementById(id);
     if (!sec) return;
-    const collapsed = sec.classList.toggle('collapsed');
-    if (chev) chev.style.transform = collapsed ? 'rotate(-90deg)' : '';
+    sec.classList.toggle('collapsed');
 }
+function toggleDataMgmt() { toggleSettingsSection('dataMgmtSection'); }
 
 // 旧入口：隐藏 input 的 onchange 仍可用
 function importData(event) {

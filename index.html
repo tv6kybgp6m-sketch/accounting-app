@@ -679,16 +679,16 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="settings-section">
-                            <h3>周期记账</h3>
+                        <div class="settings-section collapsed" id="recurringSectionWrap">
+                            <h3 class="collapsible-head" onclick="toggleSettingsSection('recurringSectionWrap')">周期记账 <span class="collapsible-state" id="recurringState"></span> <i class="fa-solid fa-chevron-down" id="recurringChevron"></i></h3>
                             <div class="settings-section-hint">按规则自动补记房租、工资、订阅等。生成的记录带规则标记，多台设备不会重复记。</div>
                             <div id="recurringSection"></div>
                         </div>
-                        <div class="settings-section">
-                            <h3>云同步</h3>
+                        <div class="settings-section collapsed" id="remoteSyncSectionWrap">
+                            <h3 class="collapsible-head" onclick="toggleSettingsSection('remoteSyncSectionWrap')">云同步 <span class="collapsible-state" id="remoteSyncState"></span> <i class="fa-solid fa-chevron-down" id="remoteSyncChevron"></i></h3>
                             <div id="remoteSyncSection"></div>
                         </div>
-                        <div class="settings-section" id="dataMgmtSection">
+                        <div class="settings-section collapsed" id="dataMgmtSection">
                             <h3 class="collapsible-head" onclick="toggleDataMgmt()">数据管理 <i class="fa-solid fa-chevron-down" id="dataMgmtChevron"></i></h3>
                             <div class="settings-row">
                                 <div class="settings-label">导出数据<div class="settings-sublabel">生成 .xlsx，可用 Numbers / Excel 打开；开了加密的话导出时要再输一次口令</div></div>
@@ -753,8 +753,8 @@
                             <h3><i class="fa-solid fa-stethoscope"></i> 数据体检</h3>
                             <div id="dataHealthSection"></div>
                         </div>
-                        <div class="settings-section">
-                            <h3><i class="fa-solid fa-lock"></i> 加密</h3>
+                        <div class="settings-section collapsed" id="encryptionSectionWrap">
+                            <h3 class="collapsible-head" onclick="toggleSettingsSection('encryptionSectionWrap')"><i class="fa-solid fa-lock"></i> 加密 <span class="collapsible-state" id="encryptionState"></span> <i class="fa-solid fa-chevron-down" id="encryptionChevron"></i></h3>
                             <div id="encryptionSection"></div>
                         </div>
                         <div class="settings-section">
@@ -1337,7 +1337,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.53').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.54').catch(() => {});
             });
         }
     </script>
