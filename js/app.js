@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.52';  // v1.39.52：预览 Excel 读取加 30 秒超时兜底（不再无限卡死）；加密文件进密码框前先提示；取消密码框优雅退出
+const APP_VERSION = '1.39.53';  // v1.39.53：删除「查看 Excel（不导入）」；导出改为明文 .xlsx + 导出前须再确认加密口令；数据管理模块加折叠；云同步 Token/同步库/到期日 改为有值时只读、点编辑才可改
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -2930,6 +2930,7 @@ function updateRemoteSyncUI() {
             <div class="rs-inline">
                 <input type="password" class="text-input" id="remoteSyncToken" placeholder="github_pat_… 或 ghp_…"
                        autocomplete="off" spellcheck="false" value="${esc(remoteSyncCfg.token)}">
+                <button class="secondary-btn rs-edit-btn hidden" id="remoteSyncTokenEdit">编辑</button>
                 <button class="secondary-btn" id="remoteSyncTestBtn"><i class="fa-solid fa-plug"></i> 校验</button>
             </div>
         </div>
@@ -2938,6 +2939,7 @@ function updateRemoteSyncUI() {
             <div class="rs-inline">
                 <input type="text" class="text-input" id="remoteSyncGist" placeholder="留空则点右边新建"
                        autocomplete="off" spellcheck="false" value="${esc(remoteSyncCfg.gistId)}">
+                <button class="secondary-btn rs-edit-btn hidden" id="remoteSyncGistEdit">编辑</button>
                 <button class="secondary-btn" id="remoteSyncCreateBtn"><i class="fa-solid fa-wand-magic-sparkles"></i> 新建同步库</button>
             </div>
         </div>
@@ -2945,6 +2947,7 @@ function updateRemoteSyncUI() {
             <div class="settings-label">Token 到期日<div class="settings-sublabel">填了会在临近时高亮提醒；多台设备共用同一个 Token 时此日期自动同步</div></div>
             <div class="rs-inline">
                 <input type="date" class="text-input" id="remoteSyncExpiry" value="${remoteSyncCfg.tokenExpiresAt ? _ymd(remoteSyncCfg.tokenExpiresAt) : ''}">
+                <button class="secondary-btn rs-edit-btn hidden" id="remoteSyncExpiryEdit">编辑</button>
             </div>
             ${renderTokenExpiryHint()}
         </div>
@@ -2989,6 +2992,28 @@ function updateRemoteSyncUI() {
     if (nowBtn) nowBtn.addEventListener('click', remoteManualSync);
     const helpBtn = document.getElementById('gistHelpBtn');
     if (helpBtn) helpBtn.addEventListener('click', openGistHelp);
+    // GitHub Token / 同步库 / 到期日：有值时只读 + 显示「编辑」按钮，点编辑才可改；空值直接可输入
+    wireEditGate(document.getElementById('remoteSyncToken'), document.getElementById('remoteSyncTokenEdit'));
+    wireEditGate(document.getElementById('remoteSyncGist'), document.getElementById('remoteSyncGistEdit'));
+    wireEditGate(document.getElementById('remoteSyncExpiry'), document.getElementById('remoteSyncExpiryEdit'));
+}
+
+// 云同步字段只读-编辑门：防误触。有值→只读且显示「编辑」；点编辑→可改；改完失焦/change 恢复只读
+function wireEditGate(input, editBtn) {
+    if (!input) return;
+    const apply = () => {
+        const has = !!input.value;
+        input.readOnly = has;
+        if (editBtn) editBtn.classList.toggle('hidden', !has);
+    };
+    apply();
+    if (editBtn) editBtn.addEventListener('click', () => {
+        input.readOnly = false;
+        editBtn.classList.add('hidden');
+        input.focus();
+    });
+    input.addEventListener('blur', apply);
+    input.addEventListener('change', apply);
 }
 
 // 云同步「查看设置步骤」弹窗：讲清 Token 怎么建、Mac / 手机分别怎么填
@@ -5660,21 +5685,14 @@ async function exportData() {
         const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
         const baseName = `记账本-${formatDateFull(new Date().toISOString())}`;
 
-        // 开启加密：把 xlsx 字节包进 app 专属加密文件 (.xlsx.enc)。
-        // 保密性和 JSON 备份一致（同一把主密钥），但 Excel/WPS 打不开，只能经本 app 还原。
+        // 导出统一为普通 .xlsx（Excel / WPS / Numbers 直接打开，不再包成 .xlsx.enc）。
+        // 若本机开启了加密，导出前必须再确认一次加密口令（与账本加密同一把密码），
+        // 防止别人拿到已解锁的 app 后直接把账本导出去。导出的文件本身是明文 xlsx。
         if (LedgerCrypto.isEnabled()) {
             try {
-                await ensureUnlocked(LedgerCrypto.keyring(), '导出需要解锁');
-                const encText = JSON.stringify(await LedgerCrypto.encryptString(uint8ToBase64(wbout)));
-                const blob = new Blob([encText], { type: 'application/octet-stream' });
-                return saveGeneratedFile(blob, baseName + '.xlsx.enc')
-                    .then(cancelled => {
-                        if (cancelled) return;
-                        markExported();
-                        showToast('数据已加密导出为 Excel (.xlsx.enc)', 'success');
-                    });
+                await ensureUnlocked(LedgerCrypto.keyring(), '导出 Excel 需要确认口令', true);
             } catch (e) {
-                if (e && e.message !== '已取消') showToast('加密导出失败：' + e.message, 'error');
+                if (e && e.message !== '已取消') showToast('导出已取消：' + e.message, 'error');
                 return;
             }
         }
@@ -5987,87 +6005,13 @@ async function importExcelFile() {
     }
 }
 
-// 查看 Excel（不导入）：解密后把表格列出来，绝不写账本
-let __previewWb = null;
-async function previewExcelFile() {
-    try {
-        if (typeof XLSX === 'undefined') {
-            showToast('正在加载 Excel 组件…', 'info');
-            try { await loadXlsxLib(); } catch (e) { showToast('Excel 组件加载失败', 'error'); return; }
-        }
-        const picked = await pickLocalFile(['xlsx', 'xls', 'enc', 'json']);
-        if (!picked) return;
-        if (picked.error) { showToast(picked.error, 'error'); return; }
-        showToast('正在读取文件…', 'info');
-        let wb;
-        try {
-            wb = await Promise.race([
-                readWorkbookFromBytes(base64ToUint8(picked.base64)),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('__READ_TIMEOUT__')), 30000)),
-            ]);
-        } catch (e) {
-            if (e && e.message === '__READ_TIMEOUT__') {
-                showToast('读取超时（30 秒）。若选的是加密的 .xlsx.enc，请确认是否已弹出"输入加密口令"框并填写；也可能是文件过大或已损坏。', 'error');
-                return;
-            }
-            throw e;
-        }
-        __previewWb = wb;
-        const names = (wb && wb.SheetNames) || [];
-        if (names.length === 0) {
-            document.getElementById('excelPreviewBody').innerHTML =
-                '<div class="excel-preview-empty">文件已读取，但里面没有可显示的表格。<br>请确认这是本应用导出的 Excel（.xlsx / .xlsx.enc），而不是 JSON 备份文件。</div>';
-            document.getElementById('excelPreviewName').textContent = picked.name;
-            document.getElementById('excelPreviewModal').classList.remove('hidden');
-            return;
-        }
-        let html = '';
-        for (const name of names) {
-            const ws = wb.Sheets[name];
-            const tbl = XLSX.utils.sheet_to_html(ws, { editable: false });
-            html += `<div class="excel-preview-sheet"><div class="excel-preview-sheet-title">${escapeHtml(name)}</div><div class="excel-preview-table-wrap">${tbl}</div></div>`;
-        }
-        document.getElementById('excelPreviewBody').innerHTML = html;
-        document.getElementById('excelPreviewName').textContent = picked.name;
-        document.getElementById('excelPreviewModal').classList.remove('hidden');
-    } catch (err) {
-        console.error('Preview error:', err);
-        if (err && err.message === '已取消') { showToast('已取消预览', 'info'); return; }
-        const msg = (err && err.message) ? err.message : '';
-        showToast('预览失败：' + (msg || '文件无法解析，可能损坏、不是本应用导出的 Excel，或加密口令不正确'), 'error');
-    }
-}
-
-function closeExcelPreview() {
-    const m = document.getElementById('excelPreviewModal');
-    if (m) m.classList.add('hidden');
-    document.getElementById('excelPreviewBody').innerHTML = '';
-    __previewWb = null;
-}
-
-async function importPreviewedExcel() {
-    if (!__previewWb) { showToast('预览已关闭，请重新打开文件再导入', 'info'); return; }
-    const wb = __previewWb;
-    closeExcelPreview();
-    try {
-        const res = applyWorkbook(wb) || {};
-        // 跳到能看到导入内容的地方，避免停在设置页“看不到内容”
-        const txnN = (res.txnAdded || 0) + (res.txnUpdated || 0);
-        const balN = (res.balAdded || 0) + (res.retAdded || 0);
-        if (txnN > 0) switchView('transactions');
-        else if (balN > 0) switchView('balance');
-        const summary = `新增 ${res.txnAdded || 0} 笔、更新 ${res.txnUpdated || 0} 笔`;
-        const extra = [];
-        if (res.balAdded) extra.push(`余额 ${res.balAdded}`);
-        if (res.retAdded) extra.push(`收益 ${res.retAdded}`);
-        if (res.budAdded) extra.push(`预算 ${res.budAdded}`);
-        const tail = extra.length ? `；另 ${extra.join('、')}` : '';
-        showToast(res.unmatched ? `${summary}${tail}，${res.unmatched} 行账户名没对上已跳过` : `${summary}${tail}`, res.unmatched ? 'error' : 'success');
-    } catch (err) {
-        console.error('Import previewed error:', err);
-        const msg = (err && err.message && err.message !== '已取消') ? err.message : '';
-        showToast('导入失败：' + (msg || '文件解析出错，可能表格格式不对'), 'error');
-    }
+// 数据管理模块折叠：点标题收起 / 展开内部各行（内容太多时方便收起）
+function toggleDataMgmt() {
+    const sec = document.getElementById('dataMgmtSection');
+    const chev = document.getElementById('dataMgmtChevron');
+    if (!sec) return;
+    const collapsed = sec.classList.toggle('collapsed');
+    if (chev) chev.style.transform = collapsed ? 'rotate(-90deg)' : '';
 }
 
 // 旧入口：隐藏 input 的 onchange 仍可用

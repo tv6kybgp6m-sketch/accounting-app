@@ -1508,6 +1508,16 @@ body.cat-dragging {
     border-bottom: 0.5px solid var(--divider);
 }
 
+/* 数据管理模块折叠：收起时隐藏内部各行，只留标题 */
+.collapsible-head { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
+.collapsible-head .fa-chevron-down { font-size: 12px; color: var(--text-muted); transition: transform 0.2s ease; }
+.settings-section.collapsed .settings-row { display: none; }
+.settings-section.collapsed .collapsible-head .fa-chevron-down { transform: rotate(-90deg); }
+
+/* 云同步字段只读模式：有值时置灰、需点「编辑」才可改，避免误触 */
+.text-input:read-only { background: var(--bg-disabled); color: var(--text-muted); cursor: default; }
+.rs-edit-btn { white-space: nowrap; }
+
 .settings-row:last-child {
     border-bottom: none;
 }

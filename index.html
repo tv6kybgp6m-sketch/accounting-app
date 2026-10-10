@@ -689,9 +689,9 @@
                             <div id="remoteSyncSection"></div>
                         </div>
                         <div class="settings-section" id="dataMgmtSection">
-                            <h3>数据管理</h3>
+                            <h3 class="collapsible-head" onclick="toggleDataMgmt()">数据管理 <i class="fa-solid fa-chevron-down" id="dataMgmtChevron"></i></h3>
                             <div class="settings-row">
-                                <div class="settings-label">导出数据<div class="settings-sublabel">生成 .xlsx，可用 Numbers / Excel 打开</div></div>
+                                <div class="settings-label">导出数据<div class="settings-sublabel">生成 .xlsx，可用 Numbers / Excel 打开；开了加密的话导出时要再输一次口令</div></div>
                                 <button class="secondary-btn" onclick="exportData()">
                                     <i class="fa-solid fa-download"></i> 导出 Excel
                                 </button>
@@ -700,12 +700,6 @@
                                 <div class="settings-label">导入数据<div class="settings-sublabel">从 .xlsx 表格读回账本</div></div>
                                 <button class="secondary-btn" onclick="importExcelFile()">
                                     <i class="fa-solid fa-upload"></i> 导入 Excel
-                                </button>
-                            </div>
-                            <div class="settings-row">
-                                <div class="settings-label">查看 Excel（不导入）<div class="settings-sublabel">解密后把表格列出来给你看，<b>绝不改动账本</b>；想导入再点「导入这份」</div></div>
-                                <button class="secondary-btn" onclick="previewExcelFile()">
-                                    <i class="fa-solid fa-eye"></i> 查看
                                 </button>
                             </div>
                             <div class="settings-row">
@@ -1123,27 +1117,7 @@
             </div>
         </div>
 
-        <!-- Excel 查看（不导入）弹窗 -->
-    <div class="modal-overlay hidden" id="excelPreviewModal">
-        <div class="modal excel-preview-modal">
-            <div class="modal-header">
-                <div class="drill-title-wrap">
-                    <h2>查看 Excel（不导入）</h2>
-                    <div class="cat-txn-sub">这只是预览，<b>不会改动你的账本</b>。文件名：<span id="excelPreviewName"></span></div>
-                </div>
-                <button class="modal-close" onclick="closeExcelPreview()"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div class="modal-body">
-                <div id="excelPreviewBody" class="excel-preview-body"></div>
-            </div>
-            <div class="scope-foot">
-                <button class="secondary-btn" onclick="closeExcelPreview()">关闭</button>
-                <button class="primary-btn" onclick="importPreviewedExcel()"><i class="fa-solid fa-upload"></i> 导入这份</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Gist 云同步设置步骤弹窗 -->
+        <!-- Gist 云同步设置步骤弹窗 -->
     <div class="modal-overlay hidden" id="gistHelpModal">
         <div class="modal balance-modal">
             <div class="modal-header">
@@ -1363,7 +1337,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.52').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.53').catch(() => {});
             });
         }
     </script>
