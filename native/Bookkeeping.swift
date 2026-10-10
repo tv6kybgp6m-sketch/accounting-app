@@ -76,11 +76,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
     var icloudSource: DispatchSourceFileSystemObject?
     var lastIcloudContent: String?
     var snapshotTimer: Timer?
+    var lastSnapshotContent: String?   // 上一次已落盘快照的内容；内容没变就跳过，避免每 10 分钟攒一堆一模一样的
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let bundle = Bundle.main
         let resourcesURL = bundle.resourceURL!
         try? FileManager.default.createDirectory(at: backupsDirURL(), withIntermediateDirectories: true)
+        primeSnapshotBaseline()
 
         // 本地服务器（localhost 源，localStorage 才能持久化）
         server = MiniHTTPServer(root: resourcesURL)
@@ -104,7 +106,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.39.54"
+        webView.customUserAgent = "BookkeepingMacApp/1.39.55"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"
@@ -425,9 +427,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         }
     }
 
-    // MARK: 每 10 分钟留一份本地快照
+    // MARK: 本地快照：内容有变化才留一份（改了数据或同步回来有变化才写；没变化不写，避免无变化时每 10 分钟攒一堆一样的）
+    func primeSnapshotBaseline() {
+        // 启动时把"最新一份已有快照"的内容当作基线：这样重启后若数据没变，不会立刻又写一份重复的
+        let dir = backupsDirURL()
+        guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        let jsons = files.filter { $0.pathExtension.lowercased() == "json" }
+        guard let newest = jsons.max(by: { a, b in
+            let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date.distantPast
+            let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date.distantPast
+            return da < db
+        }) else { return }
+        lastSnapshotContent = try? String(contentsOf: newest, encoding: .utf8)
+    }
+
     func snapshot() {
-        guard let content = readICloudString(), let data = content.data(using: .utf8) else { return }
+        guard let content = readICloudString() else { return }
+        guard content != lastSnapshotContent else { return }   // 内容没变就跳过，不写重复快照
+        lastSnapshotContent = content
+        guard let data = content.data(using: .utf8) else { return }
         let fmt = ISO8601DateFormatter()
         let name = "bookkeeping-\(fmt.string(from: Date())).json"
         let dest = backupsDirURL().appendingPathComponent(name)
