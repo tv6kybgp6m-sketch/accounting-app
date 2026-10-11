@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.55';  // v1.39.55：Mac 自动备份改为"内容有变化才留一份"（改了数据或同步回来有变化才写，没变化不写）；启动以最新已有快照为基线避免重启重复写
+const APP_VERSION = '1.39.56';  // v1.39.56：autoOpenAdd(自动弹出记一笔)改为本机偏好不同步——buildSyncPayload 上传剥离 autoOpenAdd、mergeRemoteData 合并时丢弃远端 autoOpenAdd，避免 Mac 的"关"覆盖手机上开的状态
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1210,6 +1210,8 @@ async function initICloudSync() {
 
 // 同步文档的统一结构：iCloud 通道和云同步通道共用，避免两边字段漂移
 function buildSyncPayload() {
+    // 「自动弹出记一笔」是本机偏好，绝不进同步载荷：否则 Mac 没开会把手机上开了的状态覆盖成关（用户只在手机上记账）
+    const { autoOpenAdd, ...settingsForSync } = state.settings;
     return {
         version: 1,
         lastModified: Date.now(),
@@ -1233,7 +1235,7 @@ function buildSyncPayload() {
             insuranceMembers: state.insuranceMembers,
             insuranceMemberAddedAt: state.insuranceMemberAddedAt,
             insurancePolicies: state.insurancePolicies,
-            settings: state.settings,
+            settings: settingsForSync,
             deleted: state.deleted,
             pmAddedAt: state.pmAddedAt,
             // 周期规则也要走同步：不然 Mac 上建的房租规则，手机上根本不存在，
@@ -1511,9 +1513,10 @@ function mergeRemoteData(remoteData) {
     // 注意要在 syncFingerprint() 之前修，否则会把"坏数据"当成一次内容变更推回去。
     repairNameLists();
 
-    // Settings: prefer remote if newer
+    // Settings: prefer remote if newer；但「自动弹出记一笔」是本机偏好，绝不从远端覆盖（见 buildSyncPayload）
     if (remoteData.lastModified > (iCloudLastSyncTime || 0)) {
-        state.settings = { ...state.settings, ...remote.settings };
+        const { autoOpenAdd: _drop, ...remoteSettings } = remote.settings || {};
+        state.settings = { ...state.settings, ...remoteSettings };
         document.documentElement.setAttribute('data-theme', state.settings.theme);
     }
 
