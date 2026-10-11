@@ -165,6 +165,9 @@ body {
 .traffic-light-yellow { background: #febc2e; }
 .traffic-light-green { background: #28c840; }
 
+/* 原生 Mac 壳里系统已有真标题栏，网页这套假的(含红绿灯)整体藏掉，只留系统那一套 */
+.native-shell .title-bar { display: none; }
+
 .title-text {
     position: absolute;
     left: 50%;

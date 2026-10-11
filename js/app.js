@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.56';  // v1.39.56：autoOpenAdd(自动弹出记一笔)改为本机偏好不同步——buildSyncPayload 上传剥离 autoOpenAdd、mergeRemoteData 合并时丢弃远端 autoOpenAdd，避免 Mac 的"关"覆盖手机上开的状态
+const APP_VERSION = '1.39.57';  // v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -11870,6 +11870,8 @@ async function init() {
     try { localStorage.setItem('bk_init', 'start|' + Date.now()); } catch (e) { /* 排障标记，失败无所谓 */ }
     loadRemoteSyncConfig();
     loadState();
+    // 原生 Mac 壳已有系统真标题栏(含红绿灯)，网页这套假的(含红绿灯)直接藏掉，避免两套并存
+    if (isElectron()) document.body.classList.add('native-shell');
     // 兜底：老账本 / 旧备份里的余额 id 统一成四段并清掉重复格。
     // 清理过就立刻落盘 —— 不然显示在是对的，导出的备份里还带着影子、别的设备一合并又翻倍。
     if (normalizeBalanceIds()) saveState();
