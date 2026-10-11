@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.57';  // v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.58';  // v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -231,7 +231,7 @@ let state = {
     purgeSampleDone: false,   // 示例数据残留已清过一次（v1.39.26），只清一次就不再清
     balClassTags: Object.assign({}, BAL_CLASS_TAG_DEFAULT),  // 每个资产类别归到哪一类（固定资产/流动资产/长期投资/其他投资）
     sheetCols: DEFAULT_SHEET_COLS.map(c => ({ ...c })),       // 月度账单/资产负债页共用的自定义列（见下方 helper）
-    monthlyOpen: {},              // 月度账单「账户×渠道」开关：开=能填，锁=不能填（见 isChannelOpen / setChannelOpen）
+    monthlyOpen: {},              // 月度账单「账户×渠道」开关，按成员分别记录：monthlyOpen[member][accountId][cat]=true/false（显式覆盖）；不写=按自动规则（该成员上个月记过才开）
     reportMetric: 'expense',
     breakdownExpanded: false,
     reportChartType: 'line',
@@ -3082,8 +3082,8 @@ function loadState() {
             state.sheetCols = Array.isArray(data.sheetCols) && data.sheetCols.length
                 ? data.sheetCols.map(c => ({ ...c }))
                 : DEFAULT_SHEET_COLS.map(c => ({ ...c }));
-            // 月度账单「账户×渠道」开关：首次打开时把历史上记过数的组合自动打开，其余锁住
-            seedMonthlyOpen();
+            // 月度账单「账户×渠道」开关：v1.39.58 起按成员分别记录，升级时把旧的「全成员共用」结构拆回本地自动规则
+            migrateMonthlyOpen();
             state.recurring = Array.isArray(data.recurring) ? data.recurring : [];
             state.pendingRecurring = Array.isArray(data.pendingRecurring) ? data.pendingRecurring : [];
             state.recurringSkipped = (data.recurringSkipped && typeof data.recurringSkipped === 'object')
@@ -7718,47 +7718,59 @@ function balanceCatOf(b) {
     return assetClassOf(a);
 }
 
-// ---- 月度账单「账户 × 渠道」开关（v1.39.35）----
-// 一个账户在某一类资产/负债上可能根本没钱，网格却为每账户列出全部渠道，渠道一多就容易填错格。
-// 加一个开关：不开（锁住）就不能填，开了才能填；所有渠道都保留着，哪个账户真在那个渠道有钱时再点开。
-// 结构：monthlyOpen[accountId][cat] = true 表示开；没记 = 锁（默认 false）。
-function isChannelOpen(accountId, cat) {
-    const m = state.monthlyOpen;
-    return !!(m && m[accountId] && m[accountId][cat]);
-}
-function setChannelOpen(accountId, cat, on) {
+// ---- 月度账单「账户 × 渠道」开关（v1.39.35，v1.39.58 改为按成员分别记录）----
+// 以前这个开关是「全部成员共用」一个状态：本人记了某账户某渠道，另一个成员的同一格也跟着开了，容易混淆。
+// 现在改成按家庭成员分别记录：每个成员的锁各自独立。
+// 数据结构：monthlyOpen[member][accountId][cat]
+//   · 不写（缺省）= 用「自动规则」：该成员在【上个月】记过这个账户×渠道，这月就自动开；否则锁住。
+//   · true = 用户显式点开（强制开）；false = 用户显式锁定（强制锁）。
+// 这样：本人上个月记了平安·负债 → 本人下个月那格自动开；另一个成员没记过 → 他的那格还是锁的。
+// monthlyOpen 始终是「本地 UI 状态，不进 iCloud 同步」，按成员也只是本地各自记一份。
+
+// 取某个成员的显式覆盖层（缺则建）
+function monthlyOpenLayer(member) {
     if (!state.monthlyOpen) state.monthlyOpen = {};
-    if (!state.monthlyOpen[accountId]) state.monthlyOpen[accountId] = {};
-    if (on) state.monthlyOpen[accountId][cat] = true;
-    else {
-        delete state.monthlyOpen[accountId][cat];
-        if (!Object.keys(state.monthlyOpen[accountId]).length) delete state.monthlyOpen[accountId];
-    }
+    if (!state.monthlyOpen[member]) state.monthlyOpen[member] = {};
+    return state.monthlyOpen[member];
 }
-// 首次打开（还没有任何开关记录）时，把「历史上记过数」的 (账户×渠道) 组合自动打开，其余默认锁。
-// 老用户已有的真实余额零影响，空渠道不会误填。只跑一次（已有记录就不再重跑），
-// 之后用户手动锁/开是唯一真相来源，不被历史数据覆盖。
-function seedMonthlyOpen() {
+// 自动规则：该成员在上个月是否记过这个账户×渠道（余额 / 收益 / 净入金都算）
+function memberChannelRecordedLastMonth(member, accountId, cat, month) {
+    if (!member || !month) return false;
+    const prev = previousMonthOf(month);
+    if (!prev) return false;
+    if (cat === '__ret__') {
+        return state.returns.some(r => r.member === member && r.accountId === accountId
+            && r.month === prev && r.amount !== undefined && r.amount !== null && r.amount !== '');
+    }
+    if (cat === '__flow__') {
+        return state.returns.some(r => r.member === member && r.accountId === accountId
+            && r.month === prev && r.flow !== undefined && r.flow !== null && r.flow !== '');
+    }
+    return state.balances.some(b => b.member === member && b.accountId === accountId
+        && balanceCatOf(b) === cat && b.month === prev);
+}
+// 某格是否可填：先看该成员有没有显式覆盖，没有就走自动规则（上个月记过才开）
+function isChannelOpen(member, accountId, cat, month) {
+    const layer = state.monthlyOpen && state.monthlyOpen[member];
+    if (layer && Object.prototype.hasOwnProperty.call(layer, accountId)
+        && layer[accountId] && Object.prototype.hasOwnProperty.call(layer[accountId], cat)) {
+        return !!layer[accountId][cat];
+    }
+    return memberChannelRecordedLastMonth(member, accountId, cat, month);
+}
+// 用户点锁：显式记录 true/false，盖过自动规则（之后这一格就听用户的，不被历史覆盖）
+function setChannelOpen(member, accountId, cat, on) {
+    const layer = monthlyOpenLayer(member);
+    if (!layer[accountId]) layer[accountId] = {};
+    layer[accountId][cat] = !!on;
+}
+// v1.39.58 升级迁移：旧版 monthlyOpen 是「全成员共用」的 monthlyOpen[accountId][cat]=true（还可能带 __rfSeeded 标记）。
+// 直接丢弃旧结构，改由自动规则（按成员、该成员上个月记过才开）驱动；用户之后手动点锁会落进新结构。
+// 丢弃是安全的：旧结构里那些「开」本来就是根据历史自动推出来的，新规则下每个成员会按自己的历史重新算出来。
+function migrateMonthlyOpen() {
     if (!state.monthlyOpen) state.monthlyOpen = {};
-    const m = state.monthlyOpen;
-    const mark = (accountId, cat) => {
-        if (!accountId || !cat) return;
-        if (!m[accountId]) m[accountId] = {};
-        m[accountId][cat] = true;
-    };
-    // 余额：整本子为空（新用户 / 还没种子过）才跑一次，之后手动锁/开是唯一真相来源，不被历史数据覆盖
-    if (!Object.keys(m).length) {
-        state.balances.forEach(b => mark(b.accountId, balanceCatOf(b)));
-    }
-    // 收益 / 净入金（v1.39.40 新增）：单独一次性种子，绝不回写、不覆盖任何手动锁。
-    // 历史上记过收益 / 净入金的账户自动开（不挡每月记），其余默认锁（防误填）。收益、净入金分开种子。
-    if (!m.__rfSeeded) {
-        state.returns.forEach(r => {
-            if (r.amount !== undefined && r.amount !== null && r.amount !== '') mark(r.accountId, '__ret__');
-            if (r.flow !== undefined && r.flow !== null && r.flow !== '') mark(r.accountId, '__flow__');
-        });
-        m.__rfSeeded = true;
-    }
+    const looksOld = Object.keys(state.monthlyOpen).some(k => k.indexOf('acc_') === 0);
+    if (looksOld) state.monthlyOpen = {};
 }
 
 // 没设过钱包的账户按名字猜一个初始值，省得几十个点要一个个填
@@ -8020,7 +8032,7 @@ function renderMonthlyEntry() {
     // 单格 = 账户 × 渠道。开了（默认有历史数据的组合已开）是普通输入框；
     // 锁了 = 输入框禁用 + 灰显 + 斜纹，右上角小锁按钮点一下就能打开。所有渠道都保留，不删。
     const balInput = (a, cat, cls) => {
-        const open = isChannelOpen(a.id, cat);
+        const open = isChannelOpen(member, a.id, cat, month);
         const lockBtn = `<button class="mw-lockbtn" type="button" data-lock-acct="${a.id}" data-lock-cat="${cat}"
             title="${open ? '点一下锁定这一格（不再填写）' : '点开才能填写这一格'}" aria-label="${open ? '锁定' : '点开'}">${open ? '<i class="fa-solid fa-lock-open"></i>' : '<i class="fa-solid fa-lock"></i>'}</button>`;
         const inp = `<input type="text" inputmode="decimal" class="text-input be-field${cls || ''}${open ? '' : ' mw-locked'}"
@@ -8031,7 +8043,7 @@ function renderMonthlyEntry() {
     // 收益 / 净入金（v1.39.40）：和余额格一样，每个账户独立的小锁；默认只有历史上记过数的账户才开。
     // 锁 = 只读防误改，框里有数照样存照样算（语义同 v1.39.37）；空框按 0。收益、净入金分开锁。
     const retInput = (a) => {
-        const open = isChannelOpen(a.id, '__ret__');
+        const open = isChannelOpen(member, a.id, '__ret__', month);
         const lockBtn = `<button class="mw-lockbtn" type="button" data-lock-acct="${a.id}" data-lock-cat="__ret__"
             title="${open ? '点一下锁定收益这一格（不再填写）' : '点开才能填写收益'}" aria-label="${open ? '锁定' : '点开'}">${open ? '<i class="fa-solid fa-lock-open"></i>' : '<i class="fa-solid fa-lock"></i>'}</button>`;
         const inp = `<input type="text" inputmode="decimal" class="text-input be-field${open ? '' : ' mw-locked'}"
@@ -8039,7 +8051,7 @@ function renderMonthlyEntry() {
         return `<div class="mw-c mw-ret${open ? '' : ' mw-cell-locked'}">${lockBtn}<span class="be-rate" data-rate-for="${a.id}"></span>${inp}</div>`;
     };
     const flowInput = (a) => {
-        const open = isChannelOpen(a.id, '__flow__');
+        const open = isChannelOpen(member, a.id, '__flow__', month);
         const lockBtn = `<button class="mw-lockbtn" type="button" data-lock-acct="${a.id}" data-lock-cat="__flow__"
             title="${open ? '点一下锁定净入金这一格（不再填写）' : '点开才能填写净入金'}" aria-label="${open ? '锁定' : '点开'}">${open ? '<i class="fa-solid fa-lock-open"></i>' : '<i class="fa-solid fa-lock"></i>'}</button>`;
         const inp = `<input type="text" inputmode="decimal" class="text-input be-flow${open ? '' : ' mw-locked'}"
@@ -8567,13 +8579,16 @@ function bindMonthlyEntry() {
         });
     });
     // v1.39.35：「账户 × 渠道」开关：点小锁按钮锁住 / 打开这一格（锁住 = 不能填）
+    // v1.39.58：开关按当前正在编辑的成员分别记录，不同成员互不干扰
     list.querySelectorAll('[data-lock-acct]').forEach(btn => {
         btn.addEventListener('click', e => {
             e.preventDefault(); e.stopPropagation();
             const accountId = btn.dataset.lockAcct;
             const cat = btn.dataset.lockCat;
-            const opening = !isChannelOpen(accountId, cat);
-            setChannelOpen(accountId, cat, opening);
+            const member = monthlyMember();
+            const month = getModalMonth('monthly');
+            const opening = !isChannelOpen(member, accountId, cat, month);
+            setChannelOpen(member, accountId, cat, opening);
             saveState();
             renderMonthlyEntry();
             showToast(opening ? '已打开这一格，可以填写了' : '已锁定这一格', 'info');
