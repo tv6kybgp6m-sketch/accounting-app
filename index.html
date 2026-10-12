@@ -264,6 +264,7 @@
                     <div class="view-header">
                         <h1>四笔钱</h1>
                         <div class="report-controls">
+                            <button class="money-eye-btn eye-off" data-eye-page="funds" onclick="toggleMoneyEye('funds')" title="点击显示金额" aria-label="显示金额"><i class="fa-solid fa-eye-slash"></i></button>
                             <button class="secondary-btn" id="fundAccountsBtn">
                                 <i class="fa-solid fa-tags"></i> 账户归类
                             </button>
@@ -300,6 +301,7 @@
                     <div class="view-header">
                         <h1>资产负债</h1>
                         <div class="report-controls">
+                            <button class="money-eye-btn eye-off" data-eye-page="balance" onclick="toggleMoneyEye('balance')" title="点击显示金额" aria-label="显示金额"><i class="fa-solid fa-eye-slash"></i></button>
                             <div class="report-period">
                                 <button class="period-btn active" data-bal-period="month">月报</button>
                                 <button class="period-btn" data-bal-period="year">年报</button>
@@ -438,6 +440,7 @@
                     <div class="view-header">
                         <h1>投资收益</h1>
                         <div class="report-controls">
+                            <button class="money-eye-btn eye-off" data-eye-page="returns" onclick="toggleMoneyEye('returns')" title="点击显示金额" aria-label="显示金额"><i class="fa-solid fa-eye-slash"></i></button>
                             <div class="report-period">
                                 <button class="period-btn active" data-ret-period="month">月报</button>
                                 <button class="period-btn" data-ret-period="year">年报</button>
@@ -1337,7 +1340,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.58').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.59').catch(() => {});
             });
         }
     </script>

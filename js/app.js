@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.58';  // v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.59';  // v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -3165,6 +3165,43 @@ function formatCurrency(amount) {
     const abs = Math.abs(amount);
     const str = abs.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
     return sign + str;
+}
+
+// 隐私遮罩：默认 moneyVisible=false（眼睛闭着），三页金额统一走 maskMoney，
+// 闭眼时金额显示成 ****，占比（<em>%</em> 走另一套代码）不受影响。眼睛图标切换 moneyVisible。
+let moneyVisible = false;
+function maskMoney(v) {
+    if (moneyVisible) return formatCurrency(v);
+    return '****';
+}
+function maskMoneySigned(v) {
+    if (moneyVisible) return (v > 0 ? '+' : '') + formatCurrency(v);
+    return '****';
+}
+// 切换金额可见性：翻所有眼睛按钮图标，并重渲染当前所在页
+function toggleMoneyEye(page) {
+    moneyVisible = !moneyVisible;
+    updateMoneyEyeIcons();
+    if (page === 'balance') renderBalance();
+    else if (page === 'funds') renderFourFunds();
+    else if (page === 'returns') renderReturns();
+}
+function updateMoneyEyeIcons() {
+    document.querySelectorAll('.money-eye-btn').forEach(btn => {
+        const icon = btn.querySelector('i');
+        if (!icon) return;
+        if (moneyVisible) {
+            icon.className = 'fa-solid fa-eye';
+            btn.title = '点击隐藏金额';
+            btn.setAttribute('aria-label', '隐藏金额');
+            btn.classList.remove('eye-off');
+        } else {
+            icon.className = 'fa-solid fa-eye-slash';
+            btn.title = '点击显示金额';
+            btn.setAttribute('aria-label', '显示金额');
+            btn.classList.add('eye-off');
+        }
+    });
 }
 
 function formatDate(dateStr) {
@@ -6352,6 +6389,9 @@ function renderBalanceStats() {
     }
     // 紧凑金额：去掉 ¥ 和千位分隔符，去掉多余的小数尾零，保证窄屏放得下
     const bsMoney = (v, cls) => {
+        if (!moneyVisible) {
+            return `<span class="bs-num${cls ? ' ' + cls : ''}">****</span>`;
+        }
         const sign = v < 0 ? '-' : '';
         const abs = Math.abs(v);
         let str = abs.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
@@ -6405,9 +6445,9 @@ function renderBalance() {
     const cat = recorded ? balancesByCat(info.month) : {};
     const t = totalsFromCat(cat);
 
-    document.getElementById('balTotalAsset').textContent = formatCurrency(t.asset);
-    document.getElementById('balTotalLiability').textContent = formatCurrency(t.liability);
-    document.getElementById('balNetWorth').textContent = formatCurrency(t.net);
+    document.getElementById('balTotalAsset').textContent = maskMoney(t.asset);
+    document.getElementById('balTotalLiability').textContent = maskMoney(t.liability);
+    document.getElementById('balNetWorth').textContent = maskMoney(t.net);
     document.getElementById('balRatio').textContent = (t.ratio * 100).toFixed(1) + '%';
     const asOf = document.getElementById('balAsOf');
     asOf.textContent = !info.month
@@ -6474,10 +6514,10 @@ function renderNetBridge() {
     document.getElementById('bridgeSubtitle').textContent =
         `${info.month.replace('-', '年')}月 · ${state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner}`;
 
-    const sign = v => (v > 0 ? '+' : '') + formatCurrency(v);
+    const sign = v => maskMoneySigned(v);
     const rows = [
         { k: '期初净资产', v: b.open, cls: 'neutral' },
-        { k: '本月储蓄（收入−支出）', v: b.saved, cls: b.saved >= 0 ? 'up' : 'down', note: `${sign(b.income)} 收 / ${formatCurrency(b.expense)} 支` },
+        { k: '本月储蓄（收入−支出）', v: b.saved, cls: b.saved >= 0 ? 'up' : 'down', note: `${sign(b.income)} 收 / ${maskMoney(b.expense)} 支` },
         { k: '投资收益', v: b.profit, cls: b.profit >= 0 ? 'up' : 'down' },
     ];
     if (b.fixedTouched && Math.abs(b.fixedMove) > 0.005) {
@@ -6494,7 +6534,7 @@ function renderNetBridge() {
     document.getElementById('bridgeRows').innerHTML = rows.map(r => `
         <div class="bridge-row ${r.cls}">
             <span class="br-key">${_esc(r.k)}</span>
-            <span class="br-val">${r.k === '期末净资产' || r.k === '期初净资产' ? formatCurrency(r.v) : sign(r.v)}</span>
+            <span class="br-val">${r.k === '期末净资产' || r.k === '期初净资产' ? maskMoney(r.v) : sign(r.v)}</span>
             ${r.note ? `<span class="br-note">${_esc(r.note)}</span>` : ''}
         </div>`).join('');
 
@@ -6540,7 +6580,7 @@ function drawBridgeChart(b) {
             responsive: true, maintainAspectRatio: false,
             plugins: {
                 legend: { display: false },
-                tooltip: { callbacks: { label: c => formatCurrency(Math.abs(c.raw[1] - c.raw[0])) } },
+                tooltip: { callbacks: { label: c => maskMoney(Math.abs(c.raw[1] - c.raw[0])) } },
             },
             scales: {
                 x: { grid: { display: false }, ticks: { color: textColor, font: { size: 11 } } },
@@ -6601,7 +6641,7 @@ function closeChecklist(month) {
             ? { state: 'ok', text: '流水与余额对得上', act: null }
             : {
                 state: 'warn',
-                text: `有 ${formatCurrency(Math.abs(b.unexplained))} 对不上：可能是漏记流水、余额记错，或者收益没录`,
+                text: `有 ${maskMoney(Math.abs(b.unexplained))} 对不上：可能是漏记流水、余额记错，或者收益没录`,
                 // 变动桥在资产负债页里；清单搬到报表页之后，光 scrollIntoView
                 // 会滚到一个 display:none 的元素上，点了没反应 —— 必须先切页。
                 act: { label: '看变动明细', run: () => {
@@ -6836,7 +6876,7 @@ function renderBalanceTrend(ctx, chartType, meta, metric) {
             },
             plugins: {
                 legend: { display: false },
-                tooltip: { callbacks: { label: (c) => `${meta.name}: ${formatCurrency(c.raw)}` } },
+                tooltip: { callbacks: { label: (c) => `${meta.name}: ${maskMoney(c.raw)}` } },
             },
             scales: {
                 x: {
@@ -6937,14 +6977,14 @@ function renderBalancePie(ctx, info) {
                     callbacks: {
                         label: (c) => {
                             const pct = gross ? ((c.raw / gross) * 100).toFixed(1) : '0.0';
-                            return `${c.label}: ${formatCurrency(c.raw)} (${pct}%)`;
+                            return `${c.label}: ${maskMoney(c.raw)} (${pct}%)`;
                         },
                     },
                 },
             },
         },
     });
-    charts.balance.$centerText = { label: `${BAL_METRICS[metric].name}合计`, value: formatCurrency(net) };
+    charts.balance.$centerText = { label: `${BAL_METRICS[metric].name}合计`, value: maskMoney(net) };
 }
 
 function renderBalanceBreakdown() {
@@ -6979,7 +7019,7 @@ function renderBalanceBreakdown() {
             <div class="breakdown-main">
                 <div class="breakdown-head">
                     <span class="breakdown-name">${_esc(c.label)}</span>
-                    <span class="breakdown-amount">${formatCurrency(v)}<em>${pct.toFixed(1)}%</em></span>
+                    <span class="breakdown-amount">${maskMoney(v)}<em>${pct.toFixed(1)}%</em></span>
                 </div>
                 <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (v / top) * 100)}%;background:${c.color}"></div></div>
             </div>
@@ -6998,7 +7038,7 @@ function renderBalanceBreakdown() {
             <div class="breakdown-main">
                 <div class="breakdown-head">
                     <span class="breakdown-name">${_esc(c.label)}</span>
-                    <span class="breakdown-amount">${formatCurrency(v)}<em>${pct.toFixed(1)}%</em></span>
+                    <span class="breakdown-amount">${maskMoney(v)}<em>${pct.toFixed(1)}%</em></span>
                 </div>
                 <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (v / top) * 100)}%;background:${c.color}"></div></div>
             </div>
@@ -7051,7 +7091,7 @@ function breakdownRowHTML(r, total, top, metric) {
         const color = a.color || '#8e8e8e';
         const has = r.amount !== null;
         const pct = has && total ? (r.signed / total) * 100 : 0;
-        const sign = metric === 'net' && r.amount < 0 ? '-' : '';
+        const sign = (metric === 'net' && r.amount < 0 && moneyVisible) ? '-' : '';
         return `
             <div class="breakdown-item${has ? '' : ' bd-empty-row'}" onclick="openAccountHistoryForAccount('${a.id}')">
                 <div class="breakdown-icon" style="background:${color}22;color:${color}">
@@ -7060,7 +7100,7 @@ function breakdownRowHTML(r, total, top, metric) {
                 <div class="breakdown-main">
                     <div class="breakdown-head">
                         <span class="breakdown-name">${a.name}${has ? `<span class="breakdown-rank">${r.rank}</span>` : ''}</span>
-                        <span class="breakdown-amount">${has ? `${sign}${formatCurrency(Math.abs(r.amount))}<em>${pct.toFixed(1)}%</em>` : '<span class="bd-no">未记录</span>'}</span>
+                        <span class="breakdown-amount">${has ? `${sign}${maskMoney(Math.abs(r.amount))}<em>${pct.toFixed(1)}%</em>` : '<span class="bd-no">未记录</span>'}</span>
                     </div>
                     <div class="breakdown-bar"><div class="breakdown-fill" style="width:${has ? Math.max(3, (r.signed / top) * 100) : 0}%;background:${color}"></div></div>
                 </div>
@@ -7113,9 +7153,9 @@ function openAccountHistoryForPeriod(month, label) {
     del.style.display = 'none';
     const rows = balAccounts().filter(a => map[a.id] !== undefined).sort((x, y) => map[y.id] - map[x.id]);
     document.getElementById('acctHistSummary').innerHTML = `
-        <span class="cat-txn-summary-item income">资产 <b>${formatCurrency(t.asset)}</b></span>
-        <span class="cat-txn-summary-item expense">负债 <b>${formatCurrency(t.liability)}</b></span>
-        <span class="cat-txn-summary-item">净资产 <b>${formatCurrency(t.net)}</b></span>`;
+        <span class="cat-txn-summary-item income">资产 <b>${maskMoney(t.asset)}</b></span>
+        <span class="cat-txn-summary-item expense">负债 <b>${maskMoney(t.liability)}</b></span>
+        <span class="cat-txn-summary-item">净资产 <b>${maskMoney(t.net)}</b></span>`;
     document.getElementById('acctHistList').innerHTML = rows.length
         ? rows.map(a => `
             <div class="breakdown-item" onclick="closeAccountHistoryModal();openAccountHistoryForAccount('${a.id}')">
@@ -7123,7 +7163,7 @@ function openAccountHistoryForPeriod(month, label) {
                 <div class="breakdown-main">
                     <div class="breakdown-head">
                         <span class="breakdown-name">${a.name}</span>
-                        <span class="breakdown-amount">${a.kind === 'liability' ? '-' : ''}${formatCurrency(map[a.id])}</span>
+                        <span class="breakdown-amount">${a.kind === 'liability' && moneyVisible ? '-' : ''}${maskMoney(map[a.id])}</span>
                     </div>
                 </div>
                 <span class="bal-group-tag">${a.group}</span>
@@ -7148,13 +7188,13 @@ function renderAccountHistory() {
     const delta = (latest !== undefined && prev !== undefined) ? latest - prev : 0;
     document.getElementById('acctHistSummary').innerHTML = `
         <span class="cat-txn-summary-item">共 <b>${monthKeys.length}</b> 期</span>
-        <span class="cat-txn-summary-item">最新 <b>${latest !== undefined ? formatCurrency(latest) : '—'}</b></span>
-        ${prev !== undefined ? `<span class="cat-txn-summary-item ${delta >= 0 ? 'income' : 'expense'}">环比 <b>${delta >= 0 ? '+' : ''}${formatCurrency(delta)}</b></span>` : ''}`;
+        <span class="cat-txn-summary-item">最新 <b>${latest !== undefined ? maskMoney(latest) : '—'}</b></span>
+        ${prev !== undefined ? `<span class="cat-txn-summary-item ${delta >= 0 ? 'income' : 'expense'}">环比 <b>${moneyVisible ? (delta >= 0 ? '+' : '') : ''}${maskMoney(delta)}</b></span>` : ''}`;
     document.getElementById('acctHistList').innerHTML = hist.length
         ? hist.map(b => `
             <div class="bal-history-row">
                 <span class="bh-month">${b.month.replace('-', '年')}月${all ? `<span class="bh-member">${_esc(b.member || '')}</span>` : ''}</span>
-                <span class="bh-amount">${formatCurrency(b.amount)}</span>
+                <span class="bh-amount">${maskMoney(b.amount)}</span>
                 <button class="bh-edit" onclick="editBalanceRecord('${b.id}')" title="修改这一期"><i class="fa-solid fa-pen"></i></button>
                 <button class="bh-delete" onclick="deleteBalanceSnapshot('${b.id}')" title="删除这一期"><i class="fa-solid fa-xmark"></i></button>
             </div>`).join('')
@@ -9640,7 +9680,7 @@ function memberPremium(member) {
 }
 function memberPremiumText(member) {
     const n = memberPremium(member);
-    return n ? formatCurrency(n) : '—';
+    return n ? maskMoney(n) : '—';
 }
 
 function insTotalPremium() {
@@ -9675,8 +9715,8 @@ function renderFundQuadrant() {
         <div class="fq-cell" style="--fq-color:${bk.color}">
             <div class="fq-fill" style="width:${(pct * 100).toFixed(0)}%"></div>
             <div class="fq-name"><i class="fa-solid ${bk.icon}"></i> ${bk.name}</div>
-            <div class="fq-act">${formatCurrency(act)}</div>
-            <div class="fq-meta">目标 ${formatCurrency(tgt)} · 占 ${share}%</div>
+            <div class="fq-act">${maskMoney(act)}</div>
+            <div class="fq-meta">目标 ${maskMoney(tgt)} · 占 ${share}%</div>
         </div>`;
     });
     const insDone = insCoveredCount();
@@ -9685,7 +9725,7 @@ function renderFundQuadrant() {
             <div class="fq-fill" style="width:${(insDone / INSURANCE_TYPES.length * 100).toFixed(0)}%"></div>
             <div class="fq-name"><i class="fa-solid fa-umbrella"></i> 保险保障</div>
             <div class="fq-act">${insDone}/${INSURANCE_TYPES.length} 已配</div>
-            <div class="fq-meta">总保额 ${formatCurrency(insTotalAmount())}</div>
+            <div class="fq-meta">总保额 ${maskMoney(insTotalAmount())}</div>
         </div>`);
     box.innerHTML = cells.join('');
 }
@@ -9710,7 +9750,7 @@ function renderFundCards() {
                 <span class="fc-hint">${bk.hint}</span>
             </div>
             <div class="fc-nums">
-                <div class="fc-act" style="color:${bk.color}">${formatCurrency(act)}</div>
+                <div class="fc-act" style="color:${bk.color}">${maskMoney(act)}</div>
                 <div class="fc-share">占资产 ${sharePct}%</div>
             </div>
             <div class="fc-bar"><div class="fc-bar-fill" style="width:${Math.min(pct, 100).toFixed(0)}%;background:${bk.color}"></div></div>
@@ -9722,7 +9762,7 @@ function renderFundCards() {
                 <input type="number" class="fc-pct" data-bucket="${bk.key}" value="${total > 0 ? (tgt / total * 100).toFixed(0) : ''}" placeholder="%" inputmode="numeric">
                 <span>%</span>
             </div>
-            <div class="fc-gap ${gap < 0 ? 'under' : 'ok'}">${tgt > 0 ? (gap < 0 ? `还差 ${formatCurrency(-gap)}` : `已达标，超出 ${formatCurrency(gap)}`) : '未设目标'}</div>
+            <div class="fc-gap ${gap < 0 ? 'under' : 'ok'}">${tgt > 0 ? (gap < 0 ? `还差 ${maskMoney(-gap)}` : `已达标，超出 ${maskMoney(gap)}`) : '未设目标'}</div>
         </div>`;
     }).join('');
     box.querySelectorAll('.fc-amt').forEach(inp => inp.addEventListener('change', () => setFundTarget(inp.dataset.bucket, parseFloat(inp.value) || 0, 'amount')));
@@ -9766,10 +9806,10 @@ function renderFundDonut() {
             options: {
                 responsive: true, maintainAspectRatio: false, cutout: '55%',
                 layout: { padding: { left: 24, right: 24, top: 8, bottom: 8 } },
-                plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.label}: ${formatCurrency(c.raw)}` } } },
+                plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.label}: ${maskMoney(c.raw)}` } } },
             },
         });
-        fundChart.$centerText = { label: '总资产', value: formatCurrency(total) };
+        fundChart.$centerText = { label: '总资产', value: maskMoney(total) };
     };
     draw();
 }
@@ -9782,7 +9822,7 @@ function renderFundDebt() {
     const assets = fundTotalAssets();
     const ratio = assets > 0 ? (liab / assets * 100).toFixed(1) : '0.0';
     el.innerHTML = `<span class="fd-label"><i class="fa-solid fa-credit-card"></i> 负债（不计入四笔钱）</span>
-        <span class="fd-val">总负债 ${formatCurrency(liab)} · 负债率 ${ratio}%</span>`;
+        <span class="fd-val">总负债 ${maskMoney(liab)} · 负债率 ${ratio}%</span>`;
 }
 
 // ---- 未分配账户提示 ----
@@ -9826,7 +9866,7 @@ function renderInsuranceSection() {
         `<i class="fa-solid fa-xmark" draggable="false" data-insact="del" data-insmember="${_esc(m)}" title="删除"></i></span>`
     ).join('') + `<button class="ins-member ins-add" data-insadd="1"><i class="fa-solid fa-plus"></i> 成员</button>`
         // 全家一年要交多少保费，以前得自己把每个人头上的数加起来
-        + `<span class="ins-prem-total">全部保费 <b>${formatCurrency(insTotalPremium())}</b>/年</span>`;
+        + `<span class="ins-prem-total">全部保费 <b>${maskMoney(insTotalPremium())}</b>/年</span>`;
 
     // 保险成员横向拖拽排序：和账户 / 分类同一套观感（卡片跟手 + 落点高亮线）。
     // 成员名是身份（保单按 险种__成员 存），所以拖的是数组顺序，改的是显示次序。
@@ -9916,7 +9956,7 @@ function renderInsuranceSection() {
 // 理赔金额小计
 function claimSum(p) {
     const sum = ((p && p.claims) || []).reduce((s, c) => s + (Number(c.amount) || 0), 0);
-    return sum ? `已赔 ${formatCurrency(sum)}` : '理赔记录';
+    return sum ? `已赔 ${maskMoney(sum)}` : '理赔记录';
 }
 
 // 到期提醒扫全家，不是只扫当前看的那个人 —— 续保错过就白交了
@@ -9982,11 +10022,11 @@ function renderInsClaims() {
     if (!p) { closeInsClaims(); return; }
     const list = (p.claims || []).slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
     document.getElementById('insClaimSub').textContent =
-        `保额 ${formatCurrency(Number(p.amount) || 0)} · 已赔 ${formatCurrency((p.claims || []).reduce((s, c) => s + (Number(c.amount) || 0), 0))}`;
+        `保额 ${maskMoney(Number(p.amount) || 0)} · 已赔 ${maskMoney((p.claims || []).reduce((s, c) => s + (Number(c.amount) || 0), 0))}`;
     document.getElementById('insClaimList').innerHTML = list.length ? list.map(c => `
         <div class="claim-row">
             <span class="cr-date">${_esc(c.date || '')}</span>
-            <span class="cr-amt">${formatCurrency(Number(c.amount) || 0)}</span>
+            <span class="cr-amt">${maskMoney(Number(c.amount) || 0)}</span>
             <span class="cr-note">${_esc(c.note || '')}</span>
             <button class="bh-delete" type="button" data-claim-del="${_esc(c.id)}" title="删除"><i class="fa-solid fa-xmark"></i></button>
         </div>`).join('') : '<div class="breakdown-empty">还没有理赔记录</div>';
@@ -10004,7 +10044,7 @@ function addInsClaim() {
     const row = { id: `cl_${Date.now()}_${Math.floor(Math.random() * 1000)}`, date, amount, note, createdAt: Date.now() };
     p.claims.push(row);
     p.updatedAt = Date.now();
-    const label = `${p.type} 理赔 ${formatCurrency(amount)}`;
+    const label = `${p.type} 理赔 ${maskMoney(amount)}`;
     const canUndo = pushUndo(label, { claimAdd: [{ policyId: p.id, claimId: row.id }] });
     saveState();
     ['claimDate', 'claimAmount', 'claimNote'].forEach(id => { document.getElementById(id).value = ''; });
@@ -10450,7 +10490,7 @@ function renderFamilySummary() {
     });
 
     const tA = rows.reduce((s, r) => s + r.a, 0), tL = rows.reduce((s, r) => s + r.l, 0);
-    const money = (v, cls) => `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${formatCurrency(v)}</span>`;
+    const money = (v, cls) => `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${maskMoney(v)}</span>`;
     body.innerHTML = rows.map(r => `
         <tr>
             <td class="bs-label">${_esc(r.mem)}</td>
@@ -10862,7 +10902,7 @@ function renderAssetChange() {
     trendBox.classList.toggle('hidden', !showTrend);
 
     const mLabel = m => m ? m.replace('-', '年') + '月' : '—';
-    const signed = v => (v > 0 ? '+' : '') + formatCurrency(v);
+    const signed = v => maskMoneySigned(v);
     const tiles = [
         { k: '期初总资产', v: t.open, sub: t.open === null ? `${mLabel(t.openMonth)}未记余额` : mLabel(t.openMonth), plain: true },
         { k: '净入金', v: t.flowKnown ? t.flow : null, sub: t.flowKnown ? '转入 − 转出（投资账户）' : '未录入' },
@@ -10874,7 +10914,7 @@ function renderAssetChange() {
         const cls = tile.plain ? '' : (((tile.v || 0) > 0) ? ' up' : (((tile.v || 0) < 0) ? ' down' : ''));
         const val = (tile.v === null || tile.v === undefined)
             ? '<span class="tac-na">—</span>'
-            : (tile.plain ? _esc(formatCurrency(tile.v)) : _esc(signed(tile.v)));
+            : (tile.plain ? _esc(maskMoney(tile.v)) : _esc(signed(tile.v)));
         return `<div class="tac-tile${cls}"><span class="tt-k">${_esc(tile.k)}</span>`
             + `<span class="tt-v">${val}</span><span class="tt-s">${_esc(tile.sub)}</span></div>`;
     }).join('');
@@ -10932,7 +10972,7 @@ function renderTacChart(t) {
                 plugins: {
                     legend: { display: false },
                     tooltip: { callbacks: { label: (c) => (c.raw === null || c.raw === undefined)
-                        ? '该月未记余额' : `总资产: ${formatCurrency(c.raw)}` } },
+                        ? '该月未记余额' : `总资产: ${maskMoney(c.raw)}` } },
                 },
                 scales: {
                     x: { grid: { display: false }, ticks: { color: palette.text, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
@@ -11002,9 +11042,9 @@ function renderReturnSummary(info) {
     let monthHint;
     if (!mKey) monthHint = '还没有收益记录';
     else if (mStat.rate === null) monthHint = NO_RATE[mStat.reason] || '暂时算不出收益率';
-    else if (mStat.unknown.length) monthHint = `本金 ${formatCurrency(mStat.base)} · 未计入 ${namesOf(mStat.unknown)}（缺上月余额）`;
-    else if (mStat.flowKnown) monthHint = `本金 ${formatCurrency(mStat.base)} · 含净入金 ${formatCurrency(mStat.flow)}`;
-    else monthHint = `平均本金 ${formatCurrency(mStat.base)} · 未录入金（近似）`;
+    else if (mStat.unknown.length) monthHint = `本金 ${maskMoney(mStat.base)} · 未计入 ${namesOf(mStat.unknown)}（缺上月余额）`;
+    else if (mStat.flowKnown) monthHint = `本金 ${maskMoney(mStat.base)} · 含净入金 ${maskMoney(mStat.flow)}`;
+    else monthHint = `平均本金 ${maskMoney(mStat.base)} · 未录入金（近似）`;
     const monthCard = {
         label: mKey ? `${ymd(mKey)} 收益` : '本月收益',
         amount: mKey ? sumOf([mKey]) : 0, rate: mStat.rate,
@@ -11061,7 +11101,7 @@ function renderReturnSummary(info) {
     // 卡上不再写"XX收益率"：百分数跟在金额后面一眼就懂，省下来的一行留给小字说明
     box.innerHTML = slots.map(c => {
         const big = c.big !== undefined ? c.big
-            : (c.amount === null || c.amount === undefined ? '—' : formatCurrency(c.amount));
+            : (c.amount === null || c.amount === undefined ? '—' : maskMoney(c.amount));
         const bigCls = c.big !== undefined ? (c.bigCls || '') : rateClsOf(c.amount);
         const small = c.sub !== undefined ? c.sub : pctText(c.rate);
         const smallCls = c.sub !== undefined ? (c.subCls || '') : rateClsOf(c.rate);
@@ -11139,9 +11179,9 @@ function renderReturnScope(info) {
         if (cur.check) {
             warn.classList.remove('hidden');
             warn.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> `
-                + `这个月对不上：你录的收益是 <b>${formatCurrency(cur.profit)}</b>，`
-                + `但按「期末 ${formatCurrency(cur.v1)} − 期初 ${formatCurrency(cur.v0)} − 净入金 ${formatCurrency(cur.flow)}」`
-                + `应该是 <b>${formatCurrency(cur.check.implied)}</b>，差 <b>${formatCurrency(cur.check.gap)}</b>。`
+                + `这个月对不上：你录的收益是 <b>${maskMoney(cur.profit)}</b>，`
+                + `但按「期末 ${maskMoney(cur.v1)} − 期初 ${maskMoney(cur.v0)} − 净入金 ${maskMoney(cur.flow)}」`
+                + `应该是 <b>${maskMoney(cur.check.implied)}</b>，差 <b>${maskMoney(cur.check.gap)}</b>。`
                 + `可能是余额或收益记错了。`;
         } else {
             warn.classList.add('hidden'); warn.innerHTML = '';
@@ -11249,7 +11289,7 @@ function renderReturnTrend(ctx, chartType) {
                 legend: { display: false },
                 tooltip: { callbacks: { label: (c) => c.raw === null || c.raw === undefined
                     ? '本金未知，算不出收益率'
-                    : (rate ? `收益率: ${c.raw.toFixed(2)}%` : `收益: ${formatCurrency(c.raw)}`) } },
+                    : (rate ? `收益率: ${c.raw.toFixed(2)}%` : `收益: ${maskMoney(c.raw)}`) } },
             },
             scales: {
                 x: {
@@ -11317,14 +11357,14 @@ function renderReturnPie(ctx, info) {
                         label: (c) => {
                             const e = entries[c.dataIndex];
                             const pct = gross ? ((c.raw / gross) * 100).toFixed(1) : '0.0';
-                            return `${c.label}: ${formatCurrency(e ? e.amount : c.raw)} (${pct}%)`;
+                            return `${c.label}: ${maskMoney(e ? e.amount : c.raw)} (${pct}%)`;
                         },
                     },
                 },
             },
         },
     });
-    charts.returns.$centerText = { label: '本期净收益', value: formatCurrency(net) };
+    charts.returns.$centerText = { label: '本期净收益', value: maskMoney(net) };
 }
 
 function renderReturnBreakdown(info) {
@@ -11353,7 +11393,7 @@ function renderReturnBreakdown(info) {
             <div class="breakdown-main">
                 <div class="breakdown-head">
                     <span class="breakdown-name">${r.name}</span>
-                    <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}${rateTxt ? ` <span class="breakdown-rate${rateCls}">${rateTxt}</span>` : ''}</span>
+                    <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${maskMoney(r.amount)}${rateTxt ? ` <span class="breakdown-rate${rateCls}">${rateTxt}</span>` : ''}</span>
                 </div>
                 <div class="breakdown-bar"><div class="breakdown-bar-fill" style="width:${Math.min(pct, 100).toFixed(1)}%;background:${r.amount < 0 ? '#34c759' : r.color}"></div></div>
             </div>
@@ -11438,7 +11478,7 @@ function renderReturnCalendar() {
             const r = portfolioCumulative(ms).cumulative;
             const val = rate ? r : amount;
             cells.push(calTile(tileCls(val, true), `${y} 年`,
-                rate ? pctText(r) : formatCurrency(amount),
+                rate ? pctText(r) : maskMoney(amount),
                 ` data-ret-cal-year="${y}" role="button" tabindex="0"`));
         });
         amountTotal = returnSummary(months).total;
@@ -11453,7 +11493,7 @@ function renderReturnCalendar() {
             const r = st ? st.rate : null;
             const val = rate ? r : amount;
             cells.push(calTile(tileCls(val, has), CN_MONTHS[m - 1],
-                rate ? (has ? pctText(r) : '') : (has ? formatCurrency(amount) : ''),
+                rate ? (has ? pctText(r) : '') : (has ? maskMoney(amount) : ''),
                 has ? ` data-ret-cal-month="${key}" role="button" tabindex="0"` : ''));
         }
         cum = portfolioCumulative(months.filter(m => m.slice(0, 4) === String(year)));
@@ -11466,7 +11506,7 @@ function renderReturnCalendar() {
         const ok = (cum.cumulative || 0) >= 0;
         totalEl.innerHTML = `${byYear ? '全部累计收益率' : '本年累计收益率'} <b class="${ok ? 'income' : 'expense'}">${pctText(cum.cumulative)}</b>`;
     } else {
-        totalEl.innerHTML = `${byYear ? '全部收益' : '当年收益'} <b class="${amountTotal >= 0 ? 'income' : 'expense'}">${formatCurrency(amountTotal)}</b>`;
+        totalEl.innerHTML = `${byYear ? '全部收益' : '当年收益'} <b class="${amountTotal >= 0 ? 'income' : 'expense'}">${maskMoney(amountTotal)}</b>`;
     }
     const note = document.getElementById('retCalNote');
     if (byYear) {
@@ -11508,7 +11548,7 @@ function renderReturnMonthly() {
         rateByMonth[m] = portfolioMonthStats(m).rate;
     });
 
-    const money = (v, cls) => `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${formatCurrency(v)}</span>`;
+    const money = (v, cls) => `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${maskMoney(v)}</span>`;
     let html = months.map((m, i) => {
         const cur = returnSummary([m]).total;
         const prevMonth = previousMonthOf(m);
@@ -11564,7 +11604,7 @@ function openReturnDetailForPeriod(months, label) {
     if (editBtn) editBtn.style.display = 'none';
     const sum = document.getElementById('acctHistSummary');
     const portCum = portfolioCumulative(months, 'all');
-    if (sum) sum.innerHTML = `<span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">净收益 <b>${formatCurrency(total)}</b></span>
+    if (sum) sum.innerHTML = `<span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">净收益 <b>${maskMoney(total)}</b></span>
         <span class="cat-txn-summary-item">组合收益率 <b>${pctText(portCum.cumulative)}</b></span>
         <span class="cat-txn-summary-item">涉及 <b>${rows.length}</b> 个账户</span>`;
     const list = document.getElementById('acctHistList');
@@ -11578,7 +11618,7 @@ function openReturnDetailForPeriod(months, label) {
             <div class="breakdown-main">
                 <div class="breakdown-head">
                     <span class="breakdown-name">${r.name}</span>
-                    <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)}${rateTxt ? ` <span class="breakdown-rate ${rateCls}">${rateTxt}</span>` : ''}</span>
+                    <span class="breakdown-amount ${r.amount >= 0 ? 'income' : 'expense'}">${maskMoney(r.amount)}${rateTxt ? ` <span class="breakdown-rate ${rateCls}">${rateTxt}</span>` : ''}</span>
                 </div>
             </div>
         </div>`;
@@ -11632,9 +11672,9 @@ function renderReturnAccountHistory() {
     const sum = document.getElementById('acctHistSummary');
     if (sum) sum.innerHTML = `
         <span class="cat-txn-summary-item">共 <b>${[...new Set(rows.map(r => r.month))].length}</b> 期</span>
-        <span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">累计 <b>${formatCurrency(total)}</b></span>
+        <span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">累计 <b>${maskMoney(total)}</b></span>
         <span class="cat-txn-summary-item">收益率 <b>${rateTxt || '—'}</b></span>
-        <span class="cat-txn-summary-item">最新 <b>${rows.length ? formatCurrency(rows[0].amount) : '—'}</b></span>`;
+        <span class="cat-txn-summary-item">最新 <b>${rows.length ? maskMoney(rows[0].amount) : '—'}</b></span>`;
     const list = document.getElementById('acctHistList');
     if (list) list.innerHTML = rows.length ? rows.map(r => {
         const m = accountReturnRate(returnHistoryAccountId, [r.month], r.member);
@@ -11643,7 +11683,7 @@ function renderReturnAccountHistory() {
         return `
         <div class="bal-history-row">
             <span class="bh-month">${r.month.replace('-', '年')}月<span class="bh-member">${_esc(r.member || '')}</span></span>
-            <span class="bh-amount ${r.amount >= 0 ? 'income' : 'expense'}">${formatCurrency(r.amount)} <span class="breakdown-rate ${mCls}">${mTxt}</span></span>
+            <span class="bh-amount ${r.amount >= 0 ? 'income' : 'expense'}">${maskMoney(r.amount)} <span class="breakdown-rate ${mCls}">${mTxt}</span></span>
             <button class="bh-edit" onclick="editReturnRecord('${r.id}')" title="修改这一期"><i class="fa-solid fa-pen"></i></button>
             <button class="bh-delete" onclick="deleteReturnSnapshot('${r.id}')" title="删除这一期"><i class="fa-solid fa-xmark"></i></button>
         </div>`;

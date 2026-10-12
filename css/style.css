@@ -810,6 +810,35 @@ body {
     gap: 10px;
 }
 
+/* 隐私眼睛按钮：闭眼（默认）灰一点，睁眼高亮 */
+.money-eye-btn {
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border, #e3e6ea);
+    background: var(--bg-card);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 15px;
+    flex: 0 0 auto;
+    transition: all var(--transition);
+}
+.money-eye-btn:hover {
+    background: var(--bg-content);
+    color: var(--text-primary);
+}
+.money-eye-btn.eye-off {
+    color: var(--text-tertiary, #aab1ba);
+    opacity: .85;
+}
+.money-eye-btn:not(.eye-off) {
+    color: var(--accent, #2f6df6);
+    border-color: var(--accent, #2f6df6);
+}
+
 .report-period {
     display: flex;
     background: var(--bg-card);
