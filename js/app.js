@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.59';  // v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.60';  // v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -11962,9 +11962,14 @@ async function init() {
     // 用户根本分不清哪条是演示的、哪条是自己记的，清理还容易误删真数据。
     // 空账本就是空账本，想试软件直接自己记一笔即可。
 
-    // Auto-open transaction modal on launch if enabled
-    if (state.settings.autoOpenAdd) {
-        setTimeout(() => openTransactionModal(), 300);
+    // 启动自动弹"记一笔"：本机偏好 autoOpenAdd 开启，或 URL 带 ?action=add（iOS 快捷指令"打开 URL"打开网站记账）时
+    let _autoOpen = !!state.settings.autoOpenAdd;
+    try {
+        const _params = new URLSearchParams(location.search);
+        if (_params.get('action') === 'add') _autoOpen = true;
+    } catch (e) { /* 老浏览器无 URLSearchParams，忽略 */ }
+    if (_autoOpen) {
+        setTimeout(() => openTransactionModal(), 400);
     }
 
     // Warm up Chart.js in the background once the first screen is on screen
