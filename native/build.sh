@@ -3,8 +3,11 @@
 set -e
 cd "$(dirname "$0")/.."
 
+# 发布前先把未压缩的 app.js 压成 app.min.js（仅压缩、不改名，避免行内 onclick 处理函数名被改坏）
+bash ./minify.sh || echo "（minify 跳过，使用已提交的 js/app.min.js）"
+
 APP_NAME=Bookkeeping
-VERSION=1.39.60
+VERSION=1.39.61
 APP_DIR="dist/$APP_NAME.app"
 CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"

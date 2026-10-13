@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.60';  // v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.61';  // v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -232,6 +232,7 @@ let state = {
     balClassTags: Object.assign({}, BAL_CLASS_TAG_DEFAULT),  // 每个资产类别归到哪一类（固定资产/流动资产/长期投资/其他投资）
     sheetCols: DEFAULT_SHEET_COLS.map(c => ({ ...c })),       // 月度账单/资产负债页共用的自定义列（见下方 helper）
     monthlyOpen: {},              // 月度账单「账户×渠道」开关，按成员分别记录：monthlyOpen[member][accountId][cat]=true/false（显式覆盖）；不写=按自动规则（该成员上个月记过才开）
+    moneyVisibleByPage: { balance: false, funds: false, returns: false },  // 每页独立的金额眼睛状态（默认全闭眼）
     reportMetric: 'expense',
     breakdownExpanded: false,
     reportChartType: 'line',
@@ -336,6 +337,10 @@ function saveStateNow() {
         pendingRecurring: state.pendingRecurring || [],
         recurringSkipped: state.recurringSkipped || {},
         monthlyOpen: state.monthlyOpen || {},  // 月度账单「账户×渠道」开关状态（本地 UI，不进 iCloud 同步）
+        // B02 修复：资产归类(balClassTags)与自定义列(sheetCols)以前漏写，刷新/同步后退回默认
+        balClassTags: state.balClassTags,
+        sheetCols: state.sheetCols,
+        moneyVisibleByPage: state.moneyVisibleByPage,  // 每页独立的金额眼睛状态
         // 成员筛选和三个页面的时间档：以前每次打开都回到"全部 + 月报"，
         // 天天看同一本账的人等于每天重新点一遍。
         uiPrefs: {
@@ -2276,7 +2281,7 @@ function wipeForReplace(data) {
         transactions: idsOf(data.transactions), categories: idsOf(data.categories),
         budgets: idsOf(data.budgets), accounts: idsOf(data.accounts),
         balances: idsOf(data.balances), returns: idsOf(data.returns),
-        insurancePolicies: idsOf(data.insurancePolicies),
+        insurance: idsOf(data.insurancePolicies),
     };
     const mark = (list, coll) => (list || []).forEach(x => {
         if (x && !keep[coll].has(x.id)) addTombstone(coll, x.id);
@@ -2420,11 +2425,17 @@ async function applyImportedJSON(text, opts) {
 备份：交易 ${n(d.transactions)} 笔、余额 ${n(d.balances)} 条、收益 ${n(d.returns)} 条
 
 不在备份里的现有记录会被删除，并且这个删除会同步到另一台设备。覆盖不能撤销 —— 建议先点「导出备份」把现在的数据存一份。`)) return false;
-        wipeForReplace(d);
+        const savedDeleted = JSON.parse(JSON.stringify(state.deleted));  // B06 兜底：覆盖失败则还原删除标记，避免部分改动已生效
+        try {
+            wipeForReplace(d);
+            clearTombstonesFor(parsed.data);
+            mergeRemoteData(parsed);
+        } catch (e) {
+            state.deleted = savedDeleted;
+            showToast('覆盖恢复失败，账本未改动：' + (e && e.message ? e.message : e), 'error');
+            return false;
+        }
     }
-    // 覆盖恢复 = 以备份为准，所以备份里有的记录不能留着旧的删除标记
-    if (replace) clearTombstonesFor(parsed.data);
-    mergeRemoteData(parsed);
     // 导入的这份备份可能是老版本导出的，里面余额 id 是三段式。
     // 不走这一步就会和本地的四段记录并存 → 同一格算两遍（「东方资产翻倍」那种）。
     normalizeBalanceIds();
@@ -3084,6 +3095,8 @@ function loadState() {
                 : DEFAULT_SHEET_COLS.map(c => ({ ...c }));
             // 月度账单「账户×渠道」开关：v1.39.58 起按成员分别记录，升级时把旧的「全成员共用」结构拆回本地自动规则
             migrateMonthlyOpen();
+            // 附加修复：手工锁/解锁状态写进了本地，但之前没从备份读回，刷新后退回自动规则
+            state.monthlyOpen = (data.monthlyOpen && typeof data.monthlyOpen === 'object') ? data.monthlyOpen : {};
             state.recurring = Array.isArray(data.recurring) ? data.recurring : [];
             state.pendingRecurring = Array.isArray(data.pendingRecurring) ? data.pendingRecurring : [];
             state.recurringSkipped = (data.recurringSkipped && typeof data.recurringSkipped === 'object')
@@ -3097,6 +3110,7 @@ function loadState() {
             state.balanceMembers = Array.isArray(data.balanceMembers) && data.balanceMembers.length ? data.balanceMembers : ['本人'];
             state.memberAddedAt = normalizeAddedAtMap(data.memberAddedAt);
             state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信支付', defaultView: 'transactions', autoOpenAdd: false }, ...data.settings };
+            state.moneyVisibleByPage = (data.moneyVisibleByPage && typeof data.moneyVisibleByPage === 'object') ? Object.assign({ balance: false, funds: false, returns: false }, data.moneyVisibleByPage) : { balance: false, funds: false, returns: false };
             state.deleted = normalizeTombstones(data.deleted);
             state.pmAddedAt = normalizeAddedAtMap(data.pmAddedAt);
             state.lastExportAt = Number(data.lastExportAt) || 0;
@@ -3167,30 +3181,33 @@ function formatCurrency(amount) {
     return sign + str;
 }
 
-// 隐私遮罩：默认 moneyVisible=false（眼睛闭着），三页金额统一走 maskMoney，
-// 闭眼时金额显示成 ****，占比（<em>%</em> 走另一套代码）不受影响。眼睛图标切换 moneyVisible。
+// 隐私遮罩：每页独立的眼睛状态（state.moneyVisibleByPage），默认全部闭眼（false）。
+// 闭眼时金额显示成 ****，占比（<em>%</em> 走另一套代码）不受影响。
+// moneyVisible 这里只表示「当前正在渲染的那一页」是否可见，在各页 render 开头被赋值。
 let moneyVisible = false;
 function maskMoney(v) {
-    if (moneyVisible) return formatCurrency(v);
-    return '****';
+    return moneyVisible ? formatCurrency(v) : '****';
 }
 function maskMoneySigned(v) {
-    if (moneyVisible) return (v > 0 ? '+' : '') + formatCurrency(v);
-    return '****';
+    return moneyVisible ? (v > 0 ? '+' : '') + formatCurrency(v) : '****';
 }
-// 切换金额可见性：翻所有眼睛按钮图标，并重渲染当前所在页
+// 切换某一页的金额可见性：只翻那一页的状态，不影响其他页（B：每页独立开闭）
 function toggleMoneyEye(page) {
-    moneyVisible = !moneyVisible;
+    const cur = state.moneyVisibleByPage[page] = !state.moneyVisibleByPage[page];
+    moneyVisible = cur;
     updateMoneyEyeIcons();
     if (page === 'balance') renderBalance();
     else if (page === 'funds') renderFourFunds();
     else if (page === 'returns') renderReturns();
 }
+// 按各页自己的状态翻眼睛图标（不再一处开全开）
 function updateMoneyEyeIcons() {
     document.querySelectorAll('.money-eye-btn').forEach(btn => {
         const icon = btn.querySelector('i');
         if (!icon) return;
-        if (moneyVisible) {
+        const p = btn.dataset.eyePage;
+        const visible = p ? !!(state.moneyVisibleByPage && state.moneyVisibleByPage[p]) : moneyVisible;
+        if (visible) {
             icon.className = 'fa-solid fa-eye';
             btn.title = '点击隐藏金额';
             btn.setAttribute('aria-label', '隐藏金额');
@@ -3322,6 +3339,7 @@ function renderView(viewName) {
     updateSidebarSummary();
     renderPendingRecurring();
     updateInsBadges();
+    updateMoneyEyeIcons();   // 每页独立的眼睛：切换视图后按各页状态刷新图标
 }
 
 // ---- Sidebar summary (desktop sidebar month card) ----
@@ -3554,26 +3572,8 @@ function renderTransactions() {
     updateMonthFilter();
     updateTransactionMonthSummary();
 
-    let filtered = [...state.transactions];
-
-    // Filter by type
-    if (state.transactionFilter !== 'all') {
-        filtered = filtered.filter(t => t.type === state.transactionFilter);
-    }
-
-    // Filter by month
-    if (state.monthFilter) {
-        filtered = filtered.filter(t => getMonthKey(t.date) === state.monthFilter);
-    }
-
-    // Filter by search
-    if (state.searchQuery) {
-        const q = state.searchQuery.toLowerCase();
-        filtered = filtered.filter(t => {
-            const cat = getCategoryById(t.categoryId);
-            return (t.note && t.note.toLowerCase().includes(q)) || (cat && cat.name.toLowerCase().includes(q));
-        });
-    }
+    // 列表与顶部汇总共用同一套筛选条件（getFilteredTransactions），保证"筛选结果合计"和列表对得上
+    let filtered = getFilteredTransactions();
 
     // Sort by date desc
     filtered.sort((a, b) => parseLocalDate(b.date) - parseLocalDate(a.date) || b.createdAt - a.createdAt);
@@ -3586,6 +3586,19 @@ function renderTransactions() {
         txnRenderedTo = 0;
         container.innerHTML = '';
         empty.classList.remove('hidden');
+        const filtering = !!state.monthFilter || !!state.searchQuery || state.transactionFilter !== 'all';
+        if (state.transactions.length === 0) {
+            empty.innerHTML = '<i class="fa-solid fa-receipt"></i><p>还没有交易记录</p>'
+                + '<button class="primary-btn" onclick="openTransactionModal()"><i class="fa-solid fa-plus"></i> 记一笔</button>';
+        } else if (filtering) {
+            let btns = '';
+            if (state.searchQuery) btns += '<button class="secondary-btn" onclick="clearSearch()">清除搜索</button>';
+            if (state.monthFilter || state.transactionFilter !== 'all') btns += '<button class="secondary-btn" onclick="resetTxnFilter()">重置筛选</button>';
+            empty.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i><p>没有符合条件的记录</p>' + btns;
+        } else {
+            empty.innerHTML = '<i class="fa-solid fa-receipt"></i><p>还没有交易记录</p>'
+                + '<button class="primary-btn" onclick="openTransactionModal()"><i class="fa-solid fa-plus"></i> 记一笔</button>';
+        }
         return;
     }
     empty.classList.add('hidden');
@@ -3639,19 +3652,62 @@ function updateMonthFilter() {
         months.map(m => `<option value="${m}" ${m === current ? 'selected' : ''}>${getMonthLabel(m)}</option>`).join('');
 }
 
-// Top-of-page month summary (income / expense / balance for current month)
+// 交易列表的筛选条件（类型 / 月份 / 搜索）抽成公共函数，列表和顶部汇总都用同一套，
+// 这样顶部"筛选结果合计"和下方列表永远对得上（Fix：汇总随筛选变化）。
+function getFilteredTransactions() {
+    let list = [...state.transactions];
+    if (state.transactionFilter !== 'all') list = list.filter(t => t.type === state.transactionFilter);
+    if (state.monthFilter) list = list.filter(t => getMonthKey(t.date) === state.monthFilter);
+    if (state.searchQuery) {
+        const q = state.searchQuery.toLowerCase();
+        list = list.filter(t => {
+            const cat = getCategoryById(t.categoryId);
+            return (t.note && t.note.toLowerCase().includes(q)) || (cat && cat.name.toLowerCase().includes(q));
+        });
+    }
+    return list;
+}
+
+// 顶部汇总：默认显示"本月概览"（当前月收支结余）；一旦应用了筛选（月份 / 搜索 / 收支类型），
+// 就改显"筛选结果合计"（与下方列表同一套筛选）。标签随状态切换，避免被误当成列表合计。
 function updateTransactionMonthSummary() {
     const card = document.getElementById('txnMonthSummary');
     if (!card) return;
-    const monthKey = getCurrentMonthKey();
-    const monthTxns = state.transactions.filter(t => getMonthKey(t.date) === monthKey);
-    const income = monthTxns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-    const expense = monthTxns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const scopeEl = document.getElementById('tmsScope');
+    const filtering = !!state.monthFilter || !!state.searchQuery || state.transactionFilter !== 'all';
+    let income, expense;
+    if (filtering) {
+        const list = getFilteredTransactions();
+        income = list.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+        expense = list.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    } else {
+        const monthKey = getCurrentMonthKey();
+        const monthTxns = state.transactions.filter(t => getMonthKey(t.date) === monthKey);
+        income = monthTxns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+        expense = monthTxns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    }
     const balance = income - expense;
-
     document.getElementById('tmsIncome').textContent = formatCurrency(income);
     document.getElementById('tmsExpense').textContent = formatCurrency(expense);
     document.getElementById('tmsBalance').textContent = formatCurrency(balance);
+    if (scopeEl) scopeEl.textContent = filtering ? '筛选结果合计' : '本月概览';
+}
+
+// 空状态里的"清除搜索 / 重置筛选"按钮（Fix：区分无数据、无搜索结果）
+function clearSearch() {
+    state.searchQuery = '';
+    const inp = document.getElementById('searchInput');
+    if (inp) inp.value = '';
+    renderTransactions();
+}
+
+function resetTxnFilter() {
+    state.monthFilter = '';
+    state.transactionFilter = 'all';
+    const sel = document.getElementById('monthFilter');
+    if (sel) sel.value = '';
+    document.querySelectorAll('.filter-tab').forEach(t => t.classList.toggle('active', t.dataset.filter === 'all'));
+    renderTransactions();
 }
 
 // ---- Transaction Modal ----
@@ -4199,6 +4255,12 @@ function saveTransaction(opts = {}) {
         resetCalc();
         document.getElementById('noteInput').value = '';
         document.getElementById('timeInput').value = nowTimeStr();
+        // B01 修复：连续记账（"再记一笔"）后必须切回「新增」状态。
+        // 否则若本次是从「编辑」进入的，editingTransactionId 仍指向旧记录，
+        // 下一笔会去覆盖那笔旧交易，而不是新增一条。
+        state.editingTransactionId = null;
+        document.getElementById('transactionModalTitle').textContent = '记一笔';
+        document.getElementById('deleteTxnBtn').style.display = 'none';
         // Re-render to update the list behind the modal
         renderView(state.currentView);
     } else {
@@ -4309,9 +4371,11 @@ function getReportFiltered() {
     return { range, txns: state.transactions.filter(t => inRange(t.date, range)) };
 }
 
-// getDaysInMonth() takes a 0-indexed month; reports carry 1-indexed months
+// 历史月日均分母：reports 的 selMonth 是 1-indexed（2 月=2），直接传给 getDaysInMonth 即可。
+// getDaysInMonth 内部用 new Date(year, month, 0) 取的是 (month-1) 月的天数，自带偏移，不要再 +1，
+// 否则 2 月会被算成 31 天（B08）。
 function monthDays(year, month1) {
-    return getDaysInMonth(year, month1 + 1);
+    return getDaysInMonth(year, month1);
 }
 
 // Number of days covered by the current report period (for daily average)
@@ -5071,11 +5135,17 @@ function renderBudget() {
     const totalBudget = state.budgets.reduce((s, b) => s + b.amount, 0);
     const totalSpent = state.budgets.reduce((s, b) => {
         const spent = monthExpenses.filter(t => t.categoryId === b.categoryId).reduce((s2, t) => s2 + t.amount, 0);
-        return s + Math.min(spent, b.amount);
+        return s + spent;   // B03 修复：顶部"已使用"显示真实花费，不再用 Math.min 封顶（超支也要算进去）
     }, 0);
 
     document.getElementById('totalBudget').textContent = formatCurrency(totalBudget);
     document.getElementById('totalSpent').textContent = formatCurrency(totalSpent);
+    // B03 修复：超支时把"已使用"标红并提示超支金额，和明细卡片保持一致
+    const _spentEl = document.getElementById('totalSpent');
+    if (_spentEl) {
+        if (totalSpent > totalBudget) { _spentEl.style.color = '#ff3b30'; _spentEl.title = `超支 ${formatCurrency(totalSpent - totalBudget)}`; }
+        else { _spentEl.style.color = ''; _spentEl.title = ''; }
+    }
 
     const totalPct = totalBudget > 0 ? Math.min((totalSpent / totalBudget) * 100, 100) : 0;
     const fillEl = document.getElementById('totalProgress');
@@ -5657,6 +5727,7 @@ async function exportData() {
             const cat = getCategoryById(t.categoryId);
             return {
                 'ID': t.id,
+                '成员': t.member || '本人',
                 '日期': t.date,
                 '时间': t.time || '',
                 '类型': t.type === 'income' ? '收入' : '支出',
@@ -5712,7 +5783,7 @@ async function exportData() {
 
         addSheet('余额明细', state.balances.map(b => {
             const a = accountById(b.accountId);
-            return { '成员': b.member || '本人', '账户': a?.name || b.accountId, '类型': kindName(a?.kind), '月份': b.month, '金额': round2(b.amount) };
+            return { '成员': b.member || '本人', '账户': a?.name || b.accountId, '类型': catLabel(balanceCatOf(b)), '月份': b.month, '金额': round2(b.amount) };
         }).sort((x, y) => x['月份'].localeCompare(y['月份']) || x['成员'].localeCompare(y['成员'])),
             ['成员', '账户', '类型', '月份', '金额'], [{wch:10},{wch:18},{wch:8},{wch:10},{wch:14}]);
 
@@ -5813,12 +5884,19 @@ function normalizeImportDate(v) {
     const s = String(v).trim();
     // 2017-01-05 / 2017/1/5 / 2017.01.05 / 2017年1月5日
     const m = s.match(/^(\d{4})[-\/.年]\s*(\d{1,2})[-\/.月]\s*(\d{1,2})日?$/);
-    if (m) return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
+    if (m) {
+        const y = +m[1], mo = +m[2], d0 = +m[3];
+        // B11 修复：校验月/日范围，非法日期（如 2026-99-99）返回 null，导入时跳过而非原样入库
+        if (mo >= 1 && mo <= 12 && d0 >= 1 && d0 <= 31 && new Date(y, mo, 0).getDate() >= d0) {
+            return `${y}-${String(mo).padStart(2, '0')}-${String(d0).padStart(2, '0')}`;
+        }
+        return null;
+    }
     const d = new Date(s);
     if (!isNaN(d.getTime())) {
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
-    return todayStr();
+    return null;  // B11 修复：无法解析的日期不再悄悄当成"今天"
 }
 
 // ---- 选文件：桌面版走原生面板，浏览器走临时 input ----
@@ -5915,7 +5993,7 @@ function pickLocalFile(extensions) {
 
 // 把一本工作簿解析进 state（与文件从哪来无关）
 function applyWorkbook(wb) {
-            let txnAdded = 0, txnUpdated = 0;
+            let txnAdded = 0, txnUpdated = 0, txnInvalid = 0;
             // 分类：按 ID 或名称 upsert，绝不删除本地已有分类
             const ws2 = wb.Sheets['分类'];
             if (ws2) {
@@ -5945,23 +6023,32 @@ function applyWorkbook(wb) {
             const ws1 = wb.Sheets['交易记录'];
             if (ws1) {
                 const txnRows = XLSX.utils.sheet_to_json(ws1);
-                const keyOf = t => `${t.date}|${t.time || ''}|${t.type}|${t.categoryId}|${t.amount}|${t.paymentMethod || ''}|${t.note || ''}`;
+                const keyOf = t => `${t.date}|${t.time || ''}|${t.type}|${t.categoryId}|${t.amount}|${t.paymentMethod || ''}|${t.note || ''}|${t.member || ''}`;
                 const byId = new Map(state.transactions.map(t => [t.id, t]));
                 const byKey = new Map(state.transactions.map(t => [keyOf(t), t]));
-                txnAdded = 0; txnUpdated = 0;
+                txnAdded = 0; txnUpdated = 0; txnInvalid = 0;
                 txnRows.forEach(row => {
-                    const catName = row['分类'];
-                    const cat = state.categories.find(c => c.name === catName);
                     const type = row['类型'] === '收入' ? 'income' : 'expense';
+                    const date = normalizeImportDate(row['日期']);
+                    const amt = parseFloat(row['金额']);
+                    // B11 修复：金额非法（字母/负数/非数字）或日期无法解析的行，直接跳过并计数，绝不静默写成 0 或今天
+                    if (!date || !isFinite(amt) || amt <= 0) { txnInvalid++; return; }
+                    const catName = row['分类'];
+                    // B04 修复：同名分类很多（如"其他"收支各一个），必须带交易类型匹配，
+                    // 否则配偶的"收入·其他"会被错配成本人"支出·其他"
+                    const cat = state.categories.find(c => c.name === catName && c.type === type);
+                    const rowMember = String(row['成员'] || '').trim();
+                    if (rowMember && !state.balanceMembers.includes(rowMember)) state.balanceMembers.push(rowMember);
+                    const memberVal = rowMember || (state.balanceMembers[0] || '本人');
                     const rec = {
                         type,
-                        amount: parseFloat(row['金额']) || 0,
+                        amount: amt,
                         categoryId: cat?.id || (type === 'income' ? 'i_other' : 'e_other'),
-                        date: normalizeImportDate(row['日期']),
+                        date,
                         time: row['时间'] || '',
                         note: row['备注'] || '',
                         paymentMethod: row['支付方式'] || '现金',
-                        member: state.balanceMembers[0] || '本人',
+                        member: memberVal,
                     };
                     const sheetId = String(row['ID'] || '').trim();
                     const existing = (sheetId && byId.get(sheetId)) || byKey.get(keyOf(rec));
@@ -6019,14 +6106,20 @@ function applyWorkbook(wb) {
             readRows('余额明细', row => {
                 const month = normalizeImportMonth(row['月份']);
                 const amount = parseFloat(row['金额']);
-                const acc = accountByName(String(row['账户'] || '').trim(), kindFromText(row['类型']));
-                if (!month || !acc || !isFinite(amount)) { if (row['账户']) unmatched++; return; }
+                if (!month || !isFinite(amount)) { if (row['账户']) unmatched++; return; }
+                // B05 修复：余额按「成员+账户+渠道(cat)+月份」唯一。现在导出写具体列标签（现金/基金/负债…），
+                // 导入据此还原 cat，同账户同月多渠道（现金/基金/负债）不再撞 ID 被覆盖。
+                const catText = String(row['类型'] || '').trim();
+                let catKey = catKeyFromLabel(catText);
+                const acc = accountByName(String(row['账户'] || '').trim(), isLiabCat(catKey) ? 'liability' : 'asset');
+                if (!acc) { if (row['账户']) unmatched++; return; }
+                if (catKey === 'other' && catText === '资产') catKey = assetClassOf(acc) || 'cash';  // 老导出兜底
                 const member = String(row['成员'] || '本人').trim() || '本人';
                 if (!state.balanceMembers.includes(member)) state.balanceMembers.push(member);
-                const id = `${member}__${acc.id}__${month}`;
+                const id = _rebalanceId(member, acc.id, month, catKey);
                 const existing = state.balances.find(b => b.id === id);
                 if (existing) { existing.amount = amount; existing.updatedAt = Date.now(); }
-                else { state.balances.push({ id, member, accountId: acc.id, month, amount, createdAt: Date.now(), updatedAt: Date.now() }); balAdded++; }
+                else { state.balances.push({ id, member, accountId: acc.id, month, cat: catKey, amount, createdAt: Date.now(), updatedAt: Date.now() }); balAdded++; }
             });
 
             readRows('投资收益明细', row => {
@@ -6045,7 +6138,7 @@ function applyWorkbook(wb) {
     saveState();
     applyTheme(state.settings.theme);
     renderView(state.currentView);
-    return { unmatched, txnAdded, txnUpdated, balAdded, retAdded, budAdded };
+    return { unmatched, txnAdded, txnUpdated, txnInvalid, balAdded, retAdded, budAdded };
 }
 
 async function importExcelFile() {
@@ -6060,9 +6153,10 @@ async function importExcelFile() {
     try {
         const wb = await readWorkbookFromBytes(base64ToUint8(picked.base64));
         const res = applyWorkbook(wb) || {};
-        const summary = `新增 ${res.txnAdded || 0} 笔、更新 ${res.txnUpdated || 0} 笔`;
-        showToast(res.unmatched ? `${summary}，${res.unmatched} 行账户名没对上已跳过` : summary,
-            res.unmatched ? 'error' : 'success');
+        const bits = [`新增 ${res.txnAdded || 0} 笔`, `更新 ${res.txnUpdated || 0} 笔`];
+        if (res.txnInvalid) bits.push(`${res.txnInvalid} 行金额/日期非法已跳过`);
+        if (res.unmatched) bits.push(`${res.unmatched} 行账户名没对上已跳过`);
+        showToast(bits.join('，'), res.unmatched || res.txnInvalid ? 'error' : 'success');
     } catch (err) {
         console.error('Import error:', err);
         const msg = (err && err.message && err.message !== '已取消') ? err.message : '';
@@ -6089,8 +6183,10 @@ function importData(event) {
             try {
                 const wb = await readWorkbookFromBytes(new Uint8Array(e.target.result));
                 const res = applyWorkbook(wb) || {};
-                showToast(res.unmatched ? `${res.unmatched} 行账户名没对上已跳过` : 'Excel 数据已导入',
-                    res.unmatched ? 'error' : 'success');
+                const _bits = [];
+                if (res.txnInvalid) _bits.push(`${res.txnInvalid} 行金额/日期非法已跳过`);
+                if (res.unmatched) _bits.push(`${res.unmatched} 行账户名没对上已跳过`);
+                showToast(_bits.length ? _bits.join('，') : 'Excel 数据已导入', _bits.length ? 'error' : 'success');
             } catch (err) {
                 console.error('Import error:', err);
                 const msg = (err && err.message && err.message !== '已取消') ? ('（' + err.message + '）') : '';
@@ -6438,6 +6534,7 @@ function balanceHideEmpty() {
 }
 
 function renderBalance() {
+    moneyVisible = state.moneyVisibleByPage['balance'];  // 每页独立的眼睛：先按本页状态设定遮罩开关
     renderBalanceSelectors();
 
     const info = balancePeriodInfo();
@@ -7725,6 +7822,14 @@ function catLabel(k) {
     const c = sheetColByKey(k);
     if (c) return c.label;
     return BAL_CAT_NAMES[k] || assetClassName(k);
+}
+// 余额 Excel 的「类型」列写的是列标签（现金/基金/负债…），导入时据此还原成 cat key
+function catKeyFromLabel(label) {
+    if (!label) return 'other';
+    const col = getSheetCols().find(c => c.label === label);
+    if (col) return col.key;
+    if (label === '负债') return BAL_CAT_LIAB;   // 老导出兜底
+    return 'other';
 }
 function catColor(k) {
     const c = sheetColByKey(k);
@@ -9689,9 +9794,11 @@ function insTotalPremium() {
 
 function renderFourFunds() {
     if (!document.getElementById('view-funds')) return;
+    moneyVisible = state.moneyVisibleByPage['funds'];  // 每页独立的眼睛：先按本页状态设定遮罩开关
     if (!fundEditMember || !state.insuranceMembers.includes(fundEditMember)) {
         fundEditMember = state.insuranceMembers[0] || '本人';
     }
+    renderFundAsOf();
     renderFundQuadrant();
     renderFundCards();
     renderFundDonut();
@@ -9820,7 +9927,8 @@ function renderFundDebt() {
     if (!el) return;
     const liab = fundLiabilities();
     const assets = fundTotalAssets();
-    const ratio = assets > 0 ? (liab / assets * 100).toFixed(1) : '0.0';
+    // B10 修复：资产为 0、负债为正时，分母为零不能算 0%——那样会让人误以为没有负债。
+    const ratio = assets > 0 ? (liab / assets * 100).toFixed(1) : (liab > 0 ? '—' : '0.0');
     el.innerHTML = `<span class="fd-label"><i class="fa-solid fa-credit-card"></i> 负债（不计入四笔钱）</span>
         <span class="fd-val">总负债 ${maskMoney(liab)} · 负债率 ${ratio}%</span>`;
 }
@@ -9834,6 +9942,30 @@ function renderFundUnassigned() {
     el.classList.remove('hidden');
     el.innerHTML = `<span class="fu-text"><i class="fa-solid fa-circle-exclamation"></i> 有 ${un.length} 个资产账户未归类：${un.map(a => a.name).join('、')}</span>
         <button class="secondary-btn" onclick="openFundAccounts()">去归类</button>`;
+}
+
+// B09 修复：四笔钱页明确显示「截至月份」和「统计口径（全家/本人/某成员）」，
+// 当所选成员在最新月份没有资产快照时，提示"不是真的没钱"，避免把缺记录显示成 0。
+function renderFundAsOf() {
+    const el = document.getElementById('fundAsOf');
+    if (!el) return;
+    el.style.cssText = 'font-size:13px;color:#8e8e93;margin:2px 0 12px;line-height:1.5;';
+    const month = fundLatestMonth();
+    const member = state.balanceOwner;
+    const memberLabel = member === 'all' ? '全家' : member;
+    let html = `截至 <b style="color:#1c1c1e">${month || '—'}</b> · 统计口径：<b style="color:#1c1c1e">${memberLabel}</b>`;
+    if (month) {
+        const own = balanceCellsAtMonth(month, member);
+        const fam = balanceCellsAtMonth(month, 'all');
+        const ownHas = Object.keys(own).some(k => own[k] && Object.values(own[k]).some(v => v));
+        const famHas = Object.keys(fam).some(k => fam[k] && Object.values(fam[k]).some(v => v));
+        if (!ownHas && famHas && member !== 'all') {
+            html += ` <span style="color:#ff9500">（「${memberLabel}」在 ${month} 无资产快照，下方 0 不是真的没钱；切到「全家」查看）</span>`;
+        } else if (!ownHas && !famHas) {
+            html += ` <span style="color:#ff9500">（该月暂无资产记录）</span>`;
+        }
+    }
+    el.innerHTML = html;
 }
 
 // 保险成员拖拽排序：把 from 移到 to 的位置（成员名即身份，只改显示次序）
@@ -10580,7 +10712,12 @@ function portfolioMonthStats(month, ids, draft, memberOverride) {
 
     const eligible = [], unknown = [];
     scope.forEach(id => {
-        (prevMap[id] !== undefined || flowKnownOf[id]) ? eligible.push(id) : unknown.push(id);
+        const capKnown = prevMap[id] !== undefined || flowKnownOf[id];
+        const curKnown = curMap[id] !== undefined;
+        // B07 修复：期末余额缺失时，期初期末平均口径（base=(v0+v1)/2）的分母 v1 拿不到，
+        // 不能把"缺余额"当 0 算出一个虚高收益率。走了 Modified Dietz（录了净入金）才允许缺期末。
+        const ok = capKnown && (flowKnownOf[id] || curKnown);
+        ok ? eligible.push(id) : unknown.push(id);
     });
     const sum = (map) => eligible.reduce((s, id) => s + (Number(map[id]) || 0), 0);
 
@@ -10988,6 +11125,7 @@ function renderTacChart(t) {
 
 function renderReturns() {
     if (!document.getElementById('view-returns')) return;
+    moneyVisible = state.moneyVisibleByPage['returns'];  // 每页独立的眼睛：先按本页状态设定遮罩开关
     renderReturnSelectors();
     renderCaliberNote();
     renderAssetChange();
@@ -11047,7 +11185,7 @@ function renderReturnSummary(info) {
     else monthHint = `平均本金 ${maskMoney(mStat.base)} · 未录入金（近似）`;
     const monthCard = {
         label: mKey ? `${ymd(mKey)} 收益` : '本月收益',
-        amount: mKey ? sumOf([mKey]) : 0, rate: mStat.rate,
+        amount: mKey ? sumOf([mKey]) : null, rate: mStat.rate,
         amountId: 'retMonthAmount', rateId: 'retMonthRate', hintId: 'retMonthHint', hint: monthHint,
     };
 
@@ -11927,9 +12065,7 @@ async function init() {
     loadState();
     // 原生 Mac 壳已有系统真标题栏(含红绿灯)，网页这套假的(含红绿灯)直接藏掉，避免两套并存
     if (isElectron()) document.body.classList.add('native-shell');
-    // 兜底：老账本 / 旧备份里的余额 id 统一成四段并清掉重复格。
-    // 清理过就立刻落盘 —— 不然显示在是对的，导出的备份里还带着影子、别的设备一合并又翻倍。
-    if (normalizeBalanceIds()) saveState();
+    // 兜底：老账本 / 旧备份里的余额 id 统一成四段并清掉重复格（已在 loadState 内处理，这里不重复跑）。
     // 顺手把「加载示例数据」留下的 131 笔假账 + 4 条示例预算清掉（只跑一次，见函数里的签名说明）
     const _purged = purgeSampleData();
     pruneTombstones();
@@ -11939,6 +12075,8 @@ async function init() {
     initEventListeners();
     initCategoryInteractions();
     switchView(state.settings.defaultView || 'transactions');
+    // 启动骨架：第一屏渲染完立刻移除，避免白屏（B 优化）
+    const _bl = document.getElementById('bootLoading'); if (_bl) _bl.remove();
 
     // 桌面版：先把 iCloud 上的账本拉下来合并，再决定要不要塞示例数据，
     // 否则新机器上示例数据会和真实数据混在一起。

@@ -89,6 +89,7 @@
 
             <!-- Main Content -->
             <main class="main-content">
+                <div id="bootLoading"><div class="spinner"></div><div class="boot-text">加载中…</div></div>
                 <div class="storage-warning hidden" id="storageWarning"></div>
                 <!-- Transactions View -->
                 <section class="view active" id="view-transactions">
@@ -123,6 +124,7 @@
                         </div>
                     </div>
                     <div class="txn-month-summary" id="txnMonthSummary">
+                        <div class="tms-scope" id="tmsScope">本月概览</div>
                         <div class="tms-item">
                             <div class="tms-label">收入</div>
                             <div class="tms-value income" id="tmsIncome">¥0.00</div>
@@ -270,6 +272,7 @@
                             </button>
                         </div>
                     </div>
+                    <div id="fundAsOf" class="ff-asof"></div>
                     <div class="fund-quadrant" id="fundQuadrant"></div>
                     <div class="fund-cards" id="fundCards"></div>
                     <div class="chart-card">
@@ -1319,7 +1322,7 @@
     </button>
 
     <script src="js/ledger-crypto.js"></script>
-    <script src="js/app.js"></script>
+    <script src="js/app.min.js"></script>
     <script>
         // Register Service Worker for PWA offline support.
         // The version query bypasses any stale cached copy of sw.js, which would
@@ -1340,7 +1343,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.60').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.61').catch(() => {});
             });
         }
     </script>
