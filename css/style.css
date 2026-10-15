@@ -761,6 +761,10 @@ body {
     background: rgba(214, 48, 49, 0.14);
     color: var(--expense, #d63031);
 }
+.txn-anomaly-badge.dup {
+    background: rgba(230, 126, 34, 0.16);
+    color: #b9740b;
+}
 
 /* Empty State */
 .empty-state {

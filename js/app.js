@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.63';  // v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.64';  // v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -3509,12 +3509,14 @@ function transactionItemHTML(t, anomalyMap) {
     const memberBadge = (state.balanceMembers.length > 1 && t.member && t.member !== '全家')
         ? `<span class="txn-member"><i class="fa-solid fa-user"></i> ${escapeHtml(t.member)}</span>` : '';
 
-    // 异常订单徽标：标注这笔"为什么异常"（未归类 / 金额异常），只读不写
+    // 异常订单徽标：标注这笔"为什么异常"（金额异常 / 重复记账），只读不写
     const anomalyBadges = (anomalyMap && anomalyMap.get(t.id))
         ? anomalyMap.get(t.id).map(r => {
             const isAmount = r.startsWith('金额异常');
-            const label = isAmount ? '金额异常' : '未归类';
-            return `<span class="txn-anomaly-badge ${isAmount ? 'amount' : ''}" title="${escapeHtml(r)}">${label}</span>`;
+            const isDup = r.indexOf('重复记账') >= 0;
+            const label = isAmount ? '金额异常' : (isDup ? '重复记账' : '异常');
+            const cls = isAmount ? 'amount' : (isDup ? 'dup' : '');
+            return `<span class="txn-anomaly-badge ${cls}" title="${escapeHtml(r)}">${label}</span>`;
         }).join('') : '';
 
     return `
@@ -3721,33 +3723,57 @@ function updateTransactionMonthSummary(displayList) {
 }
 
 // 计算当前筛选结果里每笔「异常订单」的原因，返回 Map<txnId, string[]>。
-// 口径与下方提示条完全一致：未归类 + 金额超平时中位数 5 倍。
-// 主列表徽标与提示条共用此函数，保证两边口径一致（只读，不写任何数据）。
+// 只读、不写数据；只做两类"可疑但合法"的核对：
+//  (a) 金额异常：某笔金额 = 同分类里某个"常用金额"的整 100 倍（多按两个零 / 忘小数点）。
+//      基础金额需出现 ≥2 次才算"常用"，且本笔金额本身不能是常用值，以此降低误报。
+//  (b) 重复记账：同分类、同金额、相隔 ≤3 天出现两笔以上。
+// 主列表徽标与提示条共用此函数，保证两边口径一致。
 function txnAnomalyReasons() {
     const list = getFilteredTransactions();
     const reasons = new Map();
-    // 1) 未归类：分类是"其他/未归类"这一类
+    const round2 = v => Math.round(Math.abs(v) * 100) / 100;
+
+    // 按分类统计各金额出现次数（用于"常用金额"判断）
+    const catAmountFreq = {};
     list.forEach(t => {
-        const cat = getCategoryById(t.categoryId);
-        if (t.categoryId === 'e_other' || t.categoryId === 'i_other'
-            || (cat && /未归类|其他/.test(cat.name))) {
+        const c = t.categoryId;
+        if (!catAmountFreq[c]) catAmountFreq[c] = new Map();
+        const a = round2(t.amount);
+        catAmountFreq[c].set(a, (catAmountFreq[c].get(a) || 0) + 1);
+    });
+
+    // (a) 金额异常：整 100 倍指纹
+    const COMMON_MIN = 2; // 基础金额至少出现这么多次才算"常用"
+    list.forEach(t => {
+        const A = round2(t.amount);
+        if (A <= 0) return;
+        const freq = catAmountFreq[t.categoryId];
+        if (!freq) return;
+        const X = Math.round((A / 100) * 100) / 100; // = A/100，两位小数
+        // 本笔金额本身也是常用值 → 视为正常大额，不报；只有"基础金额常用、本笔不常用"才报
+        if (X > 0 && freq.get(X) >= COMMON_MIN && (freq.get(A) || 0) < COMMON_MIN) {
             if (!reasons.has(t.id)) reasons.set(t.id, []);
-            reasons.get(t.id).push('未归类');
+            reasons.get(t.id).push('金额异常：疑似多按零/忘小数点（是其常用金额的 100 倍）');
         }
     });
-    // 2) 异常金额：同类型（收入/支出）样本 ≥ 8 笔时，金额 > 该类型中位数 5 倍，疑似多按了零
-    ['income', 'expense'].forEach(type => {
-        const sub = list.filter(t => t.type === type).map(t => Math.abs(t.amount)).sort((a, b) => a - b);
-        if (sub.length >= 8) {
-            const mid = sub[Math.floor(sub.length / 2)];
-            if (mid > 0) {
-                list.filter(t => t.type === type && Math.abs(t.amount) > mid * 5).forEach(t => {
-                    if (!reasons.has(t.id)) reasons.set(t.id, []);
-                    reasons.get(t.id).push('金额异常：超过平时中位数的 5 倍');
-                });
-            }
-        }
+
+    // (b) 重复记账：同分类、同金额、同一天出现两笔以上。
+    // 用"同日"而不是"几天内"——同一笔花销录两遍几乎总是同一天；跨天同金额多半是正常复购（如连着两天买同价咖啡），不报，避免误伤。
+    const byKey = {};
+    list.forEach(t => {
+        const k = t.categoryId + '|' + round2(t.amount) + '|' + String(t.date).slice(0, 10);
+        (byKey[k] = byKey[k] || []).push(t);
     });
+    Object.keys(byKey).forEach(k => {
+        const g = byKey[k];
+        if (g.length < 2) return;
+        g.forEach(tx => {
+            if (!reasons.has(tx.id)) reasons.set(tx.id, []);
+            const msg = '重复记账：同分类同金额同日出现 ' + g.length + ' 笔';
+            if (!reasons.get(tx.id).includes(msg)) reasons.get(tx.id).push(msg);
+        });
+    });
+
     return reasons;
 }
 
@@ -3757,8 +3783,8 @@ function toggleTxnAnomalyOnly() {
     renderTransactions();
 }
 
-// 交易记录顶部"异常/未归类"低调提示（只读，不写任何数据）：
-// 统计当前列表（与下方列表同一套筛选）里「未归类」和「金额明显超平时」的笔数。
+// 交易记录顶部"异常订单"低调提示（只读，不写任何数据）：
+// 统计当前列表（与下方列表同一套筛选）里「金额异常（多按零/忘小数点）」和「疑似重复记账」的笔数。
 // 有异常时可点击直达"只看异常订单"；再次点击恢复全部。
 function renderTxnAnomalyHint() {
     const el = document.getElementById('txnAnomalyHint');
@@ -3773,17 +3799,20 @@ function renderTxnAnomalyHint() {
     }
     const list = getFilteredTransactions();
     if (!list.length) { el.className = 'txn-anomaly-hint'; el.innerHTML = ''; el.onclick = null; return; }
-    let unclassified = 0, anomaly = 0;
-    reasons.forEach(rs => rs.forEach(r => { if (r === '未归类') unclassified++; else anomaly++; }));
-    if (!unclassified && !anomaly) {
+    let amountAnomaly = 0, dup = 0;
+    reasons.forEach(rs => rs.forEach(r => {
+        if (r.startsWith('金额异常')) amountAnomaly++;
+        else if (r.indexOf('重复记账') >= 0) dup++;
+    }));
+    if (!amountAnomaly && !dup) {
         el.className = 'txn-anomaly-hint ok';
-        el.innerHTML = '<i class="fa-solid fa-circle-check"></i> 未发现未归类或异常金额';
+        el.innerHTML = '<i class="fa-solid fa-circle-check"></i> 未发现异常金额或重复记账';
         el.onclick = null;
         return;
     }
     const parts = [];
-    if (unclassified) parts.push(`<b>${unclassified}</b> 笔未归类`);
-    if (anomaly) parts.push(`<b>${anomaly}</b> 笔金额异常`);
+    if (amountAnomaly) parts.push(`<b>${amountAnomaly}</b> 笔金额异常`);
+    if (dup) parts.push(`<b>${dup}</b> 笔疑似重复`);
     el.className = 'txn-anomaly-hint warn';
     el.innerHTML = '<i class="fa-solid fa-circle-info"></i> ' + parts.join(' · ') + '（点击只看这些）';
     el.onclick = toggleTxnAnomalyOnly;
