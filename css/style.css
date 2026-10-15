@@ -725,6 +725,22 @@ body {
     background: var(--divider, var(--border));
 }
 
+/* 交易记录顶部"异常/未归类"低调提示（只读） */
+.txn-anomaly-hint {
+    flex-basis: 100%;
+    order: 5;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 0.5px solid var(--divider, var(--border));
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--text-tertiary);
+}
+.txn-anomaly-hint i { margin-right: 4px; }
+.txn-anomaly-hint.warn { color: var(--expense); }
+.txn-anomaly-hint.ok { color: var(--income); }
+.txn-anomaly-hint b { font-weight: 700; }
+
 /* Empty State */
 .empty-state {
     display: flex;
@@ -2857,6 +2873,30 @@ body.cat-dragging {
 }
 .bal-entry-actions .secondary-btn { font-size: 12px; padding: 6px 10px; }
 .balance-entry-list { display: flex; flex-direction: column; gap: 2px; }
+/* 月度账单录入自检面板（只读核对） */
+.monthly-selfcheck {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    border: 0.5px solid var(--divider, var(--border));
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+}
+.monthly-selfcheck .msc-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    margin-bottom: 4px;
+}
+.monthly-selfcheck .msc-line { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
+.monthly-selfcheck .msc-line + .msc-line { margin-top: 4px; }
+.monthly-selfcheck .msc-totals b { font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.monthly-selfcheck .msc-totals .msc-liab { color: var(--expense); }
+.monthly-selfcheck .msc-ok { color: var(--income); }
+.monthly-selfcheck .msc-warn { color: var(--expense); }
+.monthly-selfcheck .msc-warn i, .monthly-selfcheck .msc-ok i { margin-right: 4px; }
 .bal-entry-row {
     display: flex;
     align-items: center;
@@ -3180,6 +3220,28 @@ table.bill-stats {
 .bill-stats tr.bs-avg td.bs-label { color: var(--accent); }
 .bill-stats tr.bs-row { cursor: pointer; transition: background var(--transition); }
 .bill-stats tr.bs-row:hover { background: var(--bg-card-hover); }
+/* 账单统计：按年分组折叠行 */
+.bill-stats tr.bs-year {
+    cursor: pointer;
+    background: var(--bg-content);
+    transition: background var(--transition);
+}
+.bill-stats tr.bs-year:hover { background: var(--bg-card-hover); }
+.bill-stats tr.bs-year td { font-weight: 700; color: var(--text-primary); border-bottom: 1px solid var(--border); }
+.bill-stats tr.bs-year td.bs-label { color: var(--text-primary); }
+.bill-stats tr.bs-year .bs-caret {
+    display: inline-block;
+    width: 14px;
+    color: var(--accent);
+    font-size: 11px;
+}
+.bill-stats tr.bs-year.collapsed td { color: var(--text-secondary); }
+.bill-stats tr.bs-row.bs-sub td.bs-label {
+    padding-left: 22px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+.bill-stats tr.bs-row.bs-sub:hover { background: var(--bg-card-hover); }
 .bill-stats td.bs-empty {
     text-align: center;
     color: var(--text-tertiary);

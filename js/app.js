@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.61';  // v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.62';  // v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -3691,6 +3691,41 @@ function updateTransactionMonthSummary() {
     document.getElementById('tmsExpense').textContent = formatCurrency(expense);
     document.getElementById('tmsBalance').textContent = formatCurrency(balance);
     if (scopeEl) scopeEl.textContent = filtering ? '筛选结果合计' : '本月概览';
+    renderTxnAnomalyHint();
+}
+
+// 交易记录顶部"异常/未归类"低调提示（只读，不写任何数据）：
+// 统计当前列表（与下方列表同一套筛选）里「未归类」和「金额明显超平时」的笔数。
+function renderTxnAnomalyHint() {
+    const el = document.getElementById('txnAnomalyHint');
+    if (!el) return;
+    const list = getFilteredTransactions();
+    if (!list.length) { el.className = 'txn-anomaly-hint'; el.innerHTML = ''; return; }
+    // 1) 未归类：分类是"其他/未归类"这一类
+    const unclassified = list.filter(t => {
+        const cat = getCategoryById(t.categoryId);
+        return t.categoryId === 'e_other' || t.categoryId === 'i_other'
+            || (cat && /未归类|其他/.test(cat.name));
+    }).length;
+    // 2) 异常金额：同类型（收入/支出）样本 ≥ 8 笔时，金额 > 该类型中位数 5 倍，疑似多按了零
+    let anomaly = 0;
+    ['income', 'expense'].forEach(type => {
+        const sub = list.filter(t => t.type === type).map(t => Math.abs(t.amount)).sort((a, b) => a - b);
+        if (sub.length >= 8) {
+            const mid = sub[Math.floor(sub.length / 2)];
+            if (mid > 0) anomaly += sub.filter(v => v > mid * 5).length;
+        }
+    });
+    if (!unclassified && !anomaly) {
+        el.className = 'txn-anomaly-hint ok';
+        el.innerHTML = '<i class="fa-solid fa-circle-check"></i> 未发现未归类或异常金额';
+        return;
+    }
+    const parts = [];
+    if (unclassified) parts.push(`<b>${unclassified}</b> 笔未归类`);
+    if (anomaly) parts.push(`<b>${anomaly}</b> 笔金额异常`);
+    el.className = 'txn-anomaly-hint warn';
+    el.innerHTML = '<i class="fa-solid fa-circle-info"></i> ' + parts.join(' · ');
 }
 
 // 空状态里的"清除搜索 / 重置筛选"按钮（Fix：区分无数据、无搜索结果）
@@ -4427,8 +4462,17 @@ function renderReports() {
     renderBillStats();
 }
 
+// 年报分组（"全部"视图）：按年折叠，默认收起，点年份展开看各月
+let billYearExpanded = new Set();
+function toggleBillYear(y) {
+    if (billYearExpanded.has(y)) billYearExpanded.delete(y);
+    else billYearExpanded.add(y);
+    renderBillStats();
+}
+
 // ---- Reports: 账单统计 ----
 // 月报 → 日均 + 每天；年报/总 → 月均 + 每月。日期一律从新到旧排。
+// "全部"视图下，月份按年份分组、默认折叠，点年份展开看该年各月。
 function renderBillStats() {
     const body = document.getElementById('billStatsBody');
     if (!body) return;
@@ -4477,16 +4521,41 @@ function renderBillStats() {
             <td>${money(periods ? total.net / periods : 0)}</td>
         </tr>`];
 
-    list.forEach(b => {
+    // 单行（月/日）HTML：月视图折成「全部」里按年分组后，标签只显示月份
+    const rowHTML = (b, shortLabel) => {
         const st = sumOf(b.rows);
-        rows.push(`
-        <tr class="bs-row" onclick="openBillStatsLedger(${b.y}, ${b.m}, ${byDay ? b.d : 'null'}, '${dayLabel(b)}')">
-            <td class="bs-label">${dayLabel(b)}</td>
+        const lbl = byDay ? `${b.m}月${b.d}日` : `${b.y}年${b.m}月`;
+        return `<tr class="bs-row${shortLabel ? ' bs-sub' : ''}" onclick="openBillStatsLedger(${b.y}, ${b.m}, ${byDay ? b.d : 'null'}, '${lbl}')">
+            <td class="bs-label">${shortLabel || lbl}</td>
             <td>${money(st.inc)}</td>
             <td>${money(st.exp)}</td>
             <td>${money(st.net)}</td>
-        </tr>`);
-    });
+        </tr>`;
+    };
+
+    // "全部"视图（跨年）→ 按年份分组折叠；其余（年视图/月视图）直接平铺
+    if (!byDay && range.period === 'all') {
+        const years = [];
+        const byYear = new Map();
+        list.forEach(b => {
+            if (!byYear.has(b.y)) { byYear.set(b.y, []); years.push(b.y); }
+            byYear.get(b.y).push(b);
+        });
+        years.forEach(y => {
+            const yb = byYear.get(y);
+            const yst = sumOf(yb.flatMap(x => x.rows));
+            const open = billYearExpanded.has(y);
+            rows.push(`<tr class="bs-year${open ? ' open' : ' collapsed'}" data-year="${y}" onclick="toggleBillYear(${y})">
+                <td class="bs-label"><span class="bs-caret">${open ? '▾' : '▸'}</span>${y} 年</td>
+                <td>${money(yst.inc, 'income')}</td>
+                <td>${money(yst.exp, 'expense')}</td>
+                <td>${money(yst.net)}</td>
+            </tr>`);
+            if (open) yb.forEach(b => rows.push(rowHTML(b, `${b.m}月`)));
+        });
+    } else {
+        list.forEach(b => rows.push(rowHTML(b, null)));
+    }
     body.innerHTML = rows.join('');
 }
 
@@ -8984,6 +9053,83 @@ function updateMonthlyDerived() {
     fitMonthlyColWidths();
     // v1.39.33：核对模式下实时刷新「已核对 X / Y 格」（勾随敲随变）
     if (typeof syncChkCount === 'function') syncChkCount();
+    // 录入自检面板（只读）：总资产/总负债/净资产 + 收益自洽 + 漏填提醒
+    renderMonthlySelfCheck();
+}
+
+// 月度账单"录入自检"（只读，绝不写任何数据）：把当前这页草稿实时算成
+// 总资产/总负债/净资产，并做两件事——①收益自洽（收益应 = 期末−期初−净入金）；
+// ②上月有资产、本月空白的漏填提醒。踩中"只核对不写数"铁律。
+function renderMonthlySelfCheck() {
+    const el = document.getElementById('monthlySelfCheck');
+    if (!el) return;
+    const month = getModalMonth('monthly');
+    if (!month) { el.innerHTML = ''; return; }
+    const member = monthlyMember();
+    const list = document.getElementById('monthlyEntryList');
+    if (!list) return;
+    const numOf = inp => {
+        const raw = String(inp.value).trim();
+        if (raw === '') return null;
+        const v = parseFloat(raw);
+        return isFinite(v) ? v : null;
+    };
+    // 从草稿读：每账户净资产 + 收益 + 净入金
+    const acctNet = {}, retMap = {}, flowMap = {};
+    list.querySelectorAll('[data-bal]').forEach(inp => {
+        const v = numOf(inp); if (v === null) return;
+        const id = inp.dataset.bal, cat = inp.dataset.cat || 'other';
+        acctNet[id] = (acctNet[id] || 0) + (isLiabCat(cat) ? -Math.abs(v) : Math.abs(v));
+    });
+    list.querySelectorAll('[data-ret]').forEach(inp => { const v = numOf(inp); if (v !== null) retMap[inp.dataset.ret] = v; });
+    list.querySelectorAll('[data-flow-in]').forEach(inp => { const v = numOf(inp); if (v !== null) flowMap[inp.dataset.flowIn] = v; });
+
+    let sumAsset = 0, sumLiab = 0;
+    list.querySelectorAll('[data-bal]').forEach(inp => {
+        const v = numOf(inp); if (v === null) return;
+        const cat = inp.dataset.cat || 'other';
+        if (isLiabCat(cat)) sumLiab += v; else sumAsset += v;
+    });
+    const net = sumAsset - sumLiab;
+
+    // 收益自洽：用草稿覆盖 portfolioMonthStats 的期末/收益/净入金，与上月已存余额对比
+    const draft = {};
+    Object.keys(acctNet).forEach(id => draft[id] = { balance: acctNet[id] });
+    Object.keys(retMap).forEach(id => draft[id] = Object.assign(draft[id] || {}, { profit: retMap[id] }));
+    Object.keys(flowMap).forEach(id => draft[id] = Object.assign(draft[id] || {}, { flow: flowMap[id] }));
+    const ids = state.accounts.map(a => a.id);
+    const st = portfolioMonthStats(month, ids, draft, member);
+
+    // 上月有资产、本月空白的漏填提醒
+    const prev = previousMonthOf(month);
+    const prevMap = prev ? balancesAtMonth(prev, member) : {};
+    const missing = [];
+    Object.keys(prevMap).forEach(id => {
+        const p = prevMap[id];
+        if (!(p > 0)) return;
+        if (acctNet[id] === undefined || acctNet[id] === 0) {
+            const a = accountById(id);
+            missing.push(a ? a.name : id);
+        }
+    });
+
+    const fmt = v => formatCurrency(Math.round(v * 100) / 100);
+    let html = `<div class="msc-title">录入自检（只读核对）</div>`;
+    html += `<div class="msc-line msc-totals">
+        <span>总资产 <b>${fmt(sumAsset)}</b></span>
+        <span>总负债 <b class="msc-liab">${fmt(sumLiab)}</b></span>
+        <span>净资产 <b>${fmt(net)}</b></span>
+    </div>`;
+    if (st.check) {
+        html += `<div class="msc-line msc-warn"><i class="fa-solid fa-triangle-exclamation"></i> 收益对不上：按"期末−期初−净入金"应得 ${fmt(st.check.implied)}，但收益填了 ${fmt(st.profit)}（差 ${fmt(st.check.gap)}）—— 可能是余额或收益填错</div>`;
+    } else if (st.hasProfit) {
+        html += `<div class="msc-line msc-ok"><i class="fa-solid fa-circle-check"></i> 收益自洽：收益 ${fmt(st.profit)} 与"期末−期初−净入金"一致</div>`;
+    }
+    if (missing.length) {
+        const shown = missing.slice(0, 5).join('、') + (missing.length > 5 ? ` 等 ${missing.length} 个` : '');
+        html += `<div class="msc-line msc-warn"><i class="fa-solid fa-triangle-exclamation"></i> 上月有数本月空白：${shown} —— 确认是清掉了还是漏填</div>`;
+    }
+    el.innerHTML = html;
 }
 
 function clearMonthlyInputs() {
@@ -10753,7 +10899,7 @@ function portfolioMonthStats(month, ids, draft, memberOverride) {
         if (Math.abs(gap) > tol) check = { implied, gap, tol };
     }
 
-    return { v0, v1, profit, flow, flowKnown, base, rate, check, eligible, unknown, reason };
+    return { v0, v1, profit, flow, flowKnown, base, rate, check, eligible, unknown, reason, hasProfit };
 }
 
 // 时间加权累计收益率：逐月 (1+r) 连乘。剔掉"什么时候加钱/取钱"的影响，
