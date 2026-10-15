@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.62';  // v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.63';  // v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -3495,7 +3495,7 @@ function renderCategoryChart() {
 }
 
 // ---- Transactions ----
-function transactionItemHTML(t) {
+function transactionItemHTML(t, anomalyMap) {
     const cat = getCategoryById(t.categoryId);
     const icon = cat?.icon || 'fa-ellipsis';
     const color = cat?.color || '#636e72';
@@ -3509,6 +3509,14 @@ function transactionItemHTML(t) {
     const memberBadge = (state.balanceMembers.length > 1 && t.member && t.member !== '全家')
         ? `<span class="txn-member"><i class="fa-solid fa-user"></i> ${escapeHtml(t.member)}</span>` : '';
 
+    // 异常订单徽标：标注这笔"为什么异常"（未归类 / 金额异常），只读不写
+    const anomalyBadges = (anomalyMap && anomalyMap.get(t.id))
+        ? anomalyMap.get(t.id).map(r => {
+            const isAmount = r.startsWith('金额异常');
+            const label = isAmount ? '金额异常' : '未归类';
+            return `<span class="txn-anomaly-badge ${isAmount ? 'amount' : ''}" title="${escapeHtml(r)}">${label}</span>`;
+        }).join('') : '';
+
     return `
         <div class="transaction-item" onclick="editTransaction('${t.id}')">
             <div class="transaction-icon" style="background:${color}22;color:${color}">
@@ -3516,7 +3524,7 @@ function transactionItemHTML(t) {
             </div>
             <div class="transaction-info">
                 <div class="transaction-category">${name}</div>
-                <div class="transaction-note">${noteHtml}<span class="txn-payment"><i class="${paymentIcon}"></i> ${payment}</span>${memberBadge}</div>
+                <div class="transaction-note">${noteHtml}<span class="txn-payment"><i class="${paymentIcon}"></i> ${payment}</span>${memberBadge}${anomalyBadges}</div>
             </div>
             <div class="transaction-amount ${t.type}">${sign}${formatCurrency(t.amount)}</div>
         </div>
@@ -3542,7 +3550,7 @@ function formatDayHeader(dateStr) {
 const txnDayKey = t => String(t.date).slice(0, 10);
 
 // 按天分组的时间线：同一天只显示一个日期表头 + 当日小计
-function transactionGroupsHTML(txns) {
+function transactionGroupsHTML(txns, anomalyMap) {
     const groups = [];
     txns.forEach(t => {
         const key = txnDayKey(t);
@@ -3563,17 +3571,24 @@ function transactionGroupsHTML(txns) {
                 <span class="txn-day-date">${formatDayHeader(g.date)}</span>
                 <span class="txn-day-sum">${sum}</span>
             </div>
-            <div class="transaction-list">${g.rows.map(t => transactionItemHTML(t)).join('')}</div>
+            <div class="transaction-list">${g.rows.map(t => transactionItemHTML(t, anomalyMap)).join('')}</div>
         </div>`;
     }).join('');
 }
 
 function renderTransactions() {
     updateMonthFilter();
-    updateTransactionMonthSummary();
-
-    // 列表与顶部汇总共用同一套筛选条件（getFilteredTransactions），保证"筛选结果合计"和列表对得上
-    let filtered = getFilteredTransactions();
+    // 异常筛选态：列表与汇总都只看异常订单，且每笔标注异常原因
+    txnCurrentAnomalyReasons = txnAnomalyReasons();
+    let filtered;
+    if (txnAnomalyOnly) {
+        const ids = new Set(txnCurrentAnomalyReasons.keys());
+        filtered = getFilteredTransactions().filter(t => ids.has(t.id));
+        updateTransactionMonthSummary(filtered);
+    } else {
+        filtered = getFilteredTransactions();
+        updateTransactionMonthSummary();
+    }
 
     // Sort by date desc
     filtered.sort((a, b) => parseLocalDate(b.date) - parseLocalDate(a.date) || b.createdAt - a.createdAt);
@@ -3586,6 +3601,11 @@ function renderTransactions() {
         txnRenderedTo = 0;
         container.innerHTML = '';
         empty.classList.remove('hidden');
+        if (txnAnomalyOnly) {
+            empty.innerHTML = '<i class="fa-solid fa-circle-check"></i><p>异常订单均为 0 笔 · 数据很干净</p>'
+                + '<button class="secondary-btn" onclick="toggleTxnAnomalyOnly()">查看全部订单</button>';
+            return;
+        }
         const filtering = !!state.monthFilter || !!state.searchQuery || state.transactionFilter !== 'all';
         if (state.transactions.length === 0) {
             empty.innerHTML = '<i class="fa-solid fa-receipt"></i><p>还没有交易记录</p>'
@@ -3618,6 +3638,8 @@ function renderTransactions() {
 let txnRenderList = [];
 let txnRenderedTo = 0;
 const TXN_CHUNK = 60;
+let txnAnomalyOnly = false;            // 交易记录「只看异常订单」模式开关（只读增强，不写数据）
+let txnCurrentAnomalyReasons = null;   // 当前列表每笔异常原因 Map，供徽标渲染复用
 
 function appendTxnChunk() {
     if (txnRenderedTo >= txnRenderList.length) return;
@@ -3630,7 +3652,7 @@ function appendTxnChunk() {
     }
     const chunk = txnRenderList.slice(txnRenderedTo, end);
     txnRenderedTo = end;
-    document.getElementById('allTransactions').insertAdjacentHTML('beforeend', transactionGroupsHTML(chunk));
+    document.getElementById('allTransactions').insertAdjacentHTML('beforeend', transactionGroupsHTML(chunk, txnCurrentAnomalyReasons));
 }
 
 function initTxnInfiniteScroll() {
@@ -3670,14 +3692,18 @@ function getFilteredTransactions() {
 
 // 顶部汇总：默认显示"本月概览"（当前月收支结余）；一旦应用了筛选（月份 / 搜索 / 收支类型），
 // 就改显"筛选结果合计"（与下方列表同一套筛选）。标签随状态切换，避免被误当成列表合计。
-function updateTransactionMonthSummary() {
+// displayList：传入时（只看异常订单模式）直接用它算收支结余，否则按"筛选 / 本月"原逻辑
+function updateTransactionMonthSummary(displayList) {
     const card = document.getElementById('txnMonthSummary');
     if (!card) return;
     const scopeEl = document.getElementById('tmsScope');
+    const list = displayList || getFilteredTransactions();
     const filtering = !!state.monthFilter || !!state.searchQuery || state.transactionFilter !== 'all';
     let income, expense;
-    if (filtering) {
-        const list = getFilteredTransactions();
+    if (displayList) {
+        income = list.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+        expense = list.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    } else if (filtering) {
         income = list.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
         expense = list.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
     } else {
@@ -3690,47 +3716,83 @@ function updateTransactionMonthSummary() {
     document.getElementById('tmsIncome').textContent = formatCurrency(income);
     document.getElementById('tmsExpense').textContent = formatCurrency(expense);
     document.getElementById('tmsBalance').textContent = formatCurrency(balance);
-    if (scopeEl) scopeEl.textContent = filtering ? '筛选结果合计' : '本月概览';
+    if (scopeEl) scopeEl.textContent = txnAnomalyOnly ? `异常订单 ${list.length} 笔` : (filtering ? '筛选结果合计' : '本月概览');
     renderTxnAnomalyHint();
 }
 
-// 交易记录顶部"异常/未归类"低调提示（只读，不写任何数据）：
-// 统计当前列表（与下方列表同一套筛选）里「未归类」和「金额明显超平时」的笔数。
-function renderTxnAnomalyHint() {
-    const el = document.getElementById('txnAnomalyHint');
-    if (!el) return;
+// 计算当前筛选结果里每笔「异常订单」的原因，返回 Map<txnId, string[]>。
+// 口径与下方提示条完全一致：未归类 + 金额超平时中位数 5 倍。
+// 主列表徽标与提示条共用此函数，保证两边口径一致（只读，不写任何数据）。
+function txnAnomalyReasons() {
     const list = getFilteredTransactions();
-    if (!list.length) { el.className = 'txn-anomaly-hint'; el.innerHTML = ''; return; }
+    const reasons = new Map();
     // 1) 未归类：分类是"其他/未归类"这一类
-    const unclassified = list.filter(t => {
+    list.forEach(t => {
         const cat = getCategoryById(t.categoryId);
-        return t.categoryId === 'e_other' || t.categoryId === 'i_other'
-            || (cat && /未归类|其他/.test(cat.name));
-    }).length;
+        if (t.categoryId === 'e_other' || t.categoryId === 'i_other'
+            || (cat && /未归类|其他/.test(cat.name))) {
+            if (!reasons.has(t.id)) reasons.set(t.id, []);
+            reasons.get(t.id).push('未归类');
+        }
+    });
     // 2) 异常金额：同类型（收入/支出）样本 ≥ 8 笔时，金额 > 该类型中位数 5 倍，疑似多按了零
-    let anomaly = 0;
     ['income', 'expense'].forEach(type => {
         const sub = list.filter(t => t.type === type).map(t => Math.abs(t.amount)).sort((a, b) => a - b);
         if (sub.length >= 8) {
             const mid = sub[Math.floor(sub.length / 2)];
-            if (mid > 0) anomaly += sub.filter(v => v > mid * 5).length;
+            if (mid > 0) {
+                list.filter(t => t.type === type && Math.abs(t.amount) > mid * 5).forEach(t => {
+                    if (!reasons.has(t.id)) reasons.set(t.id, []);
+                    reasons.get(t.id).push('金额异常：超过平时中位数的 5 倍');
+                });
+            }
         }
     });
+    return reasons;
+}
+
+// 点击提示条：在主列表 / 只看异常订单之间切换（只读，不改任何数据）
+function toggleTxnAnomalyOnly() {
+    txnAnomalyOnly = !txnAnomalyOnly;
+    renderTransactions();
+}
+
+// 交易记录顶部"异常/未归类"低调提示（只读，不写任何数据）：
+// 统计当前列表（与下方列表同一套筛选）里「未归类」和「金额明显超平时」的笔数。
+// 有异常时可点击直达"只看异常订单"；再次点击恢复全部。
+function renderTxnAnomalyHint() {
+    const el = document.getElementById('txnAnomalyHint');
+    if (!el) return;
+    const reasons = txnAnomalyReasons();
+    // 已处于"只看异常订单"模式：提示条变成可点的返回开关
+    if (txnAnomalyOnly) {
+        el.className = 'txn-anomaly-hint active';
+        el.innerHTML = `<i class="fa-solid fa-filter"></i> 正在只看异常订单（<b>${reasons.size}</b> 笔） · 点击查看全部`;
+        el.onclick = toggleTxnAnomalyOnly;
+        return;
+    }
+    const list = getFilteredTransactions();
+    if (!list.length) { el.className = 'txn-anomaly-hint'; el.innerHTML = ''; el.onclick = null; return; }
+    let unclassified = 0, anomaly = 0;
+    reasons.forEach(rs => rs.forEach(r => { if (r === '未归类') unclassified++; else anomaly++; }));
     if (!unclassified && !anomaly) {
         el.className = 'txn-anomaly-hint ok';
         el.innerHTML = '<i class="fa-solid fa-circle-check"></i> 未发现未归类或异常金额';
+        el.onclick = null;
         return;
     }
     const parts = [];
     if (unclassified) parts.push(`<b>${unclassified}</b> 笔未归类`);
     if (anomaly) parts.push(`<b>${anomaly}</b> 笔金额异常`);
     el.className = 'txn-anomaly-hint warn';
-    el.innerHTML = '<i class="fa-solid fa-circle-info"></i> ' + parts.join(' · ');
+    el.innerHTML = '<i class="fa-solid fa-circle-info"></i> ' + parts.join(' · ') + '（点击只看这些）';
+    el.onclick = toggleTxnAnomalyOnly;
 }
 
 // 空状态里的"清除搜索 / 重置筛选"按钮（Fix：区分无数据、无搜索结果）
 function clearSearch() {
     state.searchQuery = '';
+    txnAnomalyOnly = false;
     const inp = document.getElementById('searchInput');
     if (inp) inp.value = '';
     renderTransactions();
@@ -3739,6 +3801,7 @@ function clearSearch() {
 function resetTxnFilter() {
     state.monthFilter = '';
     state.transactionFilter = 'all';
+    txnAnomalyOnly = false;
     const sel = document.getElementById('monthFilter');
     if (sel) sel.value = '';
     document.querySelectorAll('.filter-tab').forEach(t => t.classList.toggle('active', t.dataset.filter === 'all'));
@@ -5159,7 +5222,7 @@ function renderCategoryLedger() {
             `<span class="cat-txn-summary-item expense">支出 <b>${formatCurrency(expense)}</b></span>`);
     }
     summary.innerHTML = parts.join('');
-    list.innerHTML = transactionGroupsHTML(sorted);
+    list.innerHTML = transactionGroupsHTML(sorted, null);
 }
 
 function closeCategoryTxnModal() {
@@ -12065,6 +12128,7 @@ function initEventListeners() {
     document.querySelectorAll('.filter-tab').forEach(tab => {
         tab.addEventListener('click', () => {
             state.transactionFilter = tab.dataset.filter;
+            txnAnomalyOnly = false;
             document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             renderTransactions();
@@ -12080,6 +12144,7 @@ function initEventListeners() {
     // Month filter
     document.getElementById('monthFilter').addEventListener('change', (e) => {
         state.monthFilter = e.target.value;
+        txnAnomalyOnly = false;
         renderTransactions();
     });
 
