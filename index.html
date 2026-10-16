@@ -1324,6 +1324,7 @@
     </button>
 
     <script src="js/ledger-crypto.js"></script>
+    <script src="js/fflate.min.js"></script>
     <script src="js/app.min.js"></script>
     <script>
         // Register Service Worker for PWA offline support.
@@ -1345,7 +1346,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.66').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.67').catch(() => {});
             });
         }
     </script>

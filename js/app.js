@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.66';  // v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.67';  // v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -216,6 +216,10 @@ let state = {
     searchQuery: '',
     monthFilter: '',
     excludedAnomalies: {},       // txnId -> true：用户手动"排除"的异常订单，不再在徽标/提示/只看异常里出现；可单笔或一键恢复
+    // v1.39.67：本机存储层的"重复值编码"字典（短码 -> 明文名）。只服务 localStorage 这一份
+    // 本机副本，不进云同步/备份/Excel——那些通道一律明文，旧版本 App 也读得懂。
+    memberCodes: {},             // 如 m1 -> 本人
+    pmCodes: {},                 // 如 p1 -> 微信支付
     reportPeriod: 'month',
     reportYear: null,
     reportMonth: null,
@@ -269,6 +273,80 @@ let __saveTimer = null;
 let __lastSavedBytes = 0;      // 最近一次序列化出来的字节数
 let __storageError = '';         // 非空表示存盘失败，需要醒目提示
 
+// ---- v1.39.67 本机存储层：压缩 + 重复值编码（只作用于 localStorage 这一份本机副本）----
+// ① 重复值编码：交易的 type/member/paymentMethod 写成短码、不再存 createdAt。
+//    存前编码、读后解码，内存里永远是明文——界面/报表/Excel/云同步全部无感。
+// ② deflate 压缩：编码后的 JSON 经 fflate 压成 base64 存（LZ1: 前缀），实测 11 倍。
+// 为什么只在本机做：云端/备份/iCloud 保持明文结构，任何旧版本 App 都读得懂，
+// 从根上消除"新旧数据格式在唯一一份云端账本里打架"的风险（砍 id/删字段若直接改
+// 同步格式，旧设备会把新格式推乱，这正是该方案被否的原因）。
+// fflate 选同步 API（deflateSync/inflateSync）而非 CompressionStream：保存链路
+// （saveStateNow/flushState）是同步的，且每次切后台都会触发，不能等异步流。
+const LOCAL_Z_PREFIX = 'LZ1:';               // 本机压缩标记：LZ1 + base64(zlib)
+const LOCAL_Z_THRESHOLD = 24 * 1024;         // 不到 24KB 的账本不折腾
+const TXN_TYPE_ENC = { expense: 'e', income: 'i', transfer: 't' };
+const TXN_TYPE_DEC = { e: 'expense', i: 'income', t: 'transfer' };
+let __loadFailed = false;   // 本机数据读不出来（更新版本写的格式/损坏）→ 禁止保存和同步，
+                            // 绝不能用默认空状态覆盖真数据，更不能把空账本推上云端
+
+function packForStorage(text) {
+    try {
+        if (!window.fflate || text.length <= LOCAL_Z_THRESHOLD) return text;
+        const packed = LOCAL_Z_PREFIX + bytesToBase64(fflate.deflateSync(fflate.strToU8(text)));
+        return packed.length < text.length ? packed : text;   // 压不动就别白折腾（同 encodeSyncPayload）
+    } catch (e) { return text; }
+}
+
+function unpackFromStorage(raw) {
+    if (typeof raw !== 'string' || raw.indexOf(LOCAL_Z_PREFIX) !== 0) return raw;
+    if (!window.fflate) throw new Error('缺少解压组件（fflate 未加载）');
+    return fflate.strFromU8(fflate.inflateSync(base64ToBytes(raw.slice(LOCAL_Z_PREFIX.length))));
+}
+
+// 名字 -> 短码（懒分配，码只进本机存储）。守卫：新码不能撞上任何现存明文名字，
+// 否则解码时会把真名字误当成码。
+function shortCodeFor(name, codeMap, plainNames, prefix) {
+    for (const k in codeMap) if (codeMap[k] === name) return k;
+    let n = Object.keys(codeMap).length + 1, code;
+    do { code = prefix + (n++); } while (codeMap[code] || plainNames.indexOf(code) >= 0);
+    codeMap[code] = name;
+    return code;
+}
+
+// 存前编码：只动 data 里的浅拷贝，绝不碰 state（云端同步读的是内存里的明文）。
+function encodeStorageState(data) {
+    const memberNames = [...new Set([...(state.balanceMembers || []), ...(state.insuranceMembers || [])])];
+    const pmNames = [...new Set(state.paymentMethods || [])];
+    (state.transactions || []).forEach(t => {
+        if (!t) return;
+        if (t.member) memberNames.push(t.member);
+        if (t.paymentMethod) pmNames.push(t.paymentMethod);
+    });
+    data.transactions = (state.transactions || []).map(t => {
+        if (!t) return t;
+        const c = Object.assign({}, t);
+        if (TXN_TYPE_ENC[c.type]) c.type = TXN_TYPE_ENC[c.type];
+        if (c.member) c.member = shortCodeFor(c.member, state.memberCodes, memberNames, 'm');
+        if (c.paymentMethod) c.paymentMethod = shortCodeFor(c.paymentMethod, state.pmCodes, pmNames, 'p');
+        delete c.createdAt;   // v1.39.67：存储里不存 createdAt（updatedAt 已够合并裁判和墓碑判死用）
+        return c;
+    });
+    return data;
+}
+
+// 读后解码：短码还原成明文；明文字段原样保留（新旧格式混存时都得认）。
+// 注意不删 createdAt——旧账本磁盘上带来的 createdAt 留在内存里当排序次级键挺好。
+function decodeStorageState(data) {
+    const mm = state.memberCodes || {}, pm = state.pmCodes || {};
+    (data.transactions || []).forEach(t => {
+        if (!t) return;
+        if (TXN_TYPE_DEC[t.type]) t.type = TXN_TYPE_DEC[t.type];
+        if (t.member != null && mm[t.member] !== undefined) t.member = mm[t.member];
+        if (t.paymentMethod != null && pm[t.paymentMethod] !== undefined) t.paymentMethod = pm[t.paymentMethod];
+    });
+    return data;
+}
+
 // 合并远端数据后若本地内容其实没变，就只落盘、不回推 iCloud。
 // 否则两台设备会互相触发对方的「远端有更新」，无限来回写。
 let __suppressSyncSchedule = false;
@@ -312,6 +390,13 @@ function saveGeneratedFile(blob, filename) {
 }
 
 function saveStateNow() {
+    // v1.39.67：本机数据读不出来时绝不保存——否则默认空状态会覆盖真数据，
+    // 接着同步再把空账本推上去，三台设备一起空。
+    if (__loadFailed) {
+        __storageError = '本机账本格式读不出（可能是更新版本写入的），已停止保存。请更新 App 后重试。';
+        renderStorageWarning();
+        return;
+    }
     const data = {
         purgeSampleDone: state.purgeSampleDone,
         transactions: state.transactions,
@@ -338,6 +423,12 @@ function saveStateNow() {
         pendingRecurring: state.pendingRecurring || [],
         recurringSkipped: state.recurringSkipped || {},
         monthlyOpen: state.monthlyOpen || {},  // 月度账单「账户×渠道」开关状态（本地 UI，不进 iCloud 同步）
+        // v1.39.67 修复 v1.39.65 漏存：异常订单「排除」列表此前没进本机存储，
+        // 关网刷新即丢（有网时靠从云端合并回来"看起来"没丢）。
+        excludedAnomalies: state.excludedAnomalies,
+        // 存储层短码字典：没有它，存成的短码就解不回来了
+        memberCodes: state.memberCodes || {},
+        pmCodes: state.pmCodes || {},
         // B02 修复：资产归类(balClassTags)与自定义列(sheetCols)以前漏写，刷新/同步后退回默认
         balClassTags: state.balClassTags,
         sheetCols: state.sheetCols,
@@ -352,10 +443,14 @@ function saveStateNow() {
             closeMonth: state.closeMonth,
         },
     };
+    // v1.39.67：先编码（短码+去 createdAt，只动浅拷贝）再压缩，然后才落盘。
+    // __lastSavedBytes 记的是"实际存进去的字符串长度"——数据体检的占用%以此为准。
+    encodeStorageState(data);
     const text = JSON.stringify(data);
-    __lastSavedBytes = text.length;
+    const stored = packForStorage(text);
+    __lastSavedBytes = stored.length;
     try {
-        localStorage.setItem(STORAGE_KEY, text);
+        localStorage.setItem(STORAGE_KEY, stored);
         if (__storageError) { __storageError = ''; renderStorageWarning(); }
     } catch (e) {
         // 写不进去绝不能装作成功：内存里还在，但关掉就没了
@@ -2794,7 +2889,7 @@ async function remotePush() {
 
 // 一次完整同步：先拉后推。串行加锁，避免定时器叠起来。
 async function remoteSyncCycle(reason) {
-    if (!remoteSyncReady() || __remoteBusy) return false;
+    if (!remoteSyncReady() || __remoteBusy || __loadFailed) return false;   // v1.39.67：__loadFailed 时整周期禁止
     __remoteBusy = true;
     try {
         const pulled = await remotePullAndMerge();
@@ -2817,7 +2912,7 @@ async function remoteSyncCycle(reason) {
 
 // 本地数据有改动后延迟推送（复用 saveState 的调用点）
 function scheduleRemoteSync() {
-    if (!remoteSyncReady()) return;
+    if (!remoteSyncReady() || __loadFailed) return;   // v1.39.67：本机数据读不出时禁止同步（防止把空状态推上去）
     if (__remotePushTimer) clearTimeout(__remotePushTimer);
     __remotePushTimer = setTimeout(() => {
         __remotePushTimer = null;
@@ -3085,8 +3180,14 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
         try {
-            const data = JSON.parse(raw);
+            // v1.39.67：压缩串（LZ1: 前缀）先解压再解析；明文老数据原样解析
+            const data = JSON.parse(unpackFromStorage(raw));
             state.transactions = data.transactions || [];
+            // 短码字典要先读出来，才能把交易里的 type/member/paymentMethod 短码还原成明文
+            state.memberCodes = (data.memberCodes && typeof data.memberCodes === 'object') ? data.memberCodes : {};
+            state.pmCodes = (data.pmCodes && typeof data.pmCodes === 'object') ? data.pmCodes : {};
+            decodeStorageState(data);
+            state.excludedAnomalies = (data.excludedAnomalies && typeof data.excludedAnomalies === 'object') ? data.excludedAnomalies : {};
             state.categories = data.categories || [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES];
             state.budgets = data.budgets || [];
             state.paymentMethods = (data.paymentMethods && data.paymentMethods.length > 0)
@@ -3170,6 +3271,13 @@ function loadState() {
             }
         } catch (e) {
             console.error('Failed to load state:', e);
+            // v1.39.67：解出来不是明文 JSON（LZ1: 解不开/损坏/更新版本的格式）时，
+            // 绝不能用默认空状态往下走——下一次保存就会把真数据覆盖成空账本。
+            // 停保存、停同步，大声报错，等用户更新 App。
+            if (typeof raw === 'string' && raw.trim().charAt(0) !== '{') {
+                __loadFailed = true;
+                showToast('本机账本读不出来（可能是更新版本写入的格式）。请更新到最新版 App 再打开，切勿反复开关。', 'error');
+            }
         }
     }
     // 最后统一收一遍「名字数组」：把历史上被误存成对象的支付方式 / 成员还原成名字，
@@ -3299,7 +3407,9 @@ function getDaysInMonth(year, month) {
 }
 
 function uid() {
-    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    // v1.39.67：14~15 字符缩到 12（时间 8 位 + 随机 4 位）。同一毫秒内两条随机撞车
+    // 概率约 1/168 万；跨设备同毫秒创建更是罕见，够用。旧 id 原样保留（opaque，不迁移）。
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
 function getCategoryById(id) {
@@ -3614,8 +3724,8 @@ function renderTransactions() {
         updateTransactionMonthSummary();
     }
 
-    // Sort by date desc
-    filtered.sort((a, b) => parseLocalDate(b.date) - parseLocalDate(a.date) || b.createdAt - a.createdAt);
+    // Sort by date desc（同日次的次级键：v1.39.67 起存储不存 createdAt，改认 updatedAt，老数据回退 createdAt）
+    filtered.sort((a, b) => parseLocalDate(b.date) - parseLocalDate(a.date) || (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
 
     const container = document.getElementById('allTransactions');
     const empty = document.getElementById('emptyTransactions');
@@ -5281,7 +5391,7 @@ function openLedger({ title, subtitle, ids, txns, bucket = null, ignoreMetric = 
 function renderCategoryLedger() {
     const list = document.getElementById('catTxnList');
     const empty = document.getElementById('catTxnEmpty');
-    const sorted = [...catLedgerTxns].sort((a, b) => parseLocalDate(b.date) - parseLocalDate(a.date) || b.createdAt - a.createdAt);
+    const sorted = [...catLedgerTxns].sort((a, b) => parseLocalDate(b.date) - parseLocalDate(a.date) || (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
     const income = sorted.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
     const expense = sorted.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
     const summary = document.getElementById('catTxnSummary');
