@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.67';  // v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.68';  // v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -288,6 +288,7 @@ const TXN_TYPE_ENC = { expense: 'e', income: 'i', transfer: 't' };
 const TXN_TYPE_DEC = { e: 'expense', i: 'income', t: 'transfer' };
 let __loadFailed = false;   // 本机数据读不出来（更新版本写的格式/损坏）→ 禁止保存和同步，
                             // 绝不能用默认空状态覆盖真数据，更不能把空账本推上云端
+const __usedIds = new Set();   // v1.39.68：已占用的 id，uid() 发号前查重，撞了重发
 
 function packForStorage(text) {
     try {
@@ -3179,10 +3180,25 @@ function closeGistHelp() {
 function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
+        // v1.39.68：拆成两段 try。v1.39.67 把"解析"和"迁移"合在一个 try 里的坑：
+        // 解析明明成功了（用户看得见全部数据），但后面的历史数据迁移
+        // （normalizeBalanceIds 等）一抛错，就被 catch 按"格式读不出"误判 →
+        // __loadFailed 停保存 → 记一笔存一笔、Cmd+Q 都不落盘。
+        // 第一段只负责"字节→对象"：只有它失败才 __loadFailed 停保存。
+        let data = null;
         try {
-            // v1.39.67：压缩串（LZ1: 前缀）先解压再解析；明文老数据原样解析
-            const data = JSON.parse(unpackFromStorage(raw));
-            state.transactions = data.transactions || [];
+            // 压缩串（LZ1: 前缀）先解压再解析；明文老数据原样解析
+            data = JSON.parse(unpackFromStorage(raw));
+        } catch (e) {
+            console.error('Failed to parse storage:', e);
+            if (raw.trim().charAt(0) !== '{') {
+                __loadFailed = true;
+                showToast('本机账本读不出来（可能是更新版本写入的格式）。请更新到最新版 App 再打开，切勿反复开关。', 'error');
+            }
+        }
+        if (data) {
+            try {
+                state.transactions = data.transactions || [];
             // 短码字典要先读出来，才能把交易里的 type/member/paymentMethod 短码还原成明文
             state.memberCodes = (data.memberCodes && typeof data.memberCodes === 'object') ? data.memberCodes : {};
             state.pmCodes = (data.pmCodes && typeof data.pmCodes === 'object') ? data.pmCodes : {};
@@ -3271,13 +3287,18 @@ function loadState() {
             }
         } catch (e) {
             console.error('Failed to load state:', e);
-            // v1.39.67：解出来不是明文 JSON（LZ1: 解不开/损坏/更新版本的格式）时，
-            // 绝不能用默认空状态往下走——下一次保存就会把真数据覆盖成空账本。
-            // 停保存、停同步，大声报错，等用户更新 App。
-            if (typeof raw === 'string' && raw.trim().charAt(0) !== '{') {
-                __loadFailed = true;
-                showToast('本机账本读不出来（可能是更新版本写入的格式）。请更新到最新版 App 再打开，切勿反复开关。', 'error');
-            }
+            // 第二段：state 填充 + 迁移。数据已经读进内存，此时绝不能 __loadFailed
+            // （禁保存会让用户之后的所有操作全部丢失）。只警告，照常使用。
+            showToast('账本的部分历史格式整理没完成，不影响查看和保存', 'error');
+        }
+        // v1.39.68：把现有 id 灌进防撞表，之后新发号绝不会和它们撞
+        try {
+            __usedIds.clear();
+            ['transactions', 'accounts', 'categories', 'balances', 'returns', 'insurancePolicies'].forEach(coll => {
+                (state[coll] || []).forEach(r => { if (r && r.id) __usedIds.add(r.id); });
+            });
+            (state.budgets || []).forEach(b => { if (b && b.id) __usedIds.add(b.id); });
+        } catch (e) { /* 灌表失败不致命，uid 仍有随机兜底 */ }
         }
     }
     // 最后统一收一遍「名字数组」：把历史上被误存成对象的支付方式 / 成员还原成名字，
@@ -3407,9 +3428,14 @@ function getDaysInMonth(year, month) {
 }
 
 function uid() {
-    // v1.39.67：14~15 字符缩到 12（时间 8 位 + 随机 4 位）。同一毫秒内两条随机撞车
-    // 概率约 1/168 万；跨设备同毫秒创建更是罕见，够用。旧 id 原样保留（opaque，不迁移）。
-    return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    // v1.39.68：防撞。v1.39.67 把 uid 缩成"时间 8 位 + 随机 4 位"后，批量导入
+    // （几千行空 ID 同时现场发号）在同一毫秒里撞出过重复 id——两笔不同交易
+    // 共用一个 id，体检报"多设备合并可能撞车"。发号前查重，撞了重发。
+    let id;
+    do { id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+    while (__usedIds.has(id));
+    __usedIds.add(id);
+    return id;
 }
 
 function getCategoryById(id) {
