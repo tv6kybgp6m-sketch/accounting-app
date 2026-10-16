@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.64';  // v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.65';  // v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -215,6 +215,7 @@ let state = {
     transactionFilter: 'all',
     searchQuery: '',
     monthFilter: '',
+    excludedAnomalies: {},       // txnId -> true：用户手动"排除"的异常订单，不再在徽标/提示/只看异常里出现；可单笔或一键恢复
     reportPeriod: 'month',
     reportYear: null,
     reportMonth: null,
@@ -3519,6 +3520,15 @@ function transactionItemHTML(t, anomalyMap) {
             return `<span class="txn-anomaly-badge ${cls}" title="${escapeHtml(r)}">${label}</span>`;
         }).join('') : '';
 
+    // 异常"排除"交互：已被排除的显示"已排除"可恢复；未被排除但确有异常的显示"排除"按钮。
+    // 两个按钮都 stopPropagation，避免点到编辑弹窗。
+    let anomalyExcludeControl = '';
+    if (state.excludedAnomalies[t.id]) {
+        anomalyExcludeControl = `<button class="txn-exclude-btn restored" title="已不再标记为异常，点击恢复" onclick="restoreAnomaly('${t.id}');event.stopPropagation();"><i class="fa-solid fa-eye"></i> 已排除</button>`;
+    } else if (anomalyMap && anomalyMap.get(t.id)) {
+        anomalyExcludeControl = `<button class="txn-exclude-btn" title="这笔不是真的异常？点此不再标记" onclick="excludeAnomaly('${t.id}');event.stopPropagation();"><i class="fa-solid fa-eye-slash"></i> 排除</button>`;
+    }
+
     return `
         <div class="transaction-item" onclick="editTransaction('${t.id}')">
             <div class="transaction-icon" style="background:${color}22;color:${color}">
@@ -3526,7 +3536,7 @@ function transactionItemHTML(t, anomalyMap) {
             </div>
             <div class="transaction-info">
                 <div class="transaction-category">${name}</div>
-                <div class="transaction-note">${noteHtml}<span class="txn-payment"><i class="${paymentIcon}"></i> ${payment}</span>${memberBadge}${anomalyBadges}</div>
+                <div class="transaction-note">${noteHtml}<span class="txn-payment"><i class="${paymentIcon}"></i> ${payment}</span>${memberBadge}${anomalyBadges}${anomalyExcludeControl}</div>
             </div>
             <div class="transaction-amount ${t.type}">${sign}${formatCurrency(t.amount)}</div>
         </div>
@@ -3729,7 +3739,8 @@ function updateTransactionMonthSummary(displayList) {
 //  (b) 重复记账：同分类、同金额、相隔 ≤3 天出现两笔以上。
 // 主列表徽标与提示条共用此函数，保证两边口径一致。
 function txnAnomalyReasons() {
-    const list = getFilteredTransactions();
+    // 被用户手动"排除"的异常订单不参与任何检测（徽标/提示/只看异常都不出现）
+    const list = getFilteredTransactions().filter(t => !state.excludedAnomalies[t.id]);
     const reasons = new Map();
     const round2 = v => Math.round(Math.abs(v) * 100) / 100;
 
@@ -3783,6 +3794,26 @@ function toggleTxnAnomalyOnly() {
     renderTransactions();
 }
 
+// 异常订单"排除"：用户确认某笔不是真异常，把它从异常检测里摘掉（只读核对的一部分，不改任何金额数据）。
+// 只记 txnId，随账本持久化；恢复时直接删记录即可。
+function excludeAnomaly(id) {
+    if (!id) return;
+    state.excludedAnomalies[id] = true;
+    saveState();
+    renderTransactions();
+}
+function restoreAnomaly(id) {
+    if (!id) return;
+    delete state.excludedAnomalies[id];
+    saveState();
+    renderTransactions();
+}
+function restoreAllAnomalies() {
+    state.excludedAnomalies = {};
+    saveState();
+    renderTransactions();
+}
+
 // 交易记录顶部"异常订单"低调提示（只读，不写任何数据）：
 // 统计当前列表（与下方列表同一套筛选）里「金额异常（多按零/忘小数点）」和「疑似重复记账」的笔数。
 // 有异常时可点击直达"只看异常订单"；再次点击恢复全部。
@@ -3790,14 +3821,20 @@ function renderTxnAnomalyHint() {
     const el = document.getElementById('txnAnomalyHint');
     if (!el) return;
     const reasons = txnAnomalyReasons();
+    const list = getFilteredTransactions();
+    // 当前筛选范围内被"排除"的异常订单数（只统计仍在列表里的，避免脏 id 干扰）
+    const listIds = new Set(list.map(t => t.id));
+    const excludedCount = Object.keys(state.excludedAnomalies).filter(id => listIds.has(id)).length;
+    const restoreLink = excludedCount
+        ? ` · <a class="txn-anomaly-restore" onclick="restoreAllAnomalies();event.stopPropagation();">已排除 ${excludedCount} 笔·恢复</a>`
+        : '';
     // 已处于"只看异常订单"模式：提示条变成可点的返回开关
     if (txnAnomalyOnly) {
         el.className = 'txn-anomaly-hint active';
-        el.innerHTML = `<i class="fa-solid fa-filter"></i> 正在只看异常订单（<b>${reasons.size}</b> 笔） · 点击查看全部`;
+        el.innerHTML = `<i class="fa-solid fa-filter"></i> 正在只看异常订单（<b>${reasons.size}</b> 笔） · 点击查看全部${restoreLink}`;
         el.onclick = toggleTxnAnomalyOnly;
         return;
     }
-    const list = getFilteredTransactions();
     if (!list.length) { el.className = 'txn-anomaly-hint'; el.innerHTML = ''; el.onclick = null; return; }
     let amountAnomaly = 0, dup = 0;
     reasons.forEach(rs => rs.forEach(r => {
@@ -3806,7 +3843,9 @@ function renderTxnAnomalyHint() {
     }));
     if (!amountAnomaly && !dup) {
         el.className = 'txn-anomaly-hint ok';
-        el.innerHTML = '<i class="fa-solid fa-circle-check"></i> 未发现异常金额或重复记账';
+        el.innerHTML = excludedCount
+            ? `<i class="fa-solid fa-circle-check"></i> 未发现异常金额或重复记账 · <a class="txn-anomaly-restore" onclick="restoreAllAnomalies();event.stopPropagation();">已排除 ${excludedCount} 笔·恢复</a>`
+            : '<i class="fa-solid fa-circle-check"></i> 未发现异常金额或重复记账';
         el.onclick = null;
         return;
     }
@@ -3814,7 +3853,7 @@ function renderTxnAnomalyHint() {
     if (amountAnomaly) parts.push(`<b>${amountAnomaly}</b> 笔金额异常`);
     if (dup) parts.push(`<b>${dup}</b> 笔疑似重复`);
     el.className = 'txn-anomaly-hint warn';
-    el.innerHTML = '<i class="fa-solid fa-circle-info"></i> ' + parts.join(' · ') + '（点击只看这些）';
+    el.innerHTML = '<i class="fa-solid fa-circle-info"></i> ' + parts.join(' · ') + '（点击只看这些）' + restoreLink;
     el.onclick = toggleTxnAnomalyOnly;
 }
 
@@ -6155,6 +6194,40 @@ function pickLocalFile(extensions) {
 // 把一本工作簿解析进 state（与文件从哪来无关）
 function applyWorkbook(wb) {
             let txnAdded = 0, txnUpdated = 0, txnInvalid = 0;
+            let accAdded = 0, insAdded = 0;
+
+            // 账户：导出表「账户」以前只导出不回读，导致导入时余额/收益按账户名匹配不到就整行跳过。
+            // 现在读回来：按名称匹配已有账户（匹配不到则新建），并回写分组、四笔钱归类(bucket)。
+            // 必须放在余额/收益导入之前，否则后者仍会因账户缺失而跳过。
+            const wsAcc = wb.Sheets['账户'];
+            if (wsAcc) {
+                const accPalette = ['#007aff', '#34c759', '#ff9500', '#af52de', '#5ac8fa', '#ff3b30', '#a2845e', '#30b0c7'];
+                XLSX.utils.sheet_to_json(wsAcc).forEach(row => {
+                    const name = String(row['名称'] || '').trim();
+                    if (!name) return;
+                    const group = String(row['分组'] || '').trim();
+                    const bucketText = String(row['四笔钱归类'] || '').trim();
+                    const bucket = (bucketText && bucketText !== '—' && bucketText !== '未归类')
+                        ? (FUND_BUCKETS.find(x => x.name === bucketText)?.key)
+                        : (DEFAULT_ACCOUNT_BUCKET_BY_GROUP[group] || undefined);
+                    const found = state.accounts.find(a => a.name === name);
+                    if (found) {
+                        if (group) found.group = group;
+                        if (bucket) found.bucket = bucket;
+                        found.updatedAt = Date.now();
+                    } else {
+                        state.accounts.push({
+                            id: 'acc_' + uid(), name, kind: 'asset', group, bucket,
+                            icon: 'fa-wallet',
+                            color: accPalette[state.accounts.length % accPalette.length],
+                            order: state.accounts.reduce((m, a) => Math.max(m, a.order || 0), 0) + 1,
+                            createdAt: Date.now(), updatedAt: Date.now(),
+                        });
+                        accAdded++;
+                    }
+                });
+            }
+
             // 分类：按 ID 或名称 upsert，绝不删除本地已有分类
             const ws2 = wb.Sheets['分类'];
             if (ws2) {
@@ -6179,14 +6252,14 @@ function applyWorkbook(wb) {
                 });
             }
 
-            // 交易：优先按表里的 ID 匹配，没有 ID 就用自然键，命中就地更新，否则新增。
-            // （以前是整表替换 + 每行重新 uid()，同一份文件导两次数据直接翻倍）
+            // 交易：只按表里的 ID 匹配（命中就地更新，否则新增）。
+            // 不再用"自然键"（日期+时间+金额+分类…）去做重——
+            // 它会把真实存在的两笔一模一样的交易当成一笔吞掉（清空数据再导入也会，因为 byKey 在新增时也写入）。
+            // 防"同一份文件导两次翻倍"靠的是：导出时每行都带唯一 ID，导回按 ID 匹配。
             const ws1 = wb.Sheets['交易记录'];
             if (ws1) {
                 const txnRows = XLSX.utils.sheet_to_json(ws1);
-                const keyOf = t => `${t.date}|${t.time || ''}|${t.type}|${t.categoryId}|${t.amount}|${t.paymentMethod || ''}|${t.note || ''}|${t.member || ''}`;
                 const byId = new Map(state.transactions.map(t => [t.id, t]));
-                const byKey = new Map(state.transactions.map(t => [keyOf(t), t]));
                 txnAdded = 0; txnUpdated = 0; txnInvalid = 0;
                 txnRows.forEach(row => {
                     const type = row['类型'] === '收入' ? 'income' : 'expense';
@@ -6212,7 +6285,7 @@ function applyWorkbook(wb) {
                         member: memberVal,
                     };
                     const sheetId = String(row['ID'] || '').trim();
-                    const existing = (sheetId && byId.get(sheetId)) || byKey.get(keyOf(rec));
+                    const existing = sheetId && byId.get(sheetId);
                     if (existing) {
                         Object.assign(existing, rec);
                         existing.updatedAt = Date.now();
@@ -6220,7 +6293,7 @@ function applyWorkbook(wb) {
                     } else {
                         const t = Object.assign({ id: sheetId || uid(), createdAt: Date.now(), updatedAt: Date.now() }, rec);
                         state.transactions.push(t);
-                        byId.set(t.id, t); byKey.set(keyOf(t), t);
+                        byId.set(t.id, t);
                         txnAdded++;
                     }
                 });
@@ -6296,10 +6369,46 @@ function applyWorkbook(wb) {
                 else { state.returns.push({ id, member, accountId: acc.id, month, amount, createdAt: Date.now(), updatedAt: Date.now() }); retAdded++; }
             });
 
+            // 保险清单：导出以前只导出不回读 → 现在读回来。按 成员+险种 匹配已有保单，否则新建。
+            const wsIns = wb.Sheets['保险清单'];
+            if (wsIns) {
+                XLSX.utils.sheet_to_json(wsIns).forEach(row => {
+                    const member = String(row['成员'] || '本人').trim() || '本人';
+                    const type = String(row['险种'] || '').trim();
+                    if (!type) return;
+                    const covered = String(row['是否已配置'] || '').includes('已配置');
+                    const amount = parseFloat(row['保额']) || 0;
+                    const premium = parseFloat(row['年保费']) || 0;
+                    const found = state.insurancePolicies.find(p => p.member === member && p.type === type);
+                    if (found) {
+                        found.covered = covered; found.amount = amount; found.premium = premium;
+                        found.updatedAt = Date.now();
+                    } else {
+                        state.insurancePolicies.push({
+                            id: 'pol_' + uid(), member, type, covered, amount, premium,
+                            createdAt: Date.now(), updatedAt: Date.now(),
+                        });
+                        insAdded++;
+                    }
+                });
+            }
+
+            // 四笔钱：只回写各资金桶的目标金额（当前实际/差额/说明都是派生数据，不回写）。
+            const wsFund = wb.Sheets['四笔钱'];
+            if (wsFund) {
+                XLSX.utils.sheet_to_json(wsFund).forEach(row => {
+                    const bkName = String(row['资金桶'] || '').trim();
+                    const key = FUND_BUCKETS.find(x => x.name === bkName)?.key;
+                    if (!key) return;
+                    const tgt = parseFloat(row['目标金额']);
+                    if (isFinite(tgt)) state.fundTargets[key] = Math.max(0, Math.round(tgt * 100) / 100);
+                });
+            }
+
     saveState();
     applyTheme(state.settings.theme);
     renderView(state.currentView);
-    return { unmatched, txnAdded, txnUpdated, txnInvalid, balAdded, retAdded, budAdded };
+    return { unmatched, txnAdded, txnUpdated, txnInvalid, balAdded, retAdded, budAdded, accAdded, insAdded };
 }
 
 async function importExcelFile() {
@@ -6315,6 +6424,8 @@ async function importExcelFile() {
         const wb = await readWorkbookFromBytes(base64ToUint8(picked.base64));
         const res = applyWorkbook(wb) || {};
         const bits = [`新增 ${res.txnAdded || 0} 笔`, `更新 ${res.txnUpdated || 0} 笔`];
+        if (res.accAdded) bits.push(`${res.accAdded} 个账户`);
+        if (res.insAdded) bits.push(`${res.insAdded} 份保险`);
         if (res.txnInvalid) bits.push(`${res.txnInvalid} 行金额/日期非法已跳过`);
         if (res.unmatched) bits.push(`${res.unmatched} 行账户名没对上已跳过`);
         showToast(bits.join('，'), res.unmatched || res.txnInvalid ? 'error' : 'success');

@@ -766,6 +766,42 @@ body {
     color: #b9740b;
 }
 
+/* 异常订单"排除 / 已排除"按钮：紧贴徽标后面，低调可点 */
+.txn-exclude-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border: 1px solid rgba(120, 120, 128, 0.3);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-tertiary, #9aa0a6);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.5;
+    cursor: pointer;
+    white-space: nowrap;
+    -webkit-appearance: none;
+    appearance: none;
+}
+.txn-exclude-btn:hover { background: rgba(120, 120, 128, 0.12); color: var(--text-secondary, #636e72); }
+.txn-exclude-btn.restored {
+    border-style: dashed;
+    color: var(--text-tertiary, #9aa0a6);
+    opacity: 0.8;
+}
+.txn-exclude-btn i { font-size: 10px; }
+
+/* 顶部提示条里的"已排除 N 笔·恢复"链接 */
+.txn-anomaly-restore {
+    color: var(--accent, #0984ff);
+    cursor: pointer;
+    text-decoration: none;
+    font-weight: 600;
+}
+.txn-anomaly-restore:hover { text-decoration: underline; }
+
 /* Empty State */
 .empty-state {
     display: flex;
