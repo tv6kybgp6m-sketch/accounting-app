@@ -98,7 +98,7 @@
                         <div class="view-header-right">
                             <div class="search-box">
                                 <i class="fa-solid fa-magnifying-glass"></i>
-                                <input type="text" id="searchInput" placeholder="搜索交易备注...">
+                                <input type="text" id="searchInput" placeholder="搜索备注/分类/支付方式/金额...">
                             </div>
                             <button class="primary-btn" onclick="openTransactionModal()">
                                 <i class="fa-solid fa-plus"></i> 记一笔
@@ -118,9 +118,13 @@
                             <button class="filter-tab" data-filter="income">收入</button>
                         </div>
                         <div class="filter-right">
-                            <select class="filter-select" id="monthFilter">
-                                <option value="">所有月份</option>
-                            </select>
+                            <div class="month-filter" id="monthFilter">
+                                <button type="button" class="filter-select" id="monthFilterBtn" title="选择月份">
+                                    <span id="monthFilterLabel">所有月份</span>
+                                    <i class="fa-solid fa-chevron-down month-filter-caret"></i>
+                                </button>
+                                <div class="month-dropdown hidden" id="monthDropdown"></div>
+                            </div>
                         </div>
                     </div>
                     <div class="txn-month-summary" id="txnMonthSummary">
@@ -793,11 +797,11 @@
             <div class="modal">
                 <div class="modal-header">
                     <h2 id="transactionModalTitle">记一笔</h2>
-                    <div style="display:flex;gap:6px;align-items:center;">
+                    <div style="display:flex;gap:18px;align-items:center;">
                         <button class="modal-icon-btn" id="deleteTxnBtn" onclick="deleteTransactionFromModal()" style="display:none" title="删除">
                             <i class="fa-solid fa-trash"></i>
                         </button>
-                        <button class="modal-close" onclick="closeTransactionModal()"><i class="fa-solid fa-xmark"></i></button>
+                        <button class="modal-close" onclick="closeTransactionModal()" title="关闭"><i class="fa-solid fa-xmark"></i></button>
                     </div>
                 </div>
                 <div class="modal-body">
@@ -809,7 +813,7 @@
                         <label>金额</label>
                         <div class="amount-input-wrapper" id="amountDisplayWrapper">
                             <span class="currency-symbol" id="modalCurrency">¥</span>
-                            <input type="text" inputmode="none" class="amount-input" id="amountInput" placeholder="0" readonly>
+                            <input type="text" inputmode="none" class="amount-input" id="amountInput" placeholder="0">
                             <input type="hidden" id="amountValue" value="">
                         </div>
                         <div class="amount-expression" id="amountExpression"></div>
@@ -1346,7 +1350,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.68').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.69').catch(() => {});
             });
         }
     </script>

@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.68';  // v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.69';  // v1.39.69：交易记录页四项修复——①【搜索彻底瘫痪】Excel 导入把数字单元格写进备注列（真实数据里有 note=2080 一笔），getFilteredTransactions 的 t.note.toLowerCase() 在这笔上抛 TypeError，任何搜索词都让整个筛选链崩掉、列表原样不动（用户体感"搜索框无效"）。修法三路：过滤时一律 String() 转型后再匹配（并顺带把搜索范围从"备注+分类"扩到"备注/分类/支付方式/金额"，和界面看得见的字段对齐）；loadState 加载时把非字符串备注统一规整成字符串（治存量）；Excel 导入时备注/时间/支付方式一律 String() 化（治增量）。②【金额不能粘贴】金额显示屏原是 readonly 且无 paste 监听，粘贴毫无反应。现允许直接键入/粘贴：paste 事件解析剪贴板文本（容忍 ¥ 、逗号、"元"等杂质）整体替换表达式；beforeinput 把键入的每个字符导进和数字键盘完全相同的 numpadPress 规则；input 事件兜底规整。inputmode=none 保留，手机不弹系统键盘。③【月份选择器】原生 select 平铺 100+ 个月份（真实数据 118 个月）难找难点。改成年份折叠面板：年份行从新到旧、默认全折叠（沿用报表"全部"视图同款交互），点年份展开该年月份、点月份即筛选，面板外点击自动收起。④【弹窗误触】编辑弹窗里删除按钮和关闭 X 原来只隔 6px，改 18px。v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -3270,7 +3270,13 @@ function loadState() {
             // 否则净资产桥在「按成员筛选」时无法把流水正确归属到具体成员。
             if (Array.isArray(state.transactions)) {
                 const prim = state.balanceMembers[0] || '本人';
-                state.transactions.forEach(t => { if (!t.member) t.member = prim; });
+                state.transactions.forEach(t => {
+                    if (!t.member) t.member = prim;
+                    // v1.39.69：Excel 导入曾把数字单元格原样写进备注（真实数据里 note=2080 一笔），
+                    // 类型不统一的备注会让搜索的 toLowerCase 抛异常、整条搜索链崩掉。
+                    // 加载时统一规整成字符串，治存量数据。
+                    if (t.note != null && typeof t.note !== 'string') t.note = String(t.note);
+                });
             }
 
             // 分类体系 v2 迁移：替换旧默认分类为新的，交易/预算的旧分类ID同步映射
@@ -3825,13 +3831,35 @@ function initTxnInfiniteScroll() {
     }, { passive: true });
 }
 
+// 月份筛选：v1.39.69 从原生 <select>（平铺全部月份，真实数据 118 个月）改成年份折叠面板。
+// 年份行从新到旧、默认全部折叠；点年份行展开该年各月，点月份即筛选。
+// 展开态记在 monthFilterExpanded 里，renderTransactions 每次重绘都不会把用户展开的年份收起来。
+let monthFilterExpanded = new Set();
+
 function updateMonthFilter() {
-    const select = document.getElementById('monthFilter');
+    const dd = document.getElementById('monthDropdown');
+    if (!dd) return;
     const months = [...new Set(state.transactions.map(t => getMonthKey(t.date)))].sort().reverse();
+    const years = [...new Set(months.map(m => m.slice(0, 4)))].sort().reverse();
     const current = state.monthFilter;
 
-    select.innerHTML = '<option value="">所有月份</option>' +
-        months.map(m => `<option value="${m}" ${m === current ? 'selected' : ''}>${getMonthLabel(m)}</option>`).join('');
+    let html = '<div class="md-row md-all' + (current ? '' : ' active') + '" data-month="">所有月份</div>';
+    years.forEach(y => {
+        const ymonths = months.filter(m => m.indexOf(y + '-') === 0);
+        const open = monthFilterExpanded.has(y) || ymonths.indexOf(current) >= 0;
+        html += '<div class="md-year' + (open ? ' open' : '') + '" data-year="' + y + '">'
+            + '<i class="fa-solid fa-chevron-right md-year-caret"></i>'
+            + '<span class="md-year-name">' + y + ' 年</span>'
+            + '<span class="md-year-count">' + ymonths.length + ' 个月</span>'
+            + '</div>'
+            + '<div class="md-months' + (open ? '' : ' hidden') + '">'
+            + ymonths.map(m => '<div class="md-row md-month' + (m === current ? ' active' : '') + '" data-month="' + m + '">'
+                + parseInt(m.slice(5), 10) + ' 月</div>').join('')
+            + '</div>';
+    });
+    dd.innerHTML = html;
+    const label = document.getElementById('monthFilterLabel');
+    if (label) label.textContent = current ? getMonthLabel(current) : '所有月份';
 }
 
 // 交易列表的筛选条件（类型 / 月份 / 搜索）抽成公共函数，列表和顶部汇总都用同一套，
@@ -3841,11 +3869,26 @@ function getFilteredTransactions() {
     if (state.transactionFilter !== 'all') list = list.filter(t => t.type === state.transactionFilter);
     if (state.monthFilter) list = list.filter(t => getMonthKey(t.date) === state.monthFilter);
     if (state.searchQuery) {
-        const q = state.searchQuery.toLowerCase();
-        list = list.filter(t => {
-            const cat = getCategoryById(t.categoryId);
-            return (t.note && t.note.toLowerCase().includes(q)) || (cat && cat.name.toLowerCase().includes(q));
-        });
+        const q = state.searchQuery.trim().toLowerCase();
+        if (q) {
+            // v1.39.69：Excel 导入可能把数字单元格写进备注（真实数据里有 note=2080 一笔），
+            // 原来直接 t.note.toLowerCase() 在这笔上抛 TypeError，整个筛选链崩掉 →
+            // 任何搜索词都搜不出东西（用户体感"搜索框无效"）。现在一律先转字符串再匹配。
+            // 搜索范围同时从"备注+分类"扩到"备注/分类/支付方式/金额"——都是列表界面上
+            // 看得见的字段，搜它们搜不出才叫真的"无效"。支付方式在内存里已是明文
+            // （短码在 loadState 的 decodeStorageState 里已还原），直接用。
+            list = list.filter(t => {
+                const note = t.note == null ? '' : String(t.note);
+                const cat = getCategoryById(t.categoryId);
+                const catName = cat && cat.name != null ? String(cat.name) : '';
+                const pm = t.paymentMethod == null ? '' : String(t.paymentMethod);
+                const amt = String(t.amount);
+                return note.toLowerCase().includes(q)
+                    || catName.toLowerCase().includes(q)
+                    || pm.toLowerCase().includes(q)
+                    || amt.includes(q);
+            });
+        }
     }
     return list;
 }
@@ -4018,8 +4061,9 @@ function resetTxnFilter() {
     state.monthFilter = '';
     state.transactionFilter = 'all';
     txnAnomalyOnly = false;
-    const sel = document.getElementById('monthFilter');
-    if (sel) sel.value = '';
+    // v1.39.69：月份筛选改成年份折叠面板，没有 select.value 可清；
+    // label 和选中态由 renderTransactions → updateMonthFilter 重建，展开态一并清掉。
+    monthFilterExpanded.clear();
     document.querySelectorAll('.filter-tab').forEach(t => t.classList.toggle('active', t.dataset.filter === 'all'));
     renderTransactions();
 }
@@ -4224,6 +4268,70 @@ function numpadBack() {
 
 function numpadClear() {
     resetCalc();
+}
+
+// v1.39.69：金额显示屏支持直接键入和粘贴。
+// 原来 #amountInput 是 readonly 且没有任何输入监听，往里粘一整段金额毫无反应。
+// 现在三条输入通道都汇到同一个 calc.expr：
+//   ① paste：解析剪贴板文本（容忍 ¥、千分位逗号、全角、"元"等杂质），整体替换当前表达式；
+//   ② beforeinput：把键入的单个字符导进和数字键盘完全相同的 numpadPress 规则；
+//   ③ input：兜底——老浏览器没有 beforeinput 时，键入已写进显示值，重新规整回表达式。
+// inputmode=none 保留：手机点这个框不弹系统键盘，走下面的数字键盘。
+function initAmountInput() {
+    const inp = document.getElementById('amountInput');
+    if (!inp || inp.dataset.amountBound) return;
+    inp.dataset.amountBound = '1';
+
+    inp.addEventListener('paste', (e) => {
+        const text = (e.clipboardData || window.clipboardData)?.getData('text/plain') || '';
+        const expr = sanitizeCalcExpr(text);
+        e.preventDefault();
+        if (!expr) return;                       // 粘进来的不是数字内容，忽略
+        calc.expr = expr;
+        calc.justOp = false;
+        renderCalc();
+    });
+
+    inp.addEventListener('beforeinput', (e) => {
+        const ch = e.data;
+        if (ch == null) return;                  // 删除/剪切等编辑操作放行
+        e.preventDefault();                      // 一律拦截，按计算器规则处理
+        if (/^[0-9.+-]$/.test(ch)) numpadPress(ch);
+    });
+
+    inp.addEventListener('input', () => {
+        // 只有 beforeinput 不生效（老浏览器）时才走到这：显示值已被浏览器改写，
+        // 重新规整回表达式，保证 calc.expr 和屏幕永远一致。
+        const expr = sanitizeCalcExpr(inp.value);
+        if (expr == null) return;
+        if (expr !== calc.expr) {
+            calc.expr = expr;
+            calc.justOp = false;
+            renderCalc();
+        }
+    });
+}
+
+// 把任意文本规整成计算器认识的表达式：只保留 数字/小数点/加减号。
+// 容忍 "¥1,234.56元"、全角数字、"12.5 " 这类杂质；规整不出内容返回 ''。
+function sanitizeCalcExpr(text) {
+    if (text == null) return '';
+    let s = String(text)
+        .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))  // 全角数字→半角
+        .replace(/[＋]/g, '+').replace(/[－—−]/g, '-')
+        .replace(/[。．]/g, '.').replace(/[，,]/g, '');
+    s = s.replace(/[^\d.+-]/g, '');              // 去掉货币符号、单位、空格等一切杂质
+    if (!s) return '';
+    s = s.replace(/^[+-]+/, '');                 // 开头多余的运算符丢掉
+    s = s.replace(/[+-]{2,}/g, m => m.slice(-1)); // 连续运算符只保留最后一个
+    // 一段数字里只留第一个小数点（"1.2.3" → "1.23"）
+    let out = '', seg = '';
+    for (const ch of s) {
+        if (ch === '+' || ch === '-') { seg = ''; out += ch; continue; }
+        if (ch === '.') { if (seg.includes('.')) continue; seg += '.'; out += '.'; continue; }
+        seg += ch; out += ch;
+    }
+    return out;
 }
 
 function numpadQuickSave() {
@@ -6427,9 +6535,12 @@ function applyWorkbook(wb) {
                         amount: amt,
                         categoryId: cat?.id || (type === 'income' ? 'i_other' : 'e_other'),
                         date,
-                        time: row['时间'] || '',
-                        note: row['备注'] || '',
-                        paymentMethod: row['支付方式'] || '现金',
+                        // v1.39.69：Excel 单元格可能是数字/日期（真实数据里有备注=2080 一笔），
+                        // 原样赋值会让内存里混进非字符串备注，搜索一碰就抛 TypeError。
+                        // 三列一律 String() 化后再入库。
+                        time: row['时间'] == null ? '' : String(row['时间']),
+                        note: row['备注'] == null ? '' : String(row['备注']),
+                        paymentMethod: row['支付方式'] == null || row['支付方式'] === '' ? '现金' : String(row['支付方式']),
                         member: memberVal,
                     };
                     const sheetId = String(row['ID'] || '').trim();
@@ -12379,6 +12490,44 @@ function initReturnListeners() {
 }
 
 // ---- Event Listeners ----
+// 月份折叠面板的交互 wiring（v1.39.69）：按钮开合、年份行展开/收起、选月、面板外点击收起。
+// 面板内容由 updateMonthFilter 每次重绘，所以一律用事件委托，不绑具体行。
+function initMonthFilterPanel() {
+    const btn = document.getElementById('monthFilterBtn');
+    const dd = document.getElementById('monthDropdown');
+    if (!btn || !dd || btn.dataset.mfBound) return;
+    btn.dataset.mfBound = '1';
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dd.classList.toggle('hidden');
+    });
+
+    dd.addEventListener('click', (e) => {
+        const yearEl = e.target.closest('.md-year');
+        if (yearEl) {
+            const y = yearEl.dataset.year;
+            if (monthFilterExpanded.has(y)) monthFilterExpanded.delete(y);
+            else monthFilterExpanded.add(y);
+            updateMonthFilter();
+            return;
+        }
+        const rowEl = e.target.closest('.md-row');
+        if (rowEl) {
+            state.monthFilter = rowEl.dataset.month || '';
+            txnAnomalyOnly = false;
+            dd.classList.add('hidden');
+            renderTransactions();
+        }
+    });
+
+    // 点面板外面自动收起（按钮自己的点击已 stopPropagation，不会误伤）
+    document.addEventListener('click', (e) => {
+        if (dd.classList.contains('hidden')) return;
+        if (!e.target.closest('.month-filter')) dd.classList.add('hidden');
+    });
+}
+
 function initEventListeners() {
     // Navigation
     document.querySelectorAll('.nav-item').forEach(item => {
@@ -12429,12 +12578,11 @@ function initEventListeners() {
         renderTransactions();
     });
 
-    // Month filter
-    document.getElementById('monthFilter').addEventListener('change', (e) => {
-        state.monthFilter = e.target.value;
-        txnAnomalyOnly = false;
-        renderTransactions();
-    });
+    // 月份筛选：年份折叠面板（v1.39.69，替换原生 select 的 change 监听）
+    initMonthFilterPanel();
+
+    // 金额显示屏：允许直接键入/粘贴（v1.39.69）
+    initAmountInput();
 
     // Report period
     document.querySelectorAll('.period-btn').forEach(btn => {
