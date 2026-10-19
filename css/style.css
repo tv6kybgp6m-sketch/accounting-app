@@ -2106,8 +2106,6 @@ body.cat-dragging {
 .form-row .form-group {
     flex: 1;
 }
-/* 日期这列要塞下 ‹‹ ‹ [2026年10月19日] › ›› 四个按钮，比别的列宽一些 */
-.form-row .form-group.ds-group { flex: 1.7; min-width: 0; }
 
 .form-row .form-group-time {
     flex: 0.6;
@@ -3740,7 +3738,7 @@ table.bill-stats {
 .ins-member-wrap.editing { background: var(--bg-input); border-radius: 8px; padding: 0 2px; }
 
 /* ---- 记余额/记收益：成员+月份同行；余额分资产/负债两段 ---- */
-.bal-entry-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 4px; }
+.bal-entry-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 4px; flex-wrap: wrap; }
 .bal-entry-head .form-group { flex: 1 1 0; min-width: 0; margin-bottom: 0; }
 /* 控件自身 min-width:auto 会让两栏分不匀；高度也要显式统一，
    否则成员下拉和月份下拉在不同内核下会一高一低 */
@@ -3748,6 +3746,9 @@ table.bill-stats {
 .bal-entry-head .form-group input { width: 100%; min-width: 0; height: 32px; font-size: 13px; padding: 0 8px; box-sizing: border-box; }
 /* 归属月份 = 「年（手输）+ 月（下拉）」，等分等高的规则要同时覆盖两种控件 */
 .bal-entry-head .form-group.be-ym-group { flex: 1.5 1 0; }
+/* v1.39.74：加行 / 加列挪到这一行；按钮按内容宽、不参与等分，窄屏放不下就整块换行 */
+.bal-entry-head .mw-addbtns { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+.bal-entry-head .mw-addbtns .btn-mini { white-space: nowrap; }
 .ym-pair { display: flex; gap: 6px; position: relative; }
 .ym-pair > * { flex: 1 1 0; min-width: 0; width: auto; }
 /* ‹ 2026年10月 › ：左右箭头逐月翻；点中间调出双列轮盘 */
@@ -3804,22 +3805,6 @@ table.bill-stats {
 /* 锚点按钮：长得和 filter-select 一样，点了调出轮盘（报表/资产负债/投资收益/月份筛选都用它） */
 .ym-anchor-btn { display: inline-flex; align-items: center; gap: 6px; }
 .ym-anchor-caret { font-size: 10px; color: var(--text-tertiary); }
-/* ---- 记一笔：桌面端日期步进器 ‹‹ ‹ [2026年10月19日] › ›› ---- */
-/* ‹‹/›› 翻年、‹/› 翻月，中间标签点开年月日轮盘；只在桌面端启用，手机端用系统原生控件 */
-.date-stepper { display: flex; align-items: center; gap: 2px; height: 32px; }
-.date-stepper .ds-arrow {
-    width: 26px; height: 32px; flex: 0 0 auto; border: none; background: transparent;
-    color: var(--text-secondary); font-size: 15px; line-height: 1; cursor: pointer;
-    border-radius: 8px; padding: 0; font-family: var(--font);
-}
-.date-stepper .ds-arrow:hover { background: var(--bg-card-hover); color: var(--text-primary); }
-.date-stepper .ds-label {
-    flex: 1 1 0; min-width: 0; height: 32px; border: none; background: transparent;
-    font-size: 13px; font-weight: 600; color: var(--text-primary); cursor: pointer;
-    border-radius: 8px; font-family: var(--font); white-space: nowrap;
-    padding: 0 6px; text-align: center; overflow: hidden; text-overflow: ellipsis;
-}
-.date-stepper .ds-label:hover { background: var(--bg-card-hover); }
 .be-section-title {
     display: flex; align-items: center; gap: 6px;
     margin: 8px 0 4px; font-size: 12px; font-weight: 600; color: var(--text-secondary);
@@ -4534,7 +4519,6 @@ table.bill-stats {
 .mw-col-input { font-size: 13px !important; font-weight: 600; padding: 1px 4px !important; width: 72px; text-align: center !important; }
 .mw-rename-input { font-size: 13px !important; font-weight: 600; padding: 3px 5px !important; text-align: left !important; }
 .mw-addrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-.mw-new { flex: 1 1 190px; min-width: 150px; font-size: 12.5px; }
 .mw-chips { display: flex; gap: 4px; flex-wrap: wrap; }
 .mw-chip {
     font-size: 11.5px; padding: 3px 8px; border-radius: 999px; cursor: pointer;
@@ -4700,6 +4684,7 @@ table.bill-stats {
 .mw-viewmode .modal-footer .primary-btn { display: none; }                    /* 查看模式没有「保存」可点 */
 .mw-viewmode .add-account-inline,
 .mw-viewmode .mw-addrow,
+.mw-viewmode .mw-addbtns,
 .mw-viewmode .re-hidden-note,
 .mw-viewmode .mw-sort-hint { display: none; }                                /* 隐藏加账户 / 加列 / 说明 */
 .mw-viewmode .mw-name[data-rename],

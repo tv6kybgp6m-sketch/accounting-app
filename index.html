@@ -1027,6 +1027,13 @@
                             </div>
                             <select id="monthlyInMonth" hidden></select>
                         </div>
+                        <!-- v1.39.74：加行 / 加列从表格最底下挪到「本人」这一行，抬头就能点 -->
+                        <div class="form-group mw-addbtns">
+                            <button type="button" class="btn-mini primary" id="mwAddAccountBtn"
+                                    title="加一行：放钱的地方（支付宝 / 微信 / 工商银行 / 摩根…）">＋ 增加账户</button>
+                            <button type="button" class="btn-mini" id="mwAddColBtn"
+                                    title="新增资产列或负债列">＋ 增加列</button>
+                        </div>
                     </div>
                     <div class="bal-entry-actions">
                         <button class="secondary-btn" onclick="copyLastMonthBalances()"><i class="fa-solid fa-copy"></i> 沿用上期</button>
@@ -1357,7 +1364,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.73').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.74').catch(() => {});
             });
         }
     </script>
