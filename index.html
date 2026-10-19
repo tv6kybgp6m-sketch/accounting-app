@@ -1014,9 +1014,18 @@
                         </div>
                         <div class="form-group be-ym-group">
                             <div class="ym-pair">
-                                <div class="ym-year-strip" id="monthlyInYear" role="listbox" aria-label="选择年份" tabindex="0"></div>
-                                <select class="text-input" id="monthlyInMonth"></select>
+                                <div class="ym-nav">
+                                    <button type="button" class="ym-arrow" id="monthlyPrev" aria-label="上一个月">&lsaquo;</button>
+                                    <button type="button" class="ym-cur" id="monthlyInYear" title="点这里调出年月轮盘">2026年10月</button>
+                                    <button type="button" class="ym-arrow" id="monthlyNext" aria-label="下一个月">&rsaquo;</button>
+                                </div>
+                                <div class="ym-wheel" id="monthlyWheel" hidden>
+                                    <div class="ym-wheel-highlight"></div>
+                                    <div class="ym-wheel-col" id="monthlyWheelYears" role="listbox" aria-label="选择年份"></div>
+                                    <div class="ym-wheel-col" id="monthlyWheelMonths" role="listbox" aria-label="选择月份"></div>
+                                </div>
                             </div>
+                            <select id="monthlyInMonth" hidden></select>
                         </div>
                     </div>
                     <div class="bal-entry-actions">
@@ -1348,7 +1357,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.70').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.71').catch(() => {});
             });
         }
     </script>

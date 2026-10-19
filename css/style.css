@@ -3746,14 +3746,24 @@ table.bill-stats {
 .bal-entry-head .form-group input { width: 100%; min-width: 0; height: 32px; font-size: 13px; padding: 0 8px; box-sizing: border-box; }
 /* 归属月份 = 「年（手输）+ 月（下拉）」，等分等高的规则要同时覆盖两种控件 */
 .bal-entry-head .form-group.be-ym-group { flex: 1.5 1 0; }
-.ym-pair { display: flex; gap: 6px; }
+.ym-pair { display: flex; gap: 6px; position: relative; }
 .ym-pair > * { flex: 1 1 0; min-width: 0; width: auto; }
-.ym-pair .ym-year { text-align: center; }
-.ym-year-strip { flex: 2 1 0; min-width: 0; display: flex; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 2px 0 4px; scrollbar-width: none; }
-.ym-year-strip::-webkit-scrollbar { display: none; }
-.ym-year-strip .ym-chip { flex: 0 0 auto; min-width: 50px; min-height: 42px; display: flex; align-items: center; justify-content: center; padding: 0 10px; border-radius: 16px; border: 1px solid var(--border-strong); background: var(--bg-card); color: var(--text-secondary); font-size: 13px; cursor: pointer; font-family: var(--font); user-select: none; }
-.ym-year-strip .ym-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-.ym-year-strip .ym-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* ‹ 2026年10月 › ：左右箭头逐月翻；点中间调出双列轮盘 */
+.ym-nav { display: flex; align-items: center; justify-content: center; gap: 2px; flex: 1 1 0; height: 32px; }
+.ym-arrow { width: 30px; height: 32px; flex: 0 0 auto; border: none; background: transparent; color: var(--text-secondary); font-size: 17px; line-height: 1; cursor: pointer; border-radius: 8px; padding: 0; font-family: var(--font); }
+.ym-arrow:hover:not(:disabled) { background: var(--bg-card-hover); color: var(--text-primary); }
+.ym-arrow:disabled { opacity: .25; cursor: default; }
+.ym-cur { height: 32px; padding: 0 10px; border: none; background: transparent; font-size: 14px; font-weight: 600; color: var(--text-primary); cursor: pointer; border-radius: 8px; font-family: var(--font); white-space: nowrap; }
+.ym-cur:hover { background: var(--bg-card-hover); }
+.ym-cur:focus-visible, .ym-arrow:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* 双列轮盘（iOS 风格）：中间灰条 = 选中，上下渐隐；每格 40px，列高 5 格 */
+.ym-wheel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; display: flex; gap: 2px; background: var(--bg-pop); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.16); padding: 4px; }
+.ym-wheel[hidden] { display: none; }
+.ym-wheel-highlight { position: absolute; left: 8px; right: 8px; top: 50%; height: 40px; transform: translateY(-50%); background: var(--bg-card-hover); border-radius: 10px; pointer-events: none; }
+.ym-wheel-col { position: relative; height: 200px; overflow-y: auto; scroll-snap-type: y mandatory; padding: 80px 0; scrollbar-width: none; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 24%, #000 76%, transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 24%, #000 76%, transparent 100%); }
+.ym-wheel-col::-webkit-scrollbar { display: none; }
+.ym-wheel-col > div { height: 40px; line-height: 40px; min-width: 64px; padding: 0 14px; text-align: center; scroll-snap-align: center; color: var(--text-tertiary); font-size: 16px; cursor: pointer; user-select: none; -webkit-user-select: none; font-family: var(--font); }
+.ym-wheel-col > div.active { color: var(--text-primary); font-weight: 600; }
 .be-section-title {
     display: flex; align-items: center; gap: 6px;
     margin: 8px 0 4px; font-size: 12px; font-weight: 600; color: var(--text-secondary);
