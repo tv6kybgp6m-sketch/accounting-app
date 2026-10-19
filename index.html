@@ -1014,9 +1014,7 @@
                         </div>
                         <div class="form-group be-ym-group">
                             <div class="ym-pair">
-                                <input type="text" class="text-input ym-year" id="monthlyInYear"
-                                       inputmode="numeric" pattern="[0-9]*" maxlength="4"
-                                       autocomplete="off" placeholder="年份">
+                                <div class="ym-year-strip" id="monthlyInYear" role="listbox" aria-label="选择年份" tabindex="0"></div>
                                 <select class="text-input" id="monthlyInMonth"></select>
                             </div>
                         </div>
@@ -1350,7 +1348,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.69').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.70').catch(() => {});
             });
         }
     </script>
