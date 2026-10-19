@@ -3748,7 +3748,28 @@ table.bill-stats {
 .bal-entry-head .form-group.be-ym-group { flex: 1.5 1 0; }
 /* v1.39.74：加行 / 加列挪到这一行；按钮按内容宽、不参与等分，窄屏放不下就整块换行 */
 .bal-entry-head .mw-addbtns { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
-.bal-entry-head .mw-addbtns .btn-mini { white-space: nowrap; }
+/* v1.39.75：加行 / 加列常驻显示（查看模式也不藏）；字号跟「本人」下拉一致（13px）。
+   注意 .btn-mini 全项目没有基础样式（一直靠浏览器默认按钮外观），所以这里得整套补齐。 */
+.bal-entry-head .mw-addbtns .btn-mini {
+    white-space: nowrap;
+    height: 32px;                       /* 和「本人」下拉同高 */
+    font-size: 13px;                    /* 和「本人」下拉同字号 */
+    font-family: var(--font);
+    padding: 0 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    cursor: pointer;
+    line-height: 1;
+}
+.bal-entry-head .mw-addbtns .btn-mini:hover { background: var(--bg-card-hover); }
+.bal-entry-head .mw-addbtns .btn-mini.primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: transparent;
+}
+.bal-entry-head .mw-addbtns .btn-mini.primary:hover { filter: brightness(1.08); }
 .ym-pair { display: flex; gap: 6px; position: relative; }
 .ym-pair > * { flex: 1 1 0; min-width: 0; width: auto; }
 /* ‹ 2026年10月 › ：左右箭头逐月翻；点中间调出双列轮盘 */
@@ -4332,12 +4353,6 @@ table.bill-stats {
     .ins-prem-total { margin-left: 0; width: 100%; text-align: right; }
 }
 /* ---- 记收益：不生收益的账户默认不列 + 口径面板两列勾选 ---- */
-.re-hidden-note {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
-    margin-top: 8px; padding: 8px 10px; border-radius: 10px;
-    background: var(--bg-input); font-size: 11.5px; color: var(--text-tertiary);
-}
-.re-hidden-note .link-btn { margin-top: 0; flex: none; }
 /* 两列勾选：记收益 / 算收益率。列宽要容得下表头不折行 */
 .scope-head {
     display: grid; grid-template-columns: 28px 1fr 34px 46px 56px 72px;
@@ -4518,13 +4533,6 @@ table.bill-stats {
 /* 列头里的 改名/删除 已改为悬停「⋯」菜单（见 .mw-col-more），旧的内联按钮样式弃用 */
 .mw-col-input { font-size: 13px !important; font-weight: 600; padding: 1px 4px !important; width: 72px; text-align: center !important; }
 .mw-rename-input { font-size: 13px !important; font-weight: 600; padding: 3px 5px !important; text-align: left !important; }
-.mw-addrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-.mw-chips { display: flex; gap: 4px; flex-wrap: wrap; }
-.mw-chip {
-    font-size: 11.5px; padding: 3px 8px; border-radius: 999px; cursor: pointer;
-    border: 1px solid var(--border); background: transparent; color: var(--text-secondary);
-}
-.mw-chip:hover { border-color: var(--border-strong); color: var(--text-primary); }
 .mw-c { position: relative; display: flex; align-items: center; justify-content: center; min-height: 25px; min-width: 0; }
 .mw-c .text-input { width: 100%; min-width: 0; padding: 4px 6px; font-size: 13px; text-align: center; }
 /* 一个钱包里同类资产有好几个账户时，格子纵向叠，每个前面挂一个极小的账户名 */
@@ -4683,9 +4691,6 @@ table.bill-stats {
 .mw-viewmode .bal-entry-actions .secondary-btn { display: none; }              /* 隐藏沿用上期 / 清空 / 撤销 */
 .mw-viewmode .modal-footer .primary-btn { display: none; }                    /* 查看模式没有「保存」可点 */
 .mw-viewmode .add-account-inline,
-.mw-viewmode .mw-addrow,
-.mw-viewmode .mw-addbtns,
-.mw-viewmode .re-hidden-note,
 .mw-viewmode .mw-sort-hint { display: none; }                                /* 隐藏加账户 / 加列 / 说明 */
 .mw-viewmode .mw-name[data-rename],
 .mw-viewmode .mw-more,

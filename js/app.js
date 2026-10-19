@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.74';  // v1.39.74：①【记一笔的日期改回原生控件】v1.39.73 给桌面端换的那套 ‹‹ ‹ [日期] › ›› 步进器实测下来更不好用，按用户要求撤掉，恢复系统原生 date 框（读 dateInput.value 的老逻辑本就零改动、手机端也从没动过）；顺手清掉步进器相关的 initDateStepper / refreshDateStepper / IS_TOUCH_PHONE 与 .date-stepper / .ds-group / .mw-new 样式。②【记月度账单：加行 / 加列挪到顶部】两个按钮从表格最底下挪到「本人 + 年月」那一行（.mw-addbtns，flex:0 0 auto、窄屏自动换行）；删掉前面那个输入框（对「增加列」本来就没用），改成点按钮直接弹窗填名字——「增加列」本来就是弹窗问，现在「增加账户」也一致（快捷键 chip 仍直接传名字、不再多问）；按钮变成静态 DOM 后必须加 dataset.bound 防重复绑定，否则每重绘一次就叠一层监听 → 点一下连着加出好几行 / 好几列；查看模式照旧隐藏这两个按钮。v1.39.73：四处日期控件按用户要求改造——①【月度账单弹窗默认「上个月」】以前没数据时退到 2015-01，现在一律默认今天的上个月（月初填上月账单最顺手）。②【记一笔的日期】桌面端（Mac 原生 App / 桌面浏览器）把原生日期框换成 ‹‹ ‹ [2026年10月19日] › ›› 步进器：‹‹›› 翻年、‹› 翻月，中间标签点开「年+月+日」三列轮盘；手机端不动，继续用系统原生日期控件（用户明确要求）。③【交易记录「所有月份」】年份折叠面板换成 iOS 风格双列轮盘，底部保留「所有月份」清除行。④【报表/资产负债/投资收益顶部】两个原生下拉（年+月）合并成一个「2026年10月」锚点按钮，点开同一个轮盘。通用轮盘挂 body 用 fixed 定位——普通页面容器有 overflow 会裁掉弹窗里那套 absolute 轮盘；支持 withDay（带日列）/ allowClear（清除行）。v1.39.72：修轮盘两个显示问题——①背景透出后面数字：.ym-wheel 误用未定义的 --bg-pop（无兜底 → 背景声明无效变透明），改成已定义的 --bg-card（不透明）；②偏右：原 right:0 锚在右侧栏右缘，改为 left:50%+translateX(-50%) 以其正中的「2026年10月」按钮为基准居中，整块落在弹窗内。v1.39.71：月度账单弹窗年月选择重做——【左右箭头】‹ › 逐月翻（跨年自动进位，2015-01 和当年当月处自动禁用）；【点中间「2026年10月」调出双列轮盘】iOS 风格，中条为选中、上下渐隐、scroll-snap 滚动停稳即选中；年份 2015 起到当年（v1.39.70 年份条从 1976 起被否：起点不对且不够优雅）。月份仍存在隐藏 select 里，沿用上期/清空/保存等老逻辑零改动。v1.39.70：①【粘贴静默错值】金额框粘贴科学计数法（1e5）被原清洗逻辑把"e"当杂质吃掉变成15——新增 pasteToCalcExpr：整段若是合法数字（含 1e5/1.5e3）先走 Number 展开，加减表达式才走老路径。②【月份选择器】月度账单弹窗年份从"手敲输入框"改为年份条（chip 横滑点选，覆盖 nowYear-50~nowYear 共约50年，远超旧下拉约10年上限；每个 chip ≥42px 触控友好）。v1.39.69：交易记录页四项修复——①【搜索彻底瘫痪】Excel 导入把数字单元格写进备注列（真实数据里有 note=2080 一笔），getFilteredTransactions 的 t.note.toLowerCase() 在这笔上抛 TypeError，任何搜索词都让整个筛选链崩掉、列表原样不动（用户体感"搜索框无效"）。修法三路：过滤时一律 String() 转型后再匹配（并顺带把搜索范围从"备注+分类"扩到"备注/分类/支付方式/金额"，和界面看得见的字段对齐）；loadState 加载时把非字符串备注统一规整成字符串（治存量）；Excel 导入时备注/时间/支付方式一律 String() 化（治增量）。②【金额不能粘贴】金额显示屏原是 readonly 且无 paste 监听，粘贴毫无反应。现允许直接键入/粘贴：paste 事件解析剪贴板文本（容忍 ¥ 、逗号、"元"等杂质）整体替换表达式；beforeinput 把键入的每个字符导进和数字键盘完全相同的 numpadPress 规则；input 事件兜底规整。inputmode=none 保留，手机不弹系统键盘。③【月份选择器】原生 select 平铺 100+ 个月份（真实数据 118 个月）难找难点。改成年份折叠面板：年份行从新到旧、默认全折叠（沿用报表"全部"视图同款交互），点年份展开该年月份、点月份即筛选，面板外点击自动收起。④【弹窗误触】编辑弹窗里删除按钮和关闭 X 原来只隔 6px，改 18px。v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.75';  // v1.39.75：①【轮盘永远停在第一格 → 默认不是当月】根因：openYmWheel / toggleMonthWheel 都是「先建列（里面设 scrollTop）再 hidden=false」，而 display:none 的元素没有滚动区域、此时设 scrollTop 会被忽略（一直是 0）→ 打开就停在年/月的第一格（月份第一格是「1月」）。改成「先显示、再建列」，两套轮盘都改。②【交易记录「所有月份」】点开默认停留当月。③【报表分析】月报右边的日期默认当月、点开也停当月。④【资产负债 / 投资收益】日期默认「上个月」——当月还没记、要下个月才记；并且选中「当月及以后」时也退回上个月。⑤【记月度账单】统一走新增的 prevMonthYM()，默认 = 上个月。⑥【加行 / 加列常驻显示】查看模式不再隐藏这两个按钮；并补齐 .btn-mini 的基础样式（此前全项目根本没有 .btn-mini 样式、一直靠浏览器默认按钮外观），字号 / 高度与「本人」下拉一致（13px / 32px）。⑦删掉底部常用渠道 chip（+支付宝…）与「一行 = 一个放钱的地方…」说明文字，连同它们的 CSS 一起清掉。v1.39.74：①【记一笔的日期改回原生控件】v1.39.73 给桌面端换的那套 ‹‹ ‹ [日期] › ›› 步进器实测下来更不好用，按用户要求撤掉，恢复系统原生 date 框（读 dateInput.value 的老逻辑本就零改动、手机端也从没动过）；顺手清掉步进器相关的 initDateStepper / refreshDateStepper / IS_TOUCH_PHONE 与 .date-stepper / .ds-group / .mw-new 样式。②【记月度账单：加行 / 加列挪到顶部】两个按钮从表格最底下挪到「本人 + 年月」那一行（.mw-addbtns，flex:0 0 auto、窄屏自动换行）；删掉前面那个输入框（对「增加列」本来就没用），改成点按钮直接弹窗填名字——「增加列」本来就是弹窗问，现在「增加账户」也一致（快捷键 chip 仍直接传名字、不再多问）；按钮变成静态 DOM 后必须加 dataset.bound 防重复绑定，否则每重绘一次就叠一层监听 → 点一下连着加出好几行 / 好几列；查看模式照旧隐藏这两个按钮。v1.39.73：四处日期控件按用户要求改造——①【月度账单弹窗默认「上个月」】以前没数据时退到 2015-01，现在一律默认今天的上个月（月初填上月账单最顺手）。②【记一笔的日期】桌面端（Mac 原生 App / 桌面浏览器）把原生日期框换成 ‹‹ ‹ [2026年10月19日] › ›› 步进器：‹‹›› 翻年、‹› 翻月，中间标签点开「年+月+日」三列轮盘；手机端不动，继续用系统原生日期控件（用户明确要求）。③【交易记录「所有月份」】年份折叠面板换成 iOS 风格双列轮盘，底部保留「所有月份」清除行。④【报表/资产负债/投资收益顶部】两个原生下拉（年+月）合并成一个「2026年10月」锚点按钮，点开同一个轮盘。通用轮盘挂 body 用 fixed 定位——普通页面容器有 overflow 会裁掉弹窗里那套 absolute 轮盘；支持 withDay（带日列）/ allowClear（清除行）。v1.39.72：修轮盘两个显示问题——①背景透出后面数字：.ym-wheel 误用未定义的 --bg-pop（无兜底 → 背景声明无效变透明），改成已定义的 --bg-card（不透明）；②偏右：原 right:0 锚在右侧栏右缘，改为 left:50%+translateX(-50%) 以其正中的「2026年10月」按钮为基准居中，整块落在弹窗内。v1.39.71：月度账单弹窗年月选择重做——【左右箭头】‹ › 逐月翻（跨年自动进位，2015-01 和当年当月处自动禁用）；【点中间「2026年10月」调出双列轮盘】iOS 风格，中条为选中、上下渐隐、scroll-snap 滚动停稳即选中；年份 2015 起到当年（v1.39.70 年份条从 1976 起被否：起点不对且不够优雅）。月份仍存在隐藏 select 里，沿用上期/清空/保存等老逻辑零改动。v1.39.70：①【粘贴静默错值】金额框粘贴科学计数法（1e5）被原清洗逻辑把"e"当杂质吃掉变成15——新增 pasteToCalcExpr：整段若是合法数字（含 1e5/1.5e3）先走 Number 展开，加减表达式才走老路径。②【月份选择器】月度账单弹窗年份从"手敲输入框"改为年份条（chip 横滑点选，覆盖 nowYear-50~nowYear 共约50年，远超旧下拉约10年上限；每个 chip ≥42px 触控友好）。v1.39.69：交易记录页四项修复——①【搜索彻底瘫痪】Excel 导入把数字单元格写进备注列（真实数据里有 note=2080 一笔），getFilteredTransactions 的 t.note.toLowerCase() 在这笔上抛 TypeError，任何搜索词都让整个筛选链崩掉、列表原样不动（用户体感"搜索框无效"）。修法三路：过滤时一律 String() 转型后再匹配（并顺带把搜索范围从"备注+分类"扩到"备注/分类/支付方式/金额"，和界面看得见的字段对齐）；loadState 加载时把非字符串备注统一规整成字符串（治存量）；Excel 导入时备注/时间/支付方式一律 String() 化（治增量）。②【金额不能粘贴】金额显示屏原是 readonly 且无 paste 监听，粘贴毫无反应。现允许直接键入/粘贴：paste 事件解析剪贴板文本（容忍 ¥ 、逗号、"元"等杂质）整体替换表达式；beforeinput 把键入的每个字符导进和数字键盘完全相同的 numpadPress 规则；input 事件兜底规整。inputmode=none 保留，手机不弹系统键盘。③【月份选择器】原生 select 平铺 100+ 个月份（真实数据 118 个月）难找难点。改成年份折叠面板：年份行从新到旧、默认全折叠（沿用报表"全部"视图同款交互），点年份展开该年月份、点月份即筛选，面板外点击自动收起。④【弹窗误触】编辑弹窗里删除按钮和关闭 X 原来只隔 6px，改 18px。v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -6931,23 +6931,16 @@ function renderBalanceSelectors() {
     const period = state.balancePeriod;
     if (wrap) wrap.classList.toggle('hidden', period === 'all');
     if (!label) return;
+    // v1.39.75：默认（以及「当月及以后」）一律停在「上个月」——
+    // 当月还没记，要到下个月才记，停在当月只会看到一片空白。
+    // 手动选过过去的某个月，就以他的选择为准。
     const now = new Date();
-
-    // 默认看「有记录的最新月份」，不是今天。
-    // 导入一份旧账本时如果停在当前月，页面会全是 0，看起来像什么都没导进来。
-    // 用户手动选过之后（balanceYear/Month 非 null）就以他的选择为准。
-    if (state.balanceYear == null || state.balanceMonth == null) {
-        const all = balanceMonths();
-        const latest = all[all.length - 1];
-        if (latest) {
-            if (state.balanceYear == null) state.balanceYear = Number(latest.slice(0, 4));
-            if (state.balanceMonth == null) state.balanceMonth = Number(latest.slice(5, 7));
-        }
+    let cur = Number(state.balanceYear) || 0, cm = Number(state.balanceMonth) || 0;
+    if (!cur || !cm || cur > now.getFullYear() || (cur === now.getFullYear() && cm >= now.getMonth() + 1)) {
+        const p = prevMonthYM();
+        cur = p.y; cm = p.m;
     }
-
-    const cur = state.balanceYear || now.getFullYear();
     state.balanceYear = cur;
-    const cm = state.balanceMonth || (now.getMonth() + 1);
     state.balanceMonth = cm;
     label.textContent = period === 'year' ? `${cur}年` : `${cur}年${cm}月`;
 }
@@ -8195,6 +8188,15 @@ function markHistoryModalReturnsTone(on) {
 // 年份下限 2015：真实账本最早记到 2015 年附近，再往前没有意义，列表也别拖一长串。
 // 月份选到当年时只开到本月——余额是月末快照、收益是整月结果，还没过完的月记了没意义。
 const YEAR_MIN = 2015;
+
+// 「上个月」的年月：今天 10 月 → 2026-09；今天 1 月 → 去年 12 月。
+// 资产负债 / 投资收益 / 记月度账单都按这个口径取默认月份——当月还没记，要到下个月才记。
+function prevMonthYM() {
+    const now = new Date();
+    let y = now.getFullYear(), m = now.getMonth(); // getMonth() 0 基：今天 10 月 → m=9 → 上月即 9（9 月）
+    if (m === 0) { y -= 1; m = 12; }               // 1 月 → 上月 = 去年 12 月
+    return { y, m };
+}
 // 轮盘各列滚动停稳后要回调的 onChange，按 prefix 存（目前只有 'monthly' 一个）
 const MONTH_WHEEL_CB = {};
 // 轮盘每一格的固定高度（CSS 里 .ym-wheel-col > div 的 height 必须和它一致）
@@ -8367,8 +8369,9 @@ function toggleMonthWheel(prefix) {
     else {
         const wheel = document.getElementById(prefix + 'Wheel');
         if (!wheel) return;
-        buildMonthWheel(prefix);
+        // 同上：先显示再建列，否则 display:none 时设 scrollTop 无效，轮盘永远停在第一格
         wheel.hidden = false;
+        buildMonthWheel(prefix);
         // 下一轮再挂「点外面收起」，不然这次点击自己就会把自己关掉
         setTimeout(() => document.addEventListener('click', monthWheelOutsideClose, true), 0);
     }
@@ -8559,8 +8562,11 @@ function ymWheelMarkActive() {
 
 function openYmWheel(anchorEl, opts) {
     const root = ensureYmWheelDom();
-    ymWheelBuild(opts);
+    // ⚠️ 必须先显示、再建列：display:none 的元素没有滚动区域，此时设 scrollTop 会被忽略（一直是 0），
+    // 轮盘打开后就永远停在第一格（年份第一格还好是当年，月份第一格是「1月」）——
+    // 表现为「点了日期，默认却不是当月 / 上个月」。v1.39.75 修的就是这个顺序。
     root.hidden = false;
+    ymWheelBuild(opts);
     // 定位：锚点正下方居中，右边溢出就左移、下面放不下就翻到锚点上方
     const r = anchorEl.getBoundingClientRect();
     const w = root.offsetWidth || 240, h = root.offsetHeight || 200;
@@ -8896,10 +8902,8 @@ function monthlyVal(key, accountId, saved) {
 // 日常节奏是月初填上月账单，打开就停在上一月最顺手；
 // 之前默认「最后一个有余额的月份」（或当前月），没数据时曾被解析成 2015-01，用户看到的就是错月份。
 function monthlyDefaultMonth() {
-    const now = new Date();
-    let y = now.getFullYear(), m = now.getMonth(); // getMonth() 0 基：今天 10 月 → m=9 → 上月即 9（9 月）
-    if (m === 0) { y -= 1; m = 12; }                // 1 月 → 上月 = 去年 12 月
-    return `${y}-${String(m).padStart(2, '0')}`;
+    const p = prevMonthYM();
+    return `${p.y}-${String(p.m).padStart(2, '0')}`;
 }
 
 function monthlyMember() {
@@ -9132,8 +9136,6 @@ function renderMonthlyEntry() {
             ${pcell('__net', ' mw-sumcol')}
         </div>`;
 
-    // 常用的「放钱的地方」做成快捷键，一点就多一行，不用跑去账户管理加完再回来
-    const quick = ['支付宝', '微信', '工商银行', '招商银行', '平安银行', '摩根'];
     list.innerHTML = `<div class="mw-scroll"><div class="mw-grid" style="--mw-cols:${cols}">
         <div class="mw-h mw-corner">账户 / 渠道</div>
         ${assetCats.map(c => colHeadHTML(c, '')).join('')}
@@ -9143,16 +9145,8 @@ function renderMonthlyEntry() {
         ${summaryRows}
         ${rows}
     </div></div>`
-        // v1.39.74：加行 / 加列两个按钮挪到顶部「本人」那一行了（见 index.html 的 .mw-addbtns），
-        // 输入框也去掉了——点按钮直接弹窗填名字，不用先在框里打字。这里只留下常用渠道的快捷键。
-        + `<div class="mw-addrow">
-            <span class="mw-chips">${quick.map(q =>
-                `<button class="mw-chip" data-quick-add="${_esc(q)}">+ ${_esc(q)}</button>`).join('')}</span>
-        </div>`
-        + `<div class="re-hidden-note"><span>一行 = 一个「放钱的地方」（中国银行 / 支付宝 / 微信 / 摩根…），一列 = 一类资产。
-            一个账户里同时有活期、定期、货币基金、股票基金、黄金和信用卡欠款，都在同一行里填：
-            资产填对应的类别列，欠款（信用卡、花呗、房贷）填「负债」列 —— 账户本身不再分资产还是负债。
-            像「信用卡」「花呗」这种单独的行，可以直接把数填进所属银行那一行的负债列，再用行尾的 × 删掉它。</span></div>`
+        // v1.39.75：底部这两块按用户要求删掉——常用渠道快捷键 chip、以及「一行=…一列=…」那段说明。
+        // 加行 / 加列两个按钮已在顶部「本人」那一行常驻，说明文字用户早就看熟了。
         // 手机上没有光标、也没有 hover，拖拽得靠长按，必须显式说一句，否则没人猜得到
         + `<div class="mw-sort-hint">按住<b>账户名</b>或<b>列头</b>约半秒，就能拖动调整这一行 / 这一列的顺序。灰色带 🔒 的格是「锁住」状态（只读，框里的数照样计入资产负债）；点右上角小锁能打开填写——只开你常用的渠道，不容易填错。</div>`;
     bindMonthlyEntry();
@@ -11861,17 +11855,16 @@ function renderReturnSelectors() {
     if (wrap) wrap.classList.toggle('hidden', period === 'all');
     if (!label) return;
 
-    const years = returnYears();
+    // v1.39.75：和资产负债页同一口径——默认（以及「当月及以后」）一律停在「上个月」
     const now = new Date();
-    if (!years.length) {
-        // 一份收益记录都没有时也要给出可点的年月（轮盘里能选任意年），退化到当前年月
-        if (!state.returnYear) state.returnYear = now.getFullYear();
-        if (state.returnMonth == null) state.returnMonth = now.getMonth() + 1;
-    } else {
-        if (!state.returnYear || !years.includes(String(state.returnYear))) state.returnYear = years[years.length - 1];
-        if (state.returnMonth == null) state.returnMonth = now.getMonth() + 1;
+    let ry = Number(state.returnYear) || 0, rm = Number(state.returnMonth) || 0;
+    if (!ry || !rm || ry > now.getFullYear() || (ry === now.getFullYear() && rm >= now.getMonth() + 1)) {
+        const p = prevMonthYM();
+        ry = p.y; rm = p.m;
     }
-    label.textContent = period === 'year' ? `${state.returnYear}年` : `${state.returnYear}年${state.returnMonth}月`;
+    state.returnYear = ry;
+    state.returnMonth = rm;
+    label.textContent = period === 'year' ? `${ry}年` : `${ry}年${rm}月`;
 }
 
 function renderReturnMemberBar() {
