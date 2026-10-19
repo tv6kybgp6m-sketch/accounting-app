@@ -3757,7 +3757,10 @@ table.bill-stats {
 .ym-cur:hover { background: var(--bg-card-hover); }
 .ym-cur:focus-visible, .ym-arrow:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* 双列轮盘（iOS 风格）：中间灰条 = 选中，上下渐隐；每格 40px，列高 5 格 */
-.ym-wheel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; display: flex; gap: 2px; background: var(--bg-pop); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.16); padding: 4px; }
+/* 定位：以「2026年10月」按钮为中心（.ym-nav 是居中的，按钮在 ym-pair 正中），
+   left:50% + translateX(-50%) 让轮盘正好落在你点的那个按钮正下方、整块在弹窗内；
+   背景用 --bg-card（已定义且不透明），之前误用 --bg-pop（从未定义 → 背景透明 → 透出后面数字）。 */
+.ym-wheel { position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); right: auto; z-index: 60; display: flex; gap: 2px; background: var(--bg-card, #fff); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.28); padding: 4px; }
 .ym-wheel[hidden] { display: none; }
 .ym-wheel-highlight { position: absolute; left: 8px; right: 8px; top: 50%; height: 40px; transform: translateY(-50%); background: var(--bg-card-hover); border-radius: 10px; pointer-events: none; }
 .ym-wheel-col { position: relative; height: 200px; overflow-y: auto; scroll-snap-type: y mandatory; padding: 80px 0; scrollbar-width: none; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 24%, #000 76%, transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 24%, #000 76%, transparent 100%); }
