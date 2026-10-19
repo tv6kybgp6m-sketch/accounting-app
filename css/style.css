@@ -2106,6 +2106,8 @@ body.cat-dragging {
 .form-row .form-group {
     flex: 1;
 }
+/* 日期这列要塞下 ‹‹ ‹ [2026年10月19日] › ›› 四个按钮，比别的列宽一些 */
+.form-row .form-group.ds-group { flex: 1.7; min-width: 0; }
 
 .form-row .form-group-time {
     flex: 0.6;
@@ -3767,6 +3769,57 @@ table.bill-stats {
 .ym-wheel-col::-webkit-scrollbar { display: none; }
 .ym-wheel-col > div { height: 40px; line-height: 40px; min-width: 64px; padding: 0 14px; text-align: center; scroll-snap-align: center; color: var(--text-tertiary); font-size: 16px; cursor: pointer; user-select: none; -webkit-user-select: none; font-family: var(--font); }
 .ym-wheel-col > div.active { color: var(--text-primary); font-weight: 600; }
+/* ---- 通用「年月日轮盘」浮层：挂 body、fixed 定位，避免被页面容器的 overflow 裁切 ---- */
+/* 与弹窗内那份 .ym-wheel 的区别只在外层容器，列/高亮/遮罩三套样式完全复用 */
+.ym-wheel-fixed {
+    position: fixed;
+    z-index: 1200;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-card, #fff);
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .28);
+    padding: 4px;
+}
+.ym-wheel-fixed[hidden] { display: none; }
+/* 高亮条和遮罩都以这一层为定位基准（它是 position:relative） */
+.ym-wheel-cols { position: relative; display: flex; gap: 2px; }
+.ym-wheel-day[hidden] { display: none; }
+/* 「所有月份」这类清除行：轮盘底下一整行，点了就清掉筛选 */
+.ym-wheel-clear {
+    margin-top: 4px;
+    padding: 8px 10px;
+    border-top: 1px solid rgba(0, 0, 0, .08);
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+    color: var(--accent);
+    cursor: pointer;
+    font-family: var(--font);
+}
+.ym-wheel-clear:hover { background: var(--bg-card-hover); }
+.ym-wheel-clear[hidden] { display: none; }
+/* 锚点按钮：长得和 filter-select 一样，点了调出轮盘（报表/资产负债/投资收益/月份筛选都用它） */
+.ym-anchor-btn { display: inline-flex; align-items: center; gap: 6px; }
+.ym-anchor-caret { font-size: 10px; color: var(--text-tertiary); }
+/* ---- 记一笔：桌面端日期步进器 ‹‹ ‹ [2026年10月19日] › ›› ---- */
+/* ‹‹/›› 翻年、‹/› 翻月，中间标签点开年月日轮盘；只在桌面端启用，手机端用系统原生控件 */
+.date-stepper { display: flex; align-items: center; gap: 2px; height: 32px; }
+.date-stepper .ds-arrow {
+    width: 26px; height: 32px; flex: 0 0 auto; border: none; background: transparent;
+    color: var(--text-secondary); font-size: 15px; line-height: 1; cursor: pointer;
+    border-radius: 8px; padding: 0; font-family: var(--font);
+}
+.date-stepper .ds-arrow:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+.date-stepper .ds-label {
+    flex: 1 1 0; min-width: 0; height: 32px; border: none; background: transparent;
+    font-size: 13px; font-weight: 600; color: var(--text-primary); cursor: pointer;
+    border-radius: 8px; font-family: var(--font); white-space: nowrap;
+    padding: 0 6px; text-align: center; overflow: hidden; text-overflow: ellipsis;
+}
+.date-stepper .ds-label:hover { background: var(--bg-card-hover); }
 .be-section-title {
     display: flex; align-items: center; gap: 6px;
     margin: 8px 0 4px; font-size: 12px; font-weight: 600; color: var(--text-secondary);

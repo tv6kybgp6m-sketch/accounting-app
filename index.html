@@ -165,11 +165,11 @@
                                 <button class="period-btn" data-period="year">年报</button>
                                 <button class="period-btn" data-period="all">全部</button>
                             </div>
-                            <div class="report-period-picker" id="reportYearWrap">
-                                <select class="filter-select" id="reportYearSelect"></select>
-                            </div>
-                            <div class="report-period-picker" id="reportMonthWrap">
-                                <select class="filter-select" id="reportMonthSelect"></select>
+                            <div class="report-period-picker" id="reportYmWrap">
+                                <button type="button" class="filter-select ym-anchor-btn" id="reportYmBtn" title="点这里调出年月轮盘">
+                                    <span id="reportYmLabel">2026年10月</span>
+                                    <i class="fa-solid fa-chevron-down ym-anchor-caret"></i>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -315,11 +315,11 @@
                                 <button class="period-btn" data-bal-period="year">年报</button>
                                 <button class="period-btn" data-bal-period="all">全部</button>
                             </div>
-                            <div class="report-period-picker" id="balanceYearWrap">
-                                <select class="filter-select" id="balanceYearSelect"></select>
-                            </div>
-                            <div class="report-period-picker" id="balanceMonthWrap">
-                                <select class="filter-select" id="balanceMonthSelect"></select>
+                            <div class="report-period-picker" id="balanceYmWrap">
+                                <button type="button" class="filter-select ym-anchor-btn" id="balanceYmBtn" title="点这里调出年月轮盘">
+                                    <span id="balanceYmLabel">2026年10月</span>
+                                    <i class="fa-solid fa-chevron-down ym-anchor-caret"></i>
+                                </button>
                             </div>
                             <button class="secondary-btn" onclick="openAccountsModal()">
                                 <i class="fa-solid fa-building-columns"></i> 账户
@@ -454,11 +454,11 @@
                                 <button class="period-btn" data-ret-period="year">年报</button>
                                 <button class="period-btn" data-ret-period="all">全部</button>
                             </div>
-                            <div class="report-period-picker" id="returnYearWrap">
-                                <select class="filter-select" id="returnYearSelect"></select>
-                            </div>
-                            <div class="report-period-picker" id="returnMonthWrap">
-                                <select class="filter-select" id="returnMonthSelect"></select>
+                            <div class="report-period-picker" id="returnYmWrap">
+                                <button type="button" class="filter-select ym-anchor-btn" id="returnYmBtn" title="点这里调出年月轮盘">
+                                    <span id="returnYmLabel">2026年10月</span>
+                                    <i class="fa-solid fa-chevron-down ym-anchor-caret"></i>
+                                </button>
                             </div>
                             <button class="secondary-btn" onclick="openAccountsModal()">
                                 <i class="fa-solid fa-building-columns"></i> 账户
@@ -1357,7 +1357,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.72').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.73').catch(() => {});
             });
         }
     </script>

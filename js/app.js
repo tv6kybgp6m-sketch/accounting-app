@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.72';  // v1.39.72：修轮盘两个显示问题——①背景透出后面数字：.ym-wheel 误用未定义的 --bg-pop（无兜底 → 背景声明无效变透明），改成已定义的 --bg-card（不透明）；②偏右：原 right:0 锚在右侧栏右缘，改为 left:50%+translateX(-50%) 以其正中的「2026年10月」按钮为基准居中，整块落在弹窗内。v1.39.71：月度账单弹窗年月选择重做——【左右箭头】‹ › 逐月翻（跨年自动进位，2015-01 和当年当月处自动禁用）；【点中间「2026年10月」调出双列轮盘】iOS 风格，中条为选中、上下渐隐、scroll-snap 滚动停稳即选中；年份 2015 起到当年（v1.39.70 年份条从 1976 起被否：起点不对且不够优雅）。月份仍存在隐藏 select 里，沿用上期/清空/保存等老逻辑零改动。v1.39.70：①【粘贴静默错值】金额框粘贴科学计数法（1e5）被原清洗逻辑把"e"当杂质吃掉变成15——新增 pasteToCalcExpr：整段若是合法数字（含 1e5/1.5e3）先走 Number 展开，加减表达式才走老路径。②【月份选择器】月度账单弹窗年份从"手敲输入框"改为年份条（chip 横滑点选，覆盖 nowYear-50~nowYear 共约50年，远超旧下拉约10年上限；每个 chip ≥42px 触控友好）。v1.39.69：交易记录页四项修复——①【搜索彻底瘫痪】Excel 导入把数字单元格写进备注列（真实数据里有 note=2080 一笔），getFilteredTransactions 的 t.note.toLowerCase() 在这笔上抛 TypeError，任何搜索词都让整个筛选链崩掉、列表原样不动（用户体感"搜索框无效"）。修法三路：过滤时一律 String() 转型后再匹配（并顺带把搜索范围从"备注+分类"扩到"备注/分类/支付方式/金额"，和界面看得见的字段对齐）；loadState 加载时把非字符串备注统一规整成字符串（治存量）；Excel 导入时备注/时间/支付方式一律 String() 化（治增量）。②【金额不能粘贴】金额显示屏原是 readonly 且无 paste 监听，粘贴毫无反应。现允许直接键入/粘贴：paste 事件解析剪贴板文本（容忍 ¥ 、逗号、"元"等杂质）整体替换表达式；beforeinput 把键入的每个字符导进和数字键盘完全相同的 numpadPress 规则；input 事件兜底规整。inputmode=none 保留，手机不弹系统键盘。③【月份选择器】原生 select 平铺 100+ 个月份（真实数据 118 个月）难找难点。改成年份折叠面板：年份行从新到旧、默认全折叠（沿用报表"全部"视图同款交互），点年份展开该年月份、点月份即筛选，面板外点击自动收起。④【弹窗误触】编辑弹窗里删除按钮和关闭 X 原来只隔 6px，改 18px。v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.73';  // v1.39.73：四处日期控件按用户要求改造——①【月度账单弹窗默认「上个月」】以前没数据时退到 2015-01，现在一律默认今天的上个月（月初填上月账单最顺手）。②【记一笔的日期】桌面端（Mac 原生 App / 桌面浏览器）把原生日期框换成 ‹‹ ‹ [2026年10月19日] › ›› 步进器：‹‹›› 翻年、‹› 翻月，中间标签点开「年+月+日」三列轮盘；手机端不动，继续用系统原生日期控件（用户明确要求）。③【交易记录「所有月份」】年份折叠面板换成 iOS 风格双列轮盘，底部保留「所有月份」清除行。④【报表/资产负债/投资收益顶部】两个原生下拉（年+月）合并成一个「2026年10月」锚点按钮，点开同一个轮盘。通用轮盘挂 body 用 fixed 定位——普通页面容器有 overflow 会裁掉弹窗里那套 absolute 轮盘；支持 withDay（带日列）/ allowClear（清除行）。v1.39.72：修轮盘两个显示问题——①背景透出后面数字：.ym-wheel 误用未定义的 --bg-pop（无兜底 → 背景声明无效变透明），改成已定义的 --bg-card（不透明）；②偏右：原 right:0 锚在右侧栏右缘，改为 left:50%+translateX(-50%) 以其正中的「2026年10月」按钮为基准居中，整块落在弹窗内。v1.39.71：月度账单弹窗年月选择重做——【左右箭头】‹ › 逐月翻（跨年自动进位，2015-01 和当年当月处自动禁用）；【点中间「2026年10月」调出双列轮盘】iOS 风格，中条为选中、上下渐隐、scroll-snap 滚动停稳即选中；年份 2015 起到当年（v1.39.70 年份条从 1976 起被否：起点不对且不够优雅）。月份仍存在隐藏 select 里，沿用上期/清空/保存等老逻辑零改动。v1.39.70：①【粘贴静默错值】金额框粘贴科学计数法（1e5）被原清洗逻辑把"e"当杂质吃掉变成15——新增 pasteToCalcExpr：整段若是合法数字（含 1e5/1.5e3）先走 Number 展开，加减表达式才走老路径。②【月份选择器】月度账单弹窗年份从"手敲输入框"改为年份条（chip 横滑点选，覆盖 nowYear-50~nowYear 共约50年，远超旧下拉约10年上限；每个 chip ≥42px 触控友好）。v1.39.69：交易记录页四项修复——①【搜索彻底瘫痪】Excel 导入把数字单元格写进备注列（真实数据里有 note=2080 一笔），getFilteredTransactions 的 t.note.toLowerCase() 在这笔上抛 TypeError，任何搜索词都让整个筛选链崩掉、列表原样不动（用户体感"搜索框无效"）。修法三路：过滤时一律 String() 转型后再匹配（并顺带把搜索范围从"备注+分类"扩到"备注/分类/支付方式/金额"，和界面看得见的字段对齐）；loadState 加载时把非字符串备注统一规整成字符串（治存量）；Excel 导入时备注/时间/支付方式一律 String() 化（治增量）。②【金额不能粘贴】金额显示屏原是 readonly 且无 paste 监听，粘贴毫无反应。现允许直接键入/粘贴：paste 事件解析剪贴板文本（容忍 ¥ 、逗号、"元"等杂质）整体替换表达式；beforeinput 把键入的每个字符导进和数字键盘完全相同的 numpadPress 规则；input 事件兜底规整。inputmode=none 保留，手机不弹系统键盘。③【月份选择器】原生 select 平铺 100+ 个月份（真实数据 118 个月）难找难点。改成年份折叠面板：年份行从新到旧、默认全折叠（沿用报表"全部"视图同款交互），点年份展开该年月份、点月份即筛选，面板外点击自动收起。④【弹窗误触】编辑弹窗里删除按钮和关闭 X 原来只隔 6px，改 18px。v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -3836,30 +3836,11 @@ function initTxnInfiniteScroll() {
 // 展开态记在 monthFilterExpanded 里，renderTransactions 每次重绘都不会把用户展开的年份收起来。
 let monthFilterExpanded = new Set();
 
+// 月份筛选的按钮文字。下拉面板已换成通用年月轮盘（v1.39.73，见 initMonthFilterPanel），
+// 这里只负责把当前筛选写回按钮上的字——「所有月份」或「2026年9月」。
 function updateMonthFilter() {
-    const dd = document.getElementById('monthDropdown');
-    if (!dd) return;
-    const months = [...new Set(state.transactions.map(t => getMonthKey(t.date)))].sort().reverse();
-    const years = [...new Set(months.map(m => m.slice(0, 4)))].sort().reverse();
-    const current = state.monthFilter;
-
-    let html = '<div class="md-row md-all' + (current ? '' : ' active') + '" data-month="">所有月份</div>';
-    years.forEach(y => {
-        const ymonths = months.filter(m => m.indexOf(y + '-') === 0);
-        const open = monthFilterExpanded.has(y) || ymonths.indexOf(current) >= 0;
-        html += '<div class="md-year' + (open ? ' open' : '') + '" data-year="' + y + '">'
-            + '<i class="fa-solid fa-chevron-right md-year-caret"></i>'
-            + '<span class="md-year-name">' + y + ' 年</span>'
-            + '<span class="md-year-count">' + ymonths.length + ' 个月</span>'
-            + '</div>'
-            + '<div class="md-months' + (open ? '' : ' hidden') + '">'
-            + ymonths.map(m => '<div class="md-row md-month' + (m === current ? ' active' : '') + '" data-month="' + m + '">'
-                + parseInt(m.slice(5), 10) + ' 月</div>').join('')
-            + '</div>';
-    });
-    dd.innerHTML = html;
     const label = document.getElementById('monthFilterLabel');
-    if (label) label.textContent = current ? getMonthLabel(current) : '所有月份';
+    if (label) label.textContent = state.monthFilter ? getMonthLabel(state.monthFilter) : '所有月份';
 }
 
 // 交易列表的筛选条件（类型 / 月份 / 搜索）抽成公共函数，列表和顶部汇总都用同一套，
@@ -4069,6 +4050,83 @@ function resetTxnFilter() {
 }
 
 // ---- Transaction Modal ----
+// ---- 记一笔的日期：桌面端加「‹‹ ‹ [2026年10月19日] › ››」步进器 ----
+// 手机端（iPhone / iPad）不动，继续用系统原生 date 控件——用户明确说「手机端没问题」。
+// 原生 dateInput 保留在 DOM 里当唯一数据源（只把 type 改成 hidden），
+// 这样读 dateInput.value 的老逻辑（保存交易、编辑回填）一行都不用改。
+let dateStepperSync = null;
+
+function initDateStepper() {
+    if (IS_TOUCH_PHONE) return;                    // 手机端：保留原生控件，什么都不动
+    const native = document.getElementById('dateInput');
+    const wrap = native && native.parentElement;
+    if (!native || !wrap || document.getElementById('dateStepper')) return;
+    native.type = 'hidden';
+    wrap.classList.add('ds-group');                // 这列要放得下四个按钮+日期，比别的列宽一点
+    const row = document.createElement('div');
+    row.className = 'date-stepper';
+    row.id = 'dateStepper';
+    row.innerHTML =
+        '<button type="button" class="ds-arrow" id="dsYearPrev" title="上一年" aria-label="上一年">&#171;</button>'
+        + '<button type="button" class="ds-arrow" id="dsMonthPrev" title="上个月" aria-label="上个月">&#8249;</button>'
+        + '<button type="button" class="ds-label" id="dsLabel" title="点此调出年月日轮盘"></button>'
+        + '<button type="button" class="ds-arrow" id="dsMonthNext" title="下个月" aria-label="下个月">&#8250;</button>'
+        + '<button type="button" class="ds-arrow" id="dsYearNext" title="下一年" aria-label="下一年">&#187;</button>';
+    wrap.appendChild(row);
+
+    const label = row.querySelector('#dsLabel');
+    // 记住「想填的那一天」：1月31 往后翻到 2月只能显示 28，但再翻回 1月该回到 31，
+    // 否则来回翻一圈日就被永久改成 28 了。keepHint=true 表示这次只是步进、不动 hint。
+    let dayHint = null;
+    const parse = () => {
+        const p = (native.value || '').split('-').map(Number);
+        const now = new Date();
+        return { y: p[0] || now.getFullYear(), m: p[1] || (now.getMonth() + 1), d: p[2] || now.getDate() };
+    };
+    const fmt = p => `${p.y}年${p.m}月${p.d}日`;
+    const apply = (p, keepHint) => {
+        if (!keepHint) dayHint = p.d;   // 明确指定日期（轮盘选中 / 弹窗回填）才更新 hint
+        native.value = `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`;
+        label.textContent = fmt(p);
+    };
+    const stepTo = (y, m) => {
+        const p = parse();
+        const hint = dayHint != null ? dayHint : p.d;
+        apply({ y, m, d: Math.min(hint, ymDaysInMonth(y, m)) }, true);   // 1月31 → 2月自动贴到 28/29
+    };
+    const stepMonth = dir => {
+        const p = parse(); let y = p.y, m = p.m + dir;
+        if (m < 1) { y -= 1; m = 12; }
+        if (m > 12) { y += 1; m = 1; }
+        stepTo(y, m);
+    };
+    const stepYear = dir => {
+        const p = parse();
+        stepTo(p.y + dir, p.m);
+    };
+    row.querySelector('#dsYearPrev').addEventListener('click', () => stepYear(-1));
+    row.querySelector('#dsMonthPrev').addEventListener('click', () => stepMonth(-1));
+    row.querySelector('#dsMonthNext').addEventListener('click', () => stepMonth(1));
+    row.querySelector('#dsYearNext').addEventListener('click', () => stepYear(1));
+    // 中间标签：点开带「日」列的年月日轮盘，一步到位挑到某天
+    label.addEventListener('click', () => {
+        const p = parse();
+        if (ymWheelIsOpen()) { closeYmWheel(); return; }
+        openYmWheel(label, {
+            year: p.y, month: p.m, day: p.d, withDay: true, minYear: 2000,
+            onPick: (y, m, d) => apply({ y, m, d: d || Math.min(p.d, ymDaysInMonth(y, m)) })
+        });
+    });
+    // 弹窗打开/回填日期时同步标签，并把这一天定为新的「想填的那天」
+    dateStepperSync = () => { const p = parse(); dayHint = p.d; label.textContent = fmt(p); };
+    dateStepperSync();
+}
+
+// 弹窗打开/回填日期后，同步步进器标签（手机端 dateStepperSync 为 null，什么都不做）
+function refreshDateStepper() {
+    if (dateStepperSync) dateStepperSync();
+}
+
 function openTransactionModal(id) {
     const modal = document.getElementById('transactionModal');
     const title = document.getElementById('transactionModalTitle');
@@ -4096,6 +4154,8 @@ function openTransactionModal(id) {
         document.getElementById('noteInput').value = '';
         renderPaymentOptions();
     }
+
+    refreshDateStepper();   // 桌面端：把步进器标签同步到刚填进去的日期
 
     // Show delete button only when editing
     document.getElementById('deleteTxnBtn').style.display = id ? '' : 'none';
@@ -4735,37 +4795,29 @@ function deleteTransactionFromModal() {
 }
 
 // ---- Reports ----
+// 顶部年月：原来「年 select + 月 select」两个原生下拉，v1.39.73 换成一个锚点按钮 + 通用轮盘。
+// 这里只负责定下当前年月、写好按钮上的字、按期间（月报/年报/全部）显示或隐藏整块。
 function renderReportSelectors() {
-    const yearWrap = document.getElementById('reportYearWrap');
-    const monthWrap = document.getElementById('reportMonthWrap');
-    const yearSelect = document.getElementById('reportYearSelect');
-    const monthSelect = document.getElementById('reportMonthSelect');
-    const now = new Date();
+    const wrap = document.getElementById('reportYmWrap');
+    const label = document.getElementById('reportYmLabel');
+    const period = state.reportPeriod;
+    if (wrap) wrap.classList.toggle('hidden', period === 'all');
+    if (!label) return;
 
-    // Collect all years from transactions + current year
+    const now = new Date();
+    // 有交易的年份 + 当前年（没有交易时至少还能选今年，不然下拉是空的）
     const years = [...new Set(state.transactions.map(t => parseLocalDate(t.date).getFullYear()))];
     years.push(now.getFullYear());
     const uniqueYears = [...new Set(years)].sort((a, b) => b - a);
 
-    // Keep the selected year valid for the available data
     let currentYear = state.reportYear || now.getFullYear();
     if (!uniqueYears.includes(currentYear)) currentYear = uniqueYears[0];
     state.reportYear = currentYear;
 
-    yearSelect.innerHTML = uniqueYears.map(y =>
-        `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}年</option>`
-    ).join('');
-
-    const period = state.reportPeriod;
-    yearWrap.classList.toggle('hidden', period === 'all');
-    monthWrap.classList.toggle('hidden', period !== 'month');
-
-    if (period === 'month') {
-        const currentMonth = state.reportMonth || (now.getMonth() + 1);
-        monthSelect.innerHTML = Array.from({ length: 12 }, (_, i) => i + 1).map(m =>
-            `<option value="${m}" ${m === currentMonth ? 'selected' : ''}>${m}月</option>`
-        ).join('');
-    }
+    const cm = state.reportMonth || (now.getMonth() + 1);
+    state.reportMonth = cm;
+    // 年报只显示年份，月报显示年月（「全部」时整块已隐藏）
+    label.textContent = period === 'year' ? `${currentYear}年` : `${currentYear}年${cm}月`;
 }
 
 // ---- Reports: period helpers ----
@@ -6949,10 +7001,11 @@ function balancePeriodInfo() {
 }
 
 function renderBalanceSelectors() {
-    const yearWrap = document.getElementById('balanceYearWrap');
-    const monthWrap = document.getElementById('balanceMonthWrap');
-    const yearSelect = document.getElementById('balanceYearSelect');
-    const monthSelect = document.getElementById('balanceMonthSelect');
+    const wrap = document.getElementById('balanceYmWrap');
+    const label = document.getElementById('balanceYmLabel');
+    const period = state.balancePeriod;
+    if (wrap) wrap.classList.toggle('hidden', period === 'all');
+    if (!label) return;
     const now = new Date();
 
     // 默认看「有记录的最新月份」，不是今天。
@@ -6967,21 +7020,11 @@ function renderBalanceSelectors() {
         }
     }
 
-    const years = balanceYears().map(Number);
-    years.push(now.getFullYear());
-    const uniq = [...new Set(years)].sort((a, b) => b - a);
-    let cur = state.balanceYear || now.getFullYear();
-    if (!uniq.includes(cur)) cur = uniq[0];
+    const cur = state.balanceYear || now.getFullYear();
     state.balanceYear = cur;
-    yearSelect.innerHTML = uniq.map(y => `<option value="${y}" ${y === cur ? 'selected' : ''}>${y}年</option>`).join('');
-
-    yearWrap.classList.toggle('hidden', state.balancePeriod === 'all');
-    monthWrap.classList.toggle('hidden', state.balancePeriod !== 'month');
-    if (state.balancePeriod === 'month') {
-        const cm = state.balanceMonth || (now.getMonth() + 1);
-        monthSelect.innerHTML = Array.from({ length: 12 }, (_, i) => i + 1)
-            .map(m => `<option value="${m}" ${m === cm ? 'selected' : ''}>${m}月</option>`).join('');
-    }
+    const cm = state.balanceMonth || (now.getMonth() + 1);
+    state.balanceMonth = cm;
+    label.textContent = period === 'year' ? `${cur}年` : `${cur}年${cm}月`;
 }
 
 function updateBalanceToggleStates() {
@@ -8227,6 +8270,9 @@ function markHistoryModalReturnsTone(on) {
 // 年份下限 2015：真实账本最早记到 2015 年附近，再往前没有意义，列表也别拖一长串。
 // 月份选到当年时只开到本月——余额是月末快照、收益是整月结果，还没过完的月记了没意义。
 const YEAR_MIN = 2015;
+// 手机/平板判定：iPhone / iPad 走系统原生 date 控件（用户明确说「手机端没问题」，不动它）；
+// 只有桌面端（Mac 原生 App + 桌面浏览器）才给「记一笔」的日期加年月步进器。
+const IS_TOUCH_PHONE = /(iPhone|iPad|iPod|Android|Mobile|Mobi)/i.test(navigator.userAgent || '');
 // 轮盘各列滚动停稳后要回调的 onChange，按 prefix 存（目前只有 'monthly' 一个）
 const MONTH_WHEEL_CB = {};
 // 轮盘每一格的固定高度（CSS 里 .ym-wheel-col > div 的 height 必须和它一致）
@@ -8453,6 +8499,207 @@ function bindModalMonth(prefix, onChange) {
             col.dataset.bound = '1';
             col.addEventListener('scroll', () => settleMonthWheel(prefix, col, i === 0 ? 'year' : 'month'));
         }
+    });
+}
+
+// ================= 通用「年月日轮盘」浮层（挂 body，fixed 定位） =================
+// 月度账单弹窗里那份 .ym-wheel 是挂在弹窗内的（弹窗空间足够）。这份是给普通页面用的：
+// 交易记录「所有月份」筛选、报表/资产负债/投资收益顶部的年月选择、记一笔的日期。
+// 普通页面的容器常有 overflow 裁剪，若沿用弹窗那套 absolute 会被裁掉，所以这份挂 body 用 fixed。
+let ymWheelState = null;
+
+// 第 m 个月有多少天（m 是 1 基）：new Date(y, m, 0) 取的是 1 基第 m 个月的最后一天
+function ymDaysInMonth(y, m) { return new Date(Number(y), Number(m), 0).getDate(); }
+
+function ensureYmWheelDom() {
+    let root = document.getElementById('ymWheelFixed');
+    if (root) return root;
+    root = document.createElement('div');
+    root.className = 'ym-wheel-fixed';
+    root.id = 'ymWheelFixed';
+    root.hidden = true;
+    root.innerHTML =
+        '<div class="ym-wheel-cols" id="ymWheelCols">'
+        + '<div class="ym-wheel-highlight"></div>'
+        + '<div class="ym-wheel-col" id="ymWheelYears" role="listbox" aria-label="选择年份"></div>'
+        + '<div class="ym-wheel-col" id="ymWheelMonths" role="listbox" aria-label="选择月份"></div>'
+        + '<div class="ym-wheel-col ym-wheel-day" id="ymWheelDays" role="listbox" aria-label="选择日" hidden></div>'
+        + '</div>'
+        + '<div class="ym-wheel-clear" id="ymWheelClear" hidden>所有月份</div>';
+    document.body.appendChild(root);
+    return root;
+}
+
+function ymWheelFillCol(col, from, to, suffix, cur) {
+    if (!col) return;
+    let html = '';
+    for (let v = from; v <= to; v++) {
+        html += `<div role="option" data-v="${v}"${v === cur ? ' class="active"' : ''}>${v}${suffix}</div>`;
+    }
+    col.innerHTML = html;
+}
+
+// opts: { year, month, day, withDay, minYear, maxYear, onPick(y,m,d), allowClear, clearLabel, onClear() }
+function ymWheelBuild(opts) {
+    const root = ensureYmWheelDom();
+    const now = new Date();
+    const minYear = Number(opts.minYear) || YEAR_MIN;
+    const maxYear = Number(opts.maxYear) || now.getFullYear();
+    let y = Math.min(maxYear, Math.max(minYear, Number(opts.year) || maxYear));
+    let m = Math.min(12, Math.max(1, Number(opts.month) || (now.getMonth() + 1)));
+    let d = Math.min(ymDaysInMonth(y, m), Math.max(1, Number(opts.day) || now.getDate()));
+    ymWheelState = { opts, y, m, d, minYear, maxYear };
+
+    const yearsCol = root.querySelector('#ymWheelYears');
+    const monthsCol = root.querySelector('#ymWheelMonths');
+    const daysCol = root.querySelector('#ymWheelDays');
+    const clearRow = root.querySelector('#ymWheelClear');
+    // 年份从新到旧：常用的年份在前，少滚几格
+    let yh = '';
+    for (let yy = maxYear; yy >= minYear; yy--) {
+        yh += `<div role="option" data-v="${yy}"${yy === y ? ' class="active"' : ''}>${yy}年</div>`;
+    }
+    yearsCol.innerHTML = yh;
+    ymWheelFillCol(monthsCol, 1, 12, '月', m);
+    daysCol.hidden = !opts.withDay;
+    if (opts.withDay) ymWheelFillCol(daysCol, 1, ymDaysInMonth(y, m), '日', d);
+    clearRow.hidden = !opts.allowClear;
+    if (opts.allowClear) clearRow.textContent = opts.clearLabel || '所有月份';
+    ymWheelSyncScroll();
+}
+
+// 把三列的滚动位置对到当前选中项（_sync 期间忽略 scroll，防止自己触发的滚动又被当成手选）
+function ymWheelSyncScroll() {
+    const root = document.getElementById('ymWheelFixed');
+    if (!root || !ymWheelState) return;
+    const vals = [ymWheelState.y, ymWheelState.m, ymWheelState.d];
+    ['#ymWheelYears', '#ymWheelMonths', '#ymWheelDays'].forEach((sel, i) => {
+        const col = root.querySelector(sel);
+        if (!col || col.hidden || !col.children.length) return;
+        let idx = Array.prototype.findIndex.call(col.children, el => Number(el.dataset.v) === vals[i]);
+        if (idx < 0) idx = 0;
+        col._sync = true;
+        col.scrollTop = idx * YM_WHEEL_ITEM_H;
+    });
+    setTimeout(() => {
+        ['#ymWheelYears', '#ymWheelMonths', '#ymWheelDays'].forEach(sel => {
+            const c = root.querySelector(sel); if (c) c._sync = false;
+        });
+    }, 80);
+}
+
+// 一列滚停了：正中那格就是选中值
+function ymWheelSettle(col, kind) {
+    if (col._sync) return;
+    clearTimeout(col._t);
+    col._t = setTimeout(() => {
+        const items = col.children;
+        if (!items.length) return;
+        const idx = Math.max(0, Math.min(items.length - 1, Math.round(col.scrollTop / YM_WHEEL_ITEM_H)));
+        ymWheelPick(kind, Number(items[idx].dataset.v));
+    }, 130);
+}
+
+function ymWheelPick(kind, v) {
+    if (!ymWheelState) return;
+    const s = ymWheelState;
+    if (!Number.isFinite(v)) return;
+    if (kind === 'year') {
+        if (v === s.y) return;
+        s.y = v;
+        if (s.d > ymDaysInMonth(s.y, s.m)) s.d = ymDaysInMonth(s.y, s.m);   // 2月29 → 平年变 28
+    } else if (kind === 'month') {
+        if (v === s.m) return;
+        s.m = v;
+        if (s.d > ymDaysInMonth(s.y, s.m)) s.d = ymDaysInMonth(s.y, s.m);
+    } else {
+        if (v === s.d) return;
+        s.d = v;
+    }
+    if (s.opts.withDay && kind !== 'day') {
+        ymWheelFillCol(document.querySelector('#ymWheelDays'), 1, ymDaysInMonth(s.y, s.m), '日', s.d);
+    }
+    ymWheelMarkActive();
+    if (kind !== 'day' && s.opts.withDay) ymWheelSyncScroll();
+    if (s.opts.onPick) s.opts.onPick(s.y, s.m, s.opts.withDay ? s.d : null);
+}
+
+function ymWheelMarkActive() {
+    const root = document.getElementById('ymWheelFixed');
+    if (!root || !ymWheelState) return;
+    const map = { '#ymWheelYears': ymWheelState.y, '#ymWheelMonths': ymWheelState.m, '#ymWheelDays': ymWheelState.d };
+    Object.keys(map).forEach(sel => {
+        const col = root.querySelector(sel);
+        if (!col) return;
+        Array.prototype.forEach.call(col.children, el => el.classList.toggle('active', Number(el.dataset.v) === map[sel]));
+    });
+}
+
+function openYmWheel(anchorEl, opts) {
+    const root = ensureYmWheelDom();
+    ymWheelBuild(opts);
+    root.hidden = false;
+    // 定位：锚点正下方居中，右边溢出就左移、下面放不下就翻到锚点上方
+    const r = anchorEl.getBoundingClientRect();
+    const w = root.offsetWidth || 240, h = root.offsetHeight || 200;
+    let left = r.left + r.width / 2 - w / 2;
+    left = Math.max(8, Math.min(left, (window.innerWidth || 1024) - w - 8));
+    let top = r.bottom + 6;
+    if (top + h > (window.innerHeight || 768) - 8) top = Math.max(8, r.top - h - 6);
+    root.style.left = left + 'px';
+    root.style.top = top + 'px';
+    root._anchor = anchorEl;
+    [['#ymWheelYears', 'year'], ['#ymWheelMonths', 'month'], ['#ymWheelDays', 'day']].forEach(([sel, kind]) => {
+        const col = root.querySelector(sel);
+        if (!col || col.hidden) return;
+        col._ymh = () => ymWheelSettle(col, kind);
+        col.addEventListener('scroll', col._ymh);
+    });
+    const clearRow = root.querySelector('#ymWheelClear');
+    if (clearRow) {
+        clearRow._ymc = () => { closeYmWheel(); if (opts.onClear) opts.onClear(); };
+        clearRow.addEventListener('click', clearRow._ymc);
+    }
+    setTimeout(() => document.addEventListener('click', ymWheelOutsideClose, true), 0);
+}
+
+function ymWheelOutsideClose(e) {
+    const root = document.getElementById('ymWheelFixed');
+    if (!root || root.hidden) { document.removeEventListener('click', ymWheelOutsideClose, true); return; }
+    const anchor = root._anchor;
+    // 点锚点自己不算「点外面」——由锚点的 click 自己 toggle，避免开关打架
+    if (anchor && (e.target === anchor || anchor.contains(e.target))) return;
+    if (!root.contains(e.target)) closeYmWheel();
+}
+
+function closeYmWheel() {
+    const root = document.getElementById('ymWheelFixed');
+    if (!root || root.hidden) return;
+    root.hidden = true;
+    ['#ymWheelYears', '#ymWheelMonths', '#ymWheelDays'].forEach(sel => {
+        const col = root.querySelector(sel);
+        if (col && col._ymh) { col.removeEventListener('scroll', col._ymh); col._ymh = null; }
+    });
+    const clearRow = root.querySelector('#ymWheelClear');
+    if (clearRow && clearRow._ymc) { clearRow.removeEventListener('click', clearRow._ymc); clearRow._ymc = null; }
+    document.removeEventListener('click', ymWheelOutsideClose, true);
+}
+
+function ymWheelIsOpen() {
+    const root = document.getElementById('ymWheelFixed');
+    return !!root && !root.hidden;
+}
+
+// 顶部「2026年10月」这类锚点按钮的统一接线：点开轮盘、选中即写回 state 并重绘该页。
+// getCurrent() 返回当前年月给轮盘作初始值；onPick(y, m) 由调用方写回自己的 state。
+function bindYmAnchorBtn(btnId, getCurrent, onPick) {
+    const btn = document.getElementById(btnId);
+    if (!btn || btn.dataset.ymBound) return;
+    btn.dataset.ymBound = '1';
+    btn.addEventListener('click', () => {
+        if (ymWheelIsOpen()) { closeYmWheel(); return; }   // 再点一次收起
+        const cur = getCurrent();
+        openYmWheel(btn, { year: cur.y, month: cur.m, onPick });
     });
 }
 
@@ -8723,11 +8970,14 @@ function monthlyVal(key, accountId, saved) {
     return String(typed).trim() === '' ? '' : typed;
 }
 
+// 月度账单弹窗「默认打开的月份」= 今天的上个月。
+// 日常节奏是月初填上月账单，打开就停在上一月最顺手；
+// 之前默认「最后一个有余额的月份」（或当前月），没数据时曾被解析成 2015-01，用户看到的就是错月份。
 function monthlyDefaultMonth() {
-    const ms = balanceMonths();
-    if (ms.length) return ms[ms.length - 1];
     const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    let y = now.getFullYear(), m = now.getMonth(); // getMonth() 0 基：今天 10 月 → m=9 → 上月即 9（9 月）
+    if (m === 0) { y -= 1; m = 12; }                // 1 月 → 上月 = 去年 12 月
+    return `${y}-${String(m).padStart(2, '0')}`;
 }
 
 function monthlyMember() {
@@ -10308,14 +10558,9 @@ function initBalanceListeners() {
     document.querySelectorAll('#view-balance .report-card.clickable').forEach(card => {
         card.addEventListener('click', () => setBalanceMetric(card.dataset.balMetric));
     });
-    document.getElementById('balanceYearSelect').addEventListener('change', e => {
-        state.balanceYear = parseInt(e.target.value);
-        renderBalance();
-    });
-    document.getElementById('balanceMonthSelect').addEventListener('change', e => {
-        state.balanceMonth = parseInt(e.target.value);
-        renderBalance();
-    });
+    bindYmAnchorBtn('balanceYmBtn',
+        () => ({ y: state.balanceYear || new Date().getFullYear(), m: state.balanceMonth || (new Date().getMonth() + 1) }),
+        (y, m) => { state.balanceYear = y; state.balanceMonth = m; renderBalance(); });
     bindModalMonth('monthly', () => { refreshMonthlyViewMode(); renderMonthlyEntry(); });
     const monthlyMemberSel = document.getElementById('monthlyMemberSelect');
     if (monthlyMemberSel) monthlyMemberSel.addEventListener('change', () => { refreshMonthlyViewMode(); renderMonthlyEntry(); });
@@ -11681,31 +11926,23 @@ function returnPeriodInfo() {
 }
 
 function renderReturnSelectors() {
+    const wrap = document.getElementById('returnYmWrap');
+    const label = document.getElementById('returnYmLabel');
+    const period = state.returnPeriod;
+    if (wrap) wrap.classList.toggle('hidden', period === 'all');
+    if (!label) return;
+
     const years = returnYears();
     const now = new Date();
-    if (!years.length) return;
-    if (!state.returnYear || !years.includes(String(state.returnYear))) state.returnYear = years[years.length - 1];
-
-    const ySel = document.getElementById('returnYearSelect');
-    if (ySel) {
-        ySel.innerHTML = years.map(y => `<option value="${y}" ${String(state.returnYear) === y ? 'selected' : ''}>${y}年</option>`).join('');
+    if (!years.length) {
+        // 一份收益记录都没有时也要给出可点的年月（轮盘里能选任意年），退化到当前年月
+        if (!state.returnYear) state.returnYear = now.getFullYear();
+        if (state.returnMonth == null) state.returnMonth = now.getMonth() + 1;
+    } else {
+        if (!state.returnYear || !years.includes(String(state.returnYear))) state.returnYear = years[years.length - 1];
+        if (state.returnMonth == null) state.returnMonth = now.getMonth() + 1;
     }
-    const mSel = document.getElementById('returnMonthSelect');
-    if (mSel) {
-        const months = returnMonths().filter(m => m.slice(0, 4) === String(state.returnYear));
-        const opts = months.length ? months : [`${state.returnYear}-${String(now.getMonth() + 1).padStart(2, '0')}`];
-        const cur = state.returnMonth || Number((opts[opts.length - 1] || '').slice(5, 7)) || (now.getMonth() + 1);
-        mSel.innerHTML = opts.map(m => {
-            const mm = Number(m.slice(5, 7));
-            return `<option value="${mm}" ${mm === cur ? 'selected' : ''}>${mm}月</option>`;
-        }).join('');
-        state.returnMonth = cur;
-    }
-    const yWrap = document.getElementById('returnYearWrap');
-    const mWrap = document.getElementById('returnMonthWrap');
-    const showYear = state.returnPeriod !== 'all';
-    if (yWrap) yWrap.classList.toggle('hidden', !showYear);
-    if (mWrap) mWrap.classList.toggle('hidden', state.returnPeriod !== 'month');
+    label.textContent = period === 'year' ? `${state.returnYear}年` : `${state.returnYear}年${state.returnMonth}月`;
 }
 
 function renderReturnMemberBar() {
@@ -12661,49 +12898,40 @@ function initReturnListeners() {
         state.returnCalYear = Number(e.target.value);
         renderReturnCalendar();
     });
-    const ySel = document.getElementById('returnYearSelect');
-    if (ySel) ySel.addEventListener('change', e => { state.returnYear = parseInt(e.target.value); state.returnMonth = null; renderReturns(); });
-    const mSel = document.getElementById('returnMonthSelect');
-    if (mSel) mSel.addEventListener('change', e => { state.returnMonth = parseInt(e.target.value); renderReturns(); });
+    bindYmAnchorBtn('returnYmBtn',
+        () => ({ y: state.returnYear || new Date().getFullYear(), m: state.returnMonth || (new Date().getMonth() + 1) }),
+        (y, m) => { state.returnYear = y; state.returnMonth = m; renderReturns(); });
 
 }
 
 // ---- Event Listeners ----
-// 月份折叠面板的交互 wiring（v1.39.69）：按钮开合、年份行展开/收起、选月、面板外点击收起。
-// 面板内容由 updateMonthFilter 每次重绘，所以一律用事件委托，不绑具体行。
+// 月份筛选：点按钮调出「年 + 月」双列轮盘（v1.39.73，替换 v1.39.69 的年份折叠面板）。
+// 轮盘底下一行保留「所有月份」，点了就清掉筛选、回到全部；滚停即选中，点外面收起。
 function initMonthFilterPanel() {
     const btn = document.getElementById('monthFilterBtn');
-    const dd = document.getElementById('monthDropdown');
-    if (!btn || !dd || btn.dataset.mfBound) return;
+    if (!btn || btn.dataset.mfBound) return;
     btn.dataset.mfBound = '1';
 
-    btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        dd.classList.toggle('hidden');
-    });
-
-    dd.addEventListener('click', (e) => {
-        const yearEl = e.target.closest('.md-year');
-        if (yearEl) {
-            const y = yearEl.dataset.year;
-            if (monthFilterExpanded.has(y)) monthFilterExpanded.delete(y);
-            else monthFilterExpanded.add(y);
-            updateMonthFilter();
-            return;
-        }
-        const rowEl = e.target.closest('.md-row');
-        if (rowEl) {
-            state.monthFilter = rowEl.dataset.month || '';
-            txnAnomalyOnly = false;
-            dd.classList.add('hidden');
-            renderTransactions();
-        }
-    });
-
-    // 点面板外面自动收起（按钮自己的点击已 stopPropagation，不会误伤）
-    document.addEventListener('click', (e) => {
-        if (dd.classList.contains('hidden')) return;
-        if (!e.target.closest('.month-filter')) dd.classList.add('hidden');
+    btn.addEventListener('click', () => {
+        if (ymWheelIsOpen()) { closeYmWheel(); return; }   // 再点一次收起
+        const cur = state.monthFilter;
+        const now = new Date();
+        openYmWheel(btn, {
+            year: cur ? Number(cur.slice(0, 4)) : now.getFullYear(),
+            month: cur ? Number(cur.slice(5, 7)) : (now.getMonth() + 1),
+            allowClear: true,
+            clearLabel: '所有月份',
+            onPick: (y, m) => {
+                state.monthFilter = `${y}-${String(m).padStart(2, '0')}`;
+                txnAnomalyOnly = false;
+                renderTransactions();
+            },
+            onClear: () => {
+                state.monthFilter = '';
+                txnAnomalyOnly = false;
+                renderTransactions();
+            }
+        });
     });
 }
 
@@ -12760,6 +12988,9 @@ function initEventListeners() {
     // 月份筛选：年份折叠面板（v1.39.69，替换原生 select 的 change 监听）
     initMonthFilterPanel();
 
+    // 记一笔的日期步进器（v1.39.73，仅桌面端；手机端保留系统原生日期控件）
+    initDateStepper();
+
     // 金额显示屏：允许直接键入/粘贴（v1.39.69）
     initAmountInput();
 
@@ -12793,15 +13024,9 @@ function initEventListeners() {
     initReturnListeners();
 
     // Report year/month selectors
-    document.getElementById('reportYearSelect').addEventListener('change', (e) => {
-        state.reportYear = parseInt(e.target.value);
-        renderReports();
-    });
-
-    document.getElementById('reportMonthSelect').addEventListener('change', (e) => {
-        state.reportMonth = parseInt(e.target.value);
-        renderReports();
-    });
+    bindYmAnchorBtn('reportYmBtn',
+        () => ({ y: state.reportYear || new Date().getFullYear(), m: state.reportMonth || (new Date().getMonth() + 1) }),
+        (y, m) => { state.reportYear = y; state.reportMonth = m; renderReports(); });
 
     // Currency
     document.getElementById('currencySelect').addEventListener('change', (e) => {
