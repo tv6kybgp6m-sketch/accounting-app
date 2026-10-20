@@ -3789,8 +3789,16 @@ table.bill-stats {
 .ym-wheel-highlight { position: absolute; left: 8px; right: 8px; top: 50%; height: 40px; transform: translateY(-50%); background: var(--bg-card-hover); border-radius: 10px; pointer-events: none; }
 .ym-wheel-col { position: relative; height: 200px; overflow-y: auto; scroll-snap-type: y mandatory; padding: 80px 0; scrollbar-width: none; overscroll-behavior: contain; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 24%, #000 76%, transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 24%, #000 76%, transparent 100%); }
 .ym-wheel-col::-webkit-scrollbar { display: none; }
-.ym-wheel-col > div { height: 40px; line-height: 40px; min-width: 64px; padding: 0 14px; text-align: center; scroll-snap-align: center; color: var(--text-tertiary); font-size: 16px; cursor: pointer; user-select: none; -webkit-user-select: none; font-family: var(--font); }
+/* white-space:nowrap 是 v1.39.76 加的：手机上 .ym-pair 所在的格子很窄，轮盘两列被压到
+   min-width，「2026年」里 4 个数字 + 「年」放不下就把「年」挤到第二行，点的时候对不准。
+   加了 nowrap 后列宽会按整行文字的自然宽度算，不再折行（电脑端本来就一行，此规则无副作用）。 */
+.ym-wheel-col > div { height: 40px; line-height: 40px; min-width: 64px; padding: 0 14px; text-align: center; scroll-snap-align: center; color: var(--text-tertiary); font-size: 16px; cursor: pointer; user-select: none; -webkit-user-select: none; font-family: var(--font); white-space: nowrap; }
 .ym-wheel-col > div.active { color: var(--text-primary); font-weight: 600; }
+/* 手机上再收一档：年月轮盘是 absolute 定位，容器越窄越容易被压到下限宽。
+   两列加起来仍远小于手机屏宽，不会顶出横向滚动条。 */
+@media (max-width: 640px) {
+    .ym-wheel-col > div { min-width: 56px; padding: 0 8px; font-size: 15px; }
+}
 /* ---- 通用「年月日轮盘」浮层：挂 body、fixed 定位，避免被页面容器的 overflow 裁切 ---- */
 /* 与弹窗内那份 .ym-wheel 的区别只在外层容器，列/高亮/遮罩三套样式完全复用 */
 .ym-wheel-fixed {
@@ -3808,6 +3816,8 @@ table.bill-stats {
 /* 高亮条和遮罩都以这一层为定位基准（它是 position:relative） */
 .ym-wheel-cols { position: relative; display: flex; gap: 2px; }
 .ym-wheel-day[hidden] { display: none; }
+/* v1.39.76：按年看时整列月份不出现。显式写 display:none，别只靠 UA 的 [hidden] 规则 */
+.ym-wheel-col[hidden] { display: none; }
 /* 「所有月份」这类清除行：轮盘底下一整行，点了就清掉筛选 */
 .ym-wheel-clear {
     margin-top: 4px;

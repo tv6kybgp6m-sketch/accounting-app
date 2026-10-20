@@ -1028,11 +1028,12 @@
                             <select id="monthlyInMonth" hidden></select>
                         </div>
                         <!-- v1.39.74：加行 / 加列从表格最底下挪到「本人」这一行，抬头就能点 -->
+                        <!-- v1.39.76：去掉文字里的「＋」——按钮本身就有边框，再加个加号显得啰嗦 -->
                         <div class="form-group mw-addbtns">
                             <button type="button" class="btn-mini primary" id="mwAddAccountBtn"
-                                    title="加一行：放钱的地方（支付宝 / 微信 / 工商银行 / 摩根…）">＋ 增加账户</button>
+                                    title="加一行：放钱的地方（支付宝 / 微信 / 工商银行 / 摩根…）">增加账户</button>
                             <button type="button" class="btn-mini" id="mwAddColBtn"
-                                    title="新增资产列或负债列">＋ 增加列</button>
+                                    title="新增资产列或负债列">增加列</button>
                         </div>
                     </div>
                     <div class="bal-entry-actions">
@@ -1364,7 +1365,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.75').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.76').catch(() => {});
             });
         }
     </script>

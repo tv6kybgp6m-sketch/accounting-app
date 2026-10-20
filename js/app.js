@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.75';  // v1.39.75：①【轮盘永远停在第一格 → 默认不是当月】根因：openYmWheel / toggleMonthWheel 都是「先建列（里面设 scrollTop）再 hidden=false」，而 display:none 的元素没有滚动区域、此时设 scrollTop 会被忽略（一直是 0）→ 打开就停在年/月的第一格（月份第一格是「1月」）。改成「先显示、再建列」，两套轮盘都改。②【交易记录「所有月份」】点开默认停留当月。③【报表分析】月报右边的日期默认当月、点开也停当月。④【资产负债 / 投资收益】日期默认「上个月」——当月还没记、要下个月才记；并且选中「当月及以后」时也退回上个月。⑤【记月度账单】统一走新增的 prevMonthYM()，默认 = 上个月。⑥【加行 / 加列常驻显示】查看模式不再隐藏这两个按钮；并补齐 .btn-mini 的基础样式（此前全项目根本没有 .btn-mini 样式、一直靠浏览器默认按钮外观），字号 / 高度与「本人」下拉一致（13px / 32px）。⑦删掉底部常用渠道 chip（+支付宝…）与「一行 = 一个放钱的地方…」说明文字，连同它们的 CSS 一起清掉。v1.39.74：①【记一笔的日期改回原生控件】v1.39.73 给桌面端换的那套 ‹‹ ‹ [日期] › ›› 步进器实测下来更不好用，按用户要求撤掉，恢复系统原生 date 框（读 dateInput.value 的老逻辑本就零改动、手机端也从没动过）；顺手清掉步进器相关的 initDateStepper / refreshDateStepper / IS_TOUCH_PHONE 与 .date-stepper / .ds-group / .mw-new 样式。②【记月度账单：加行 / 加列挪到顶部】两个按钮从表格最底下挪到「本人 + 年月」那一行（.mw-addbtns，flex:0 0 auto、窄屏自动换行）；删掉前面那个输入框（对「增加列」本来就没用），改成点按钮直接弹窗填名字——「增加列」本来就是弹窗问，现在「增加账户」也一致（快捷键 chip 仍直接传名字、不再多问）；按钮变成静态 DOM 后必须加 dataset.bound 防重复绑定，否则每重绘一次就叠一层监听 → 点一下连着加出好几行 / 好几列；查看模式照旧隐藏这两个按钮。v1.39.73：四处日期控件按用户要求改造——①【月度账单弹窗默认「上个月」】以前没数据时退到 2015-01，现在一律默认今天的上个月（月初填上月账单最顺手）。②【记一笔的日期】桌面端（Mac 原生 App / 桌面浏览器）把原生日期框换成 ‹‹ ‹ [2026年10月19日] › ›› 步进器：‹‹›› 翻年、‹› 翻月，中间标签点开「年+月+日」三列轮盘；手机端不动，继续用系统原生日期控件（用户明确要求）。③【交易记录「所有月份」】年份折叠面板换成 iOS 风格双列轮盘，底部保留「所有月份」清除行。④【报表/资产负债/投资收益顶部】两个原生下拉（年+月）合并成一个「2026年10月」锚点按钮，点开同一个轮盘。通用轮盘挂 body 用 fixed 定位——普通页面容器有 overflow 会裁掉弹窗里那套 absolute 轮盘；支持 withDay（带日列）/ allowClear（清除行）。v1.39.72：修轮盘两个显示问题——①背景透出后面数字：.ym-wheel 误用未定义的 --bg-pop（无兜底 → 背景声明无效变透明），改成已定义的 --bg-card（不透明）；②偏右：原 right:0 锚在右侧栏右缘，改为 left:50%+translateX(-50%) 以其正中的「2026年10月」按钮为基准居中，整块落在弹窗内。v1.39.71：月度账单弹窗年月选择重做——【左右箭头】‹ › 逐月翻（跨年自动进位，2015-01 和当年当月处自动禁用）；【点中间「2026年10月」调出双列轮盘】iOS 风格，中条为选中、上下渐隐、scroll-snap 滚动停稳即选中；年份 2015 起到当年（v1.39.70 年份条从 1976 起被否：起点不对且不够优雅）。月份仍存在隐藏 select 里，沿用上期/清空/保存等老逻辑零改动。v1.39.70：①【粘贴静默错值】金额框粘贴科学计数法（1e5）被原清洗逻辑把"e"当杂质吃掉变成15——新增 pasteToCalcExpr：整段若是合法数字（含 1e5/1.5e3）先走 Number 展开，加减表达式才走老路径。②【月份选择器】月度账单弹窗年份从"手敲输入框"改为年份条（chip 横滑点选，覆盖 nowYear-50~nowYear 共约50年，远超旧下拉约10年上限；每个 chip ≥42px 触控友好）。v1.39.69：交易记录页四项修复——①【搜索彻底瘫痪】Excel 导入把数字单元格写进备注列（真实数据里有 note=2080 一笔），getFilteredTransactions 的 t.note.toLowerCase() 在这笔上抛 TypeError，任何搜索词都让整个筛选链崩掉、列表原样不动（用户体感"搜索框无效"）。修法三路：过滤时一律 String() 转型后再匹配（并顺带把搜索范围从"备注+分类"扩到"备注/分类/支付方式/金额"，和界面看得见的字段对齐）；loadState 加载时把非字符串备注统一规整成字符串（治存量）；Excel 导入时备注/时间/支付方式一律 String() 化（治增量）。②【金额不能粘贴】金额显示屏原是 readonly 且无 paste 监听，粘贴毫无反应。现允许直接键入/粘贴：paste 事件解析剪贴板文本（容忍 ¥ 、逗号、"元"等杂质）整体替换表达式；beforeinput 把键入的每个字符导进和数字键盘完全相同的 numpadPress 规则；input 事件兜底规整。inputmode=none 保留，手机不弹系统键盘。③【月份选择器】原生 select 平铺 100+ 个月份（真实数据 118 个月）难找难点。改成年份折叠面板：年份行从新到旧、默认全折叠（沿用报表"全部"视图同款交互），点年份展开该年月份、点月份即筛选，面板外点击自动收起。④【弹窗误触】编辑弹窗里删除按钮和关闭 X 原来只隔 6px，改 18px。v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.76';  // v1.39.76：①【报表轮盘只列账本里真有的年月】新增 reportWheelYears / reportWheelMonths，年份 = 有交易的年份（+当年），某年下的月份 = 那年真正记过的月份（+当月）；空年份（如账本最早 2017 才有交易、轮盘却冒出 2015）不再出现。轮盘新增 opts.years / opts.monthsFor(year) / opts.withMonth 三个可选参数，ymWheelPick 换年份时按新年份重建月份列。②【按年看时不出现月份】报表/资产负债/投资收益在「年报」口径下 withMonth:false，月份整列不显示（月份本就没参与统计）。③【手机轮盘「2026年」折行】.ym-wheel-col > div 加 white-space:nowrap，并在 ≤640px 再收一档字号/内边距（桌面端本来就一行，无副作用）。④「＋ 增加账户 / ＋ 增加列」去掉文字里的加号。v1.39.75：①【轮盘永远停在第一格 → 默认不是当月】根因：openYmWheel / toggleMonthWheel 都是「先建列（里面设 scrollTop）再 hidden=false」，而 display:none 的元素没有滚动区域、此时设 scrollTop 会被忽略（一直是 0）→ 打开就停在年/月的第一格（月份第一格是「1月」）。改成「先显示、再建列」，两套轮盘都改。②【交易记录「所有月份」】点开默认停留当月。③【报表分析】月报右边的日期默认当月、点开也停当月。④【资产负债 / 投资收益】日期默认「上个月」——当月还没记、要下个月才记；并且选中「当月及以后」时也退回上个月。⑤【记月度账单】统一走新增的 prevMonthYM()，默认 = 上个月。⑥【加行 / 加列常驻显示】查看模式不再隐藏这两个按钮；并补齐 .btn-mini 的基础样式（此前全项目根本没有 .btn-mini 样式、一直靠浏览器默认按钮外观），字号 / 高度与「本人」下拉一致（13px / 32px）。⑦删掉底部常用渠道 chip（+支付宝…）与「一行 = 一个放钱的地方…」说明文字，连同它们的 CSS 一起清掉。v1.39.74：①【记一笔的日期改回原生控件】v1.39.73 给桌面端换的那套 ‹‹ ‹ [日期] › ›› 步进器实测下来更不好用，按用户要求撤掉，恢复系统原生 date 框（读 dateInput.value 的老逻辑本就零改动、手机端也从没动过）；顺手清掉步进器相关的 initDateStepper / refreshDateStepper / IS_TOUCH_PHONE 与 .date-stepper / .ds-group / .mw-new 样式。②【记月度账单：加行 / 加列挪到顶部】两个按钮从表格最底下挪到「本人 + 年月」那一行（.mw-addbtns，flex:0 0 auto、窄屏自动换行）；删掉前面那个输入框（对「增加列」本来就没用），改成点按钮直接弹窗填名字——「增加列」本来就是弹窗问，现在「增加账户」也一致（快捷键 chip 仍直接传名字、不再多问）；按钮变成静态 DOM 后必须加 dataset.bound 防重复绑定，否则每重绘一次就叠一层监听 → 点一下连着加出好几行 / 好几列；查看模式照旧隐藏这两个按钮。v1.39.73：四处日期控件按用户要求改造——①【月度账单弹窗默认「上个月」】以前没数据时退到 2015-01，现在一律默认今天的上个月（月初填上月账单最顺手）。②【记一笔的日期】桌面端（Mac 原生 App / 桌面浏览器）把原生日期框换成 ‹‹ ‹ [2026年10月19日] › ›› 步进器：‹‹›› 翻年、‹› 翻月，中间标签点开「年+月+日」三列轮盘；手机端不动，继续用系统原生日期控件（用户明确要求）。③【交易记录「所有月份」】年份折叠面板换成 iOS 风格双列轮盘，底部保留「所有月份」清除行。④【报表/资产负债/投资收益顶部】两个原生下拉（年+月）合并成一个「2026年10月」锚点按钮，点开同一个轮盘。通用轮盘挂 body 用 fixed 定位——普通页面容器有 overflow 会裁掉弹窗里那套 absolute 轮盘；支持 withDay（带日列）/ allowClear（清除行）。v1.39.72：修轮盘两个显示问题——①背景透出后面数字：.ym-wheel 误用未定义的 --bg-pop（无兜底 → 背景声明无效变透明），改成已定义的 --bg-card（不透明）；②偏右：原 right:0 锚在右侧栏右缘，改为 left:50%+translateX(-50%) 以其正中的「2026年10月」按钮为基准居中，整块落在弹窗内。v1.39.71：月度账单弹窗年月选择重做——【左右箭头】‹ › 逐月翻（跨年自动进位，2015-01 和当年当月处自动禁用）；【点中间「2026年10月」调出双列轮盘】iOS 风格，中条为选中、上下渐隐、scroll-snap 滚动停稳即选中；年份 2015 起到当年（v1.39.70 年份条从 1976 起被否：起点不对且不够优雅）。月份仍存在隐藏 select 里，沿用上期/清空/保存等老逻辑零改动。v1.39.70：①【粘贴静默错值】金额框粘贴科学计数法（1e5）被原清洗逻辑把"e"当杂质吃掉变成15——新增 pasteToCalcExpr：整段若是合法数字（含 1e5/1.5e3）先走 Number 展开，加减表达式才走老路径。②【月份选择器】月度账单弹窗年份从"手敲输入框"改为年份条（chip 横滑点选，覆盖 nowYear-50~nowYear 共约50年，远超旧下拉约10年上限；每个 chip ≥42px 触控友好）。v1.39.69：交易记录页四项修复——①【搜索彻底瘫痪】Excel 导入把数字单元格写进备注列（真实数据里有 note=2080 一笔），getFilteredTransactions 的 t.note.toLowerCase() 在这笔上抛 TypeError，任何搜索词都让整个筛选链崩掉、列表原样不动（用户体感"搜索框无效"）。修法三路：过滤时一律 String() 转型后再匹配（并顺带把搜索范围从"备注+分类"扩到"备注/分类/支付方式/金额"，和界面看得见的字段对齐）；loadState 加载时把非字符串备注统一规整成字符串（治存量）；Excel 导入时备注/时间/支付方式一律 String() 化（治增量）。②【金额不能粘贴】金额显示屏原是 readonly 且无 paste 监听，粘贴毫无反应。现允许直接键入/粘贴：paste 事件解析剪贴板文本（容忍 ¥ 、逗号、"元"等杂质）整体替换表达式；beforeinput 把键入的每个字符导进和数字键盘完全相同的 numpadPress 规则；input 事件兜底规整。inputmode=none 保留，手机不弹系统键盘。③【月份选择器】原生 select 平铺 100+ 个月份（真实数据 118 个月）难找难点。改成年份折叠面板：年份行从新到旧、默认全折叠（沿用报表"全部"视图同款交互），点年份展开该年月份、点月份即筛选，面板外点击自动收起。④【弹窗误触】编辑弹窗里删除按钮和关闭 X 原来只隔 6px，改 18px。v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -4745,6 +4745,28 @@ function renderReportSelectors() {
     label.textContent = period === 'year' ? `${currentYear}年` : `${currentYear}年${cm}月`;
 }
 
+// ---- 报表轮盘：只列账本里真的有记录的年月 ----
+// 用户反馈「账本最早 2017 才有交易，轮盘里却有 2015」——空白年份摆在那儿只会让人以为漏记了。
+// 年份清单 = 有交易的年份（外加今年，保证正在记的当年也能选到）；
+// 某一年下的月份清单 = 那一年真正记过账的月份（外加当月：今天的流水还没记，但当月报表也得能看）。
+function reportWheelYears() {
+    const now = new Date().getFullYear();
+    const ys = new Set(state.transactions.map(t => parseLocalDate(t.date).getFullYear()));
+    ys.add(now);
+    return [...ys].filter(y => Number.isFinite(y) && y >= YEAR_MIN && y <= now).sort((a, b) => b - a);
+}
+
+function reportWheelMonths(year) {
+    const now = new Date();
+    const ms = new Set();
+    state.transactions.forEach(t => {
+        const d = parseLocalDate(t.date);
+        if (d.getFullYear() === year) ms.add(d.getMonth() + 1);
+    });
+    if (year === now.getFullYear()) ms.add(now.getMonth() + 1);
+    return [...ms].filter(m => m >= 1 && m <= 12).sort((a, b) => a - b);
+}
+
 // ---- Reports: period helpers ----
 function getReportRange() {
     const now = new Date();
@@ -8457,21 +8479,42 @@ function ensureYmWheelDom() {
 
 function ymWheelFillCol(col, from, to, suffix, cur) {
     if (!col) return;
-    let html = '';
-    for (let v = from; v <= to; v++) {
-        html += `<div role="option" data-v="${v}"${v === cur ? ' class="active"' : ''}>${v}${suffix}</div>`;
-    }
-    col.innerHTML = html;
+    const list = [];
+    for (let v = from; v <= to; v++) list.push(v);
+    ymWheelFillList(col, list, suffix, cur);
 }
 
-// opts: { year, month, day, withDay, minYear, maxYear, onPick(y,m,d), allowClear, clearLabel, onClear() }
+// 按给定清单填一列（不是连续区间时用这个，比如「只列账本里真有的月份」）
+function ymWheelFillList(col, list, suffix, cur) {
+    if (!col) return;
+    col.innerHTML = (list || []).map(v =>
+        `<div role="option" data-v="${v}"${v === cur ? ' class="active"' : ''}>${v}${suffix}</div>`).join('');
+}
+
+// 这一列该显示哪些月份：opts.monthsFor(year) 给清单（没有就退回 1–12 全列）
+function ymWheelMonthList(opts, y) {
+    const src = typeof opts.monthsFor === 'function' ? opts.monthsFor(y) : opts.months;
+    if (!Array.isArray(src) || !src.length) return null;
+    const list = [...new Set(src.map(Number))].filter(v => Number.isFinite(v) && v >= 1 && v <= 12).sort((a, b) => a - b);
+    return list.length ? list : null;
+}
+
+// opts: { year, month, day, withDay, withMonth, years, monthsFor(y), minYear, maxYear,
+//         onPick(y,m,d), allowClear, clearLabel, onClear() }
 function ymWheelBuild(opts) {
     const root = ensureYmWheelDom();
     const now = new Date();
-    const minYear = Number(opts.minYear) || YEAR_MIN;
-    const maxYear = Number(opts.maxYear) || now.getFullYear();
+    // years：显式给年份清单（只列账本里真有的年份）；不给才退回 minYear..maxYear 连号
+    const yearList = Array.isArray(opts.years) && opts.years.length
+        ? [...new Set(opts.years.map(Number))].filter(v => Number.isFinite(v) && v <= now.getFullYear()).sort((a, b) => b - a)
+        : null;
+    const minYear = yearList ? yearList[yearList.length - 1] : (Number(opts.minYear) || YEAR_MIN);
+    const maxYear = yearList ? yearList[0] : (Number(opts.maxYear) || now.getFullYear());
     let y = Math.min(maxYear, Math.max(minYear, Number(opts.year) || maxYear));
-    let m = Math.min(12, Math.max(1, Number(opts.month) || (now.getMonth() + 1)));
+    const months0 = ymWheelMonthList(opts, y);
+    let m = months0
+        ? (months0.indexOf(Number(opts.month)) >= 0 ? Number(opts.month) : months0[months0.length - 1])
+        : Math.min(12, Math.max(1, Number(opts.month) || (now.getMonth() + 1)));
     let d = Math.min(ymDaysInMonth(y, m), Math.max(1, Number(opts.day) || now.getDate()));
     ymWheelState = { opts, y, m, d, minYear, maxYear };
 
@@ -8481,11 +8524,18 @@ function ymWheelBuild(opts) {
     const clearRow = root.querySelector('#ymWheelClear');
     // 年份从新到旧：常用的年份在前，少滚几格
     let yh = '';
-    for (let yy = maxYear; yy >= minYear; yy--) {
-        yh += `<div role="option" data-v="${yy}"${yy === y ? ' class="active"' : ''}>${yy}年</div>`;
+    if (yearList) {
+        yh = yearList.map(yy => `<div role="option" data-v="${yy}"${yy === y ? ' class="active"' : ''}>${yy}年</div>`).join('');
+    } else {
+        for (let yy = maxYear; yy >= minYear; yy--) {
+            yh += `<div role="option" data-v="${yy}"${yy === y ? ' class="active"' : ''}>${yy}年</div>`;
+        }
     }
     yearsCol.innerHTML = yh;
-    ymWheelFillCol(monthsCol, 1, 12, '月', m);
+    // withMonth:false = 按年看（年报）时整列不出现——此时月份根本没参与统计
+    monthsCol.hidden = opts.withMonth === false;
+    const months = months0 || (() => { const a = []; for (let i = 1; i <= 12; i++) a.push(i); return a; })();
+    ymWheelFillList(monthsCol, months, '月', m);
     daysCol.hidden = !opts.withDay;
     if (opts.withDay) ymWheelFillCol(daysCol, 1, ymDaysInMonth(y, m), '日', d);
     clearRow.hidden = !opts.allowClear;
@@ -8533,6 +8583,14 @@ function ymWheelPick(kind, v) {
         if (v === s.y) return;
         s.y = v;
         if (s.d > ymDaysInMonth(s.y, s.m)) s.d = ymDaysInMonth(s.y, s.m);   // 2月29 → 平年变 28
+        // 年份变了，这一年的「有哪些月」也变了（月份清单是按年给的）→ 重填月份列
+        if (s.opts.monthsFor || s.opts.months) {
+            const ml = ymWheelMonthList(s.opts, s.y);
+            if (ml) {
+                if (ml.indexOf(s.m) < 0) s.m = ml[ml.length - 1];
+                ymWheelFillList(document.querySelector('#ymWheelMonths'), ml, '月', s.m);
+            }
+        }
     } else if (kind === 'month') {
         if (v === s.m) return;
         s.m = v;
@@ -8545,7 +8603,7 @@ function ymWheelPick(kind, v) {
         ymWheelFillCol(document.querySelector('#ymWheelDays'), 1, ymDaysInMonth(s.y, s.m), '日', s.d);
     }
     ymWheelMarkActive();
-    if (kind !== 'day' && s.opts.withDay) ymWheelSyncScroll();
+    if (kind !== 'day' && (s.opts.withDay || (kind === 'year' && (s.opts.monthsFor || s.opts.months)))) ymWheelSyncScroll();
     if (s.opts.onPick) s.opts.onPick(s.y, s.m, s.opts.withDay ? s.d : null);
 }
 
@@ -8620,14 +8678,17 @@ function ymWheelIsOpen() {
 
 // 顶部「2026年10月」这类锚点按钮的统一接线：点开轮盘、选中即写回 state 并重绘该页。
 // getCurrent() 返回当前年月给轮盘作初始值；onPick(y, m) 由调用方写回自己的 state。
-function bindYmAnchorBtn(btnId, getCurrent, onPick) {
+// getOpts()（可选）每次点开时现算，典型用途：按年看时 withMonth:false（不出现月份列）、
+// 以及只列账本里真有的年份 / 年份下的月份清单。
+function bindYmAnchorBtn(btnId, getCurrent, onPick, getOpts) {
     const btn = document.getElementById(btnId);
     if (!btn || btn.dataset.ymBound) return;
     btn.dataset.ymBound = '1';
     btn.addEventListener('click', () => {
         if (ymWheelIsOpen()) { closeYmWheel(); return; }   // 再点一次收起
         const cur = getCurrent();
-        openYmWheel(btn, { year: cur.y, month: cur.m, onPick });
+        const extra = typeof getOpts === 'function' ? (getOpts() || {}) : {};
+        openYmWheel(btn, Object.assign({ year: cur.y, month: cur.m, onPick }, extra));
     });
 }
 
@@ -10483,7 +10544,8 @@ function initBalanceListeners() {
     });
     bindYmAnchorBtn('balanceYmBtn',
         () => ({ y: state.balanceYear || new Date().getFullYear(), m: state.balanceMonth || (new Date().getMonth() + 1) }),
-        (y, m) => { state.balanceYear = y; state.balanceMonth = m; renderBalance(); });
+        (y, m) => { state.balanceYear = y; state.balanceMonth = m; renderBalance(); },
+        () => ({ withMonth: state.balancePeriod !== 'year' }));
     bindModalMonth('monthly', () => { refreshMonthlyViewMode(); renderMonthlyEntry(); });
     const monthlyMemberSel = document.getElementById('monthlyMemberSelect');
     if (monthlyMemberSel) monthlyMemberSel.addEventListener('change', () => { refreshMonthlyViewMode(); renderMonthlyEntry(); });
@@ -12822,7 +12884,8 @@ function initReturnListeners() {
     });
     bindYmAnchorBtn('returnYmBtn',
         () => ({ y: state.returnYear || new Date().getFullYear(), m: state.returnMonth || (new Date().getMonth() + 1) }),
-        (y, m) => { state.returnYear = y; state.returnMonth = m; renderReturns(); });
+        (y, m) => { state.returnYear = y; state.returnMonth = m; renderReturns(); },
+        () => ({ withMonth: state.returnPeriod !== 'year' }));
 
 }
 
@@ -12945,7 +13008,13 @@ function initEventListeners() {
     // Report year/month selectors
     bindYmAnchorBtn('reportYmBtn',
         () => ({ y: state.reportYear || new Date().getFullYear(), m: state.reportMonth || (new Date().getMonth() + 1) }),
-        (y, m) => { state.reportYear = y; state.reportMonth = m; renderReports(); });
+        (y, m) => { state.reportYear = y; state.reportMonth = m; renderReports(); },
+        // 按年报时整列月份不出现（月份根本没参与统计）；年份 / 月份只列真有记录的
+        () => ({
+            withMonth: state.reportPeriod !== 'year',
+            years: reportWheelYears(),
+            monthsFor: reportWheelMonths,
+        }));
 
     // Currency
     document.getElementById('currencySelect').addEventListener('change', (e) => {
