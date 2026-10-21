@@ -853,15 +853,6 @@ body {
 }
 .txn-exclude-btn i { font-size: 10px; }
 
-/* 顶部提示条里的"已排除 N 笔·恢复"链接 */
-.txn-anomaly-restore {
-    color: var(--accent, #0984ff);
-    cursor: pointer;
-    text-decoration: none;
-    font-weight: 600;
-}
-.txn-anomaly-restore:hover { text-decoration: underline; }
-
 /* Empty State */
 .empty-state {
     display: flex;
@@ -1150,6 +1141,18 @@ body {
     background: var(--accent);
     color: #fff;
     box-shadow: var(--shadow-sm);
+}
+
+/* 折线/柱状趋势图：手机上允许"手指横向拖动读数"。
+   touch-action: pan-y 表示纵向滚动仍然交给页面（照常能滚），
+   横向手势留给图表自己处理 —— 不加的话，手指一横着划就是整页跟着动，
+   图表根本收不到 touchmove，也就读不出数。
+   点一下某个点看明细的老行为不受影响（那是 click，不是拖动）。 */
+#drillChart,
+#balanceChart,
+#returnChart,
+#tacChart {
+    touch-action: pan-y;
 }
 
 .drill-chart-empty {

@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.76';  // v1.39.76：①【报表轮盘只列账本里真有的年月】新增 reportWheelYears / reportWheelMonths，年份 = 有交易的年份（+当年），某年下的月份 = 那年真正记过的月份（+当月）；空年份（如账本最早 2017 才有交易、轮盘却冒出 2015）不再出现。轮盘新增 opts.years / opts.monthsFor(year) / opts.withMonth 三个可选参数，ymWheelPick 换年份时按新年份重建月份列。②【按年看时不出现月份】报表/资产负债/投资收益在「年报」口径下 withMonth:false，月份整列不显示（月份本就没参与统计）。③【手机轮盘「2026年」折行】.ym-wheel-col > div 加 white-space:nowrap，并在 ≤640px 再收一档字号/内边距（桌面端本来就一行，无副作用）。④「＋ 增加账户 / ＋ 增加列」去掉文字里的加号。v1.39.75：①【轮盘永远停在第一格 → 默认不是当月】根因：openYmWheel / toggleMonthWheel 都是「先建列（里面设 scrollTop）再 hidden=false」，而 display:none 的元素没有滚动区域、此时设 scrollTop 会被忽略（一直是 0）→ 打开就停在年/月的第一格（月份第一格是「1月」）。改成「先显示、再建列」，两套轮盘都改。②【交易记录「所有月份」】点开默认停留当月。③【报表分析】月报右边的日期默认当月、点开也停当月。④【资产负债 / 投资收益】日期默认「上个月」——当月还没记、要下个月才记；并且选中「当月及以后」时也退回上个月。⑤【记月度账单】统一走新增的 prevMonthYM()，默认 = 上个月。⑥【加行 / 加列常驻显示】查看模式不再隐藏这两个按钮；并补齐 .btn-mini 的基础样式（此前全项目根本没有 .btn-mini 样式、一直靠浏览器默认按钮外观），字号 / 高度与「本人」下拉一致（13px / 32px）。⑦删掉底部常用渠道 chip（+支付宝…）与「一行 = 一个放钱的地方…」说明文字，连同它们的 CSS 一起清掉。v1.39.74：①【记一笔的日期改回原生控件】v1.39.73 给桌面端换的那套 ‹‹ ‹ [日期] › ›› 步进器实测下来更不好用，按用户要求撤掉，恢复系统原生 date 框（读 dateInput.value 的老逻辑本就零改动、手机端也从没动过）；顺手清掉步进器相关的 initDateStepper / refreshDateStepper / IS_TOUCH_PHONE 与 .date-stepper / .ds-group / .mw-new 样式。②【记月度账单：加行 / 加列挪到顶部】两个按钮从表格最底下挪到「本人 + 年月」那一行（.mw-addbtns，flex:0 0 auto、窄屏自动换行）；删掉前面那个输入框（对「增加列」本来就没用），改成点按钮直接弹窗填名字——「增加列」本来就是弹窗问，现在「增加账户」也一致（快捷键 chip 仍直接传名字、不再多问）；按钮变成静态 DOM 后必须加 dataset.bound 防重复绑定，否则每重绘一次就叠一层监听 → 点一下连着加出好几行 / 好几列；查看模式照旧隐藏这两个按钮。v1.39.73：四处日期控件按用户要求改造——①【月度账单弹窗默认「上个月」】以前没数据时退到 2015-01，现在一律默认今天的上个月（月初填上月账单最顺手）。②【记一笔的日期】桌面端（Mac 原生 App / 桌面浏览器）把原生日期框换成 ‹‹ ‹ [2026年10月19日] › ›› 步进器：‹‹›› 翻年、‹› 翻月，中间标签点开「年+月+日」三列轮盘；手机端不动，继续用系统原生日期控件（用户明确要求）。③【交易记录「所有月份」】年份折叠面板换成 iOS 风格双列轮盘，底部保留「所有月份」清除行。④【报表/资产负债/投资收益顶部】两个原生下拉（年+月）合并成一个「2026年10月」锚点按钮，点开同一个轮盘。通用轮盘挂 body 用 fixed 定位——普通页面容器有 overflow 会裁掉弹窗里那套 absolute 轮盘；支持 withDay（带日列）/ allowClear（清除行）。v1.39.72：修轮盘两个显示问题——①背景透出后面数字：.ym-wheel 误用未定义的 --bg-pop（无兜底 → 背景声明无效变透明），改成已定义的 --bg-card（不透明）；②偏右：原 right:0 锚在右侧栏右缘，改为 left:50%+translateX(-50%) 以其正中的「2026年10月」按钮为基准居中，整块落在弹窗内。v1.39.71：月度账单弹窗年月选择重做——【左右箭头】‹ › 逐月翻（跨年自动进位，2015-01 和当年当月处自动禁用）；【点中间「2026年10月」调出双列轮盘】iOS 风格，中条为选中、上下渐隐、scroll-snap 滚动停稳即选中；年份 2015 起到当年（v1.39.70 年份条从 1976 起被否：起点不对且不够优雅）。月份仍存在隐藏 select 里，沿用上期/清空/保存等老逻辑零改动。v1.39.70：①【粘贴静默错值】金额框粘贴科学计数法（1e5）被原清洗逻辑把"e"当杂质吃掉变成15——新增 pasteToCalcExpr：整段若是合法数字（含 1e5/1.5e3）先走 Number 展开，加减表达式才走老路径。②【月份选择器】月度账单弹窗年份从"手敲输入框"改为年份条（chip 横滑点选，覆盖 nowYear-50~nowYear 共约50年，远超旧下拉约10年上限；每个 chip ≥42px 触控友好）。v1.39.69：交易记录页四项修复——①【搜索彻底瘫痪】Excel 导入把数字单元格写进备注列（真实数据里有 note=2080 一笔），getFilteredTransactions 的 t.note.toLowerCase() 在这笔上抛 TypeError，任何搜索词都让整个筛选链崩掉、列表原样不动（用户体感"搜索框无效"）。修法三路：过滤时一律 String() 转型后再匹配（并顺带把搜索范围从"备注+分类"扩到"备注/分类/支付方式/金额"，和界面看得见的字段对齐）；loadState 加载时把非字符串备注统一规整成字符串（治存量）；Excel 导入时备注/时间/支付方式一律 String() 化（治增量）。②【金额不能粘贴】金额显示屏原是 readonly 且无 paste 监听，粘贴毫无反应。现允许直接键入/粘贴：paste 事件解析剪贴板文本（容忍 ¥ 、逗号、"元"等杂质）整体替换表达式；beforeinput 把键入的每个字符导进和数字键盘完全相同的 numpadPress 规则；input 事件兜底规整。inputmode=none 保留，手机不弹系统键盘。③【月份选择器】原生 select 平铺 100+ 个月份（真实数据 118 个月）难找难点。改成年份折叠面板：年份行从新到旧、默认全折叠（沿用报表"全部"视图同款交互），点年份展开该年月份、点月份即筛选，面板外点击自动收起。④【弹窗误触】编辑弹窗里删除按钮和关闭 X 原来只隔 6px，改 18px。v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.77';  // v1.39.77：①【交易记录「已排除 N 笔·恢复」去掉】那个链接一直常驻在顶部提示条上，手一抖点上去就把排除全部撤销（白筛一遍）。删掉链接与 restoreAllAnomalies()，改成排除后弹 8 秒的临时「撤销」提示条（与删记录同一个时间窗）；单笔长期反悔仍点该行上的「已排除」按钮。②【折线/柱状图：竖线 + 左右移动读数】鼠标进入折线图/柱状图即出现一条竖线，左右移动就显示那一期的数值，不必把指针精确停在那个 3px 小圆点上（点多时圆点半径甚至是 0）。做法是 Chart.js 的两套判定分开设：interaction={mode:'index',intersect:false} 让提示框按「横向最近一期」取值（v3 起 tooltip.mode/intersect 已并入 interaction），同时把 hover 显式写回 nearest/true —— 不写回的话 hover 会跟着 fallback 变 index，「点某个点看明细」就会误触发。竖线用内联插件 chartCrosshairPlugin 在 afterDatasetsDraw 里自绘（Chart.js 4 无内置准星插件），数据源是 chart.tooltip.getActiveElements()（index 模式那一份），不是 chart.getActiveElements()（hover 模式，必须精确命中，用它竖线就不出现）。③【手机端手指左右拖动读数】四张图（报表走势 drillChart / 资产负债走势 balanceChart / 投资收益走势 returnChart / 总资产变化 tacChart）加 touch-action:pan-y —— 纵向滚动照常交给页面，横向手势留给图表，否则一横着划整页跟着动、图表收不到 touchmove。拖动读数后浏览器补发的 click 会被 bindChartTouchGuard/chartClickWasDrag（8px 阈值 + WeakMap 标记）拦掉，读着数不会误弹明细面板；「点一下某个点看详细数据」的老行为完全保留。v1.39.76：①【报表轮盘只列账本里真有的年月】新增 reportWheelYears / reportWheelMonths，年份 = 有交易的年份（+当年），某年下的月份 = 那年真正记过的月份（+当月）；空年份（如账本最早 2017 才有交易、轮盘却冒出 2015）不再出现。轮盘新增 opts.years / opts.monthsFor(year) / opts.withMonth 三个可选参数，ymWheelPick 换年份时按新年份重建月份列。②【按年看时不出现月份】报表/资产负债/投资收益在「年报」口径下 withMonth:false，月份整列不显示（月份本就没参与统计）。③【手机轮盘「2026年」折行】.ym-wheel-col > div 加 white-space:nowrap，并在 ≤640px 再收一档字号/内边距（桌面端本来就一行，无副作用）。④「＋ 增加账户 / ＋ 增加列」去掉文字里的加号。v1.39.75：①【轮盘永远停在第一格 → 默认不是当月】根因：openYmWheel / toggleMonthWheel 都是「先建列（里面设 scrollTop）再 hidden=false」，而 display:none 的元素没有滚动区域、此时设 scrollTop 会被忽略（一直是 0）→ 打开就停在年/月的第一格（月份第一格是「1月」）。改成「先显示、再建列」，两套轮盘都改。②【交易记录「所有月份」】点开默认停留当月。③【报表分析】月报右边的日期默认当月、点开也停当月。④【资产负债 / 投资收益】日期默认「上个月」——当月还没记、要下个月才记；并且选中「当月及以后」时也退回上个月。⑤【记月度账单】统一走新增的 prevMonthYM()，默认 = 上个月。⑥【加行 / 加列常驻显示】查看模式不再隐藏这两个按钮；并补齐 .btn-mini 的基础样式（此前全项目根本没有 .btn-mini 样式、一直靠浏览器默认按钮外观），字号 / 高度与「本人」下拉一致（13px / 32px）。⑦删掉底部常用渠道 chip（+支付宝…）与「一行 = 一个放钱的地方…」说明文字，连同它们的 CSS 一起清掉。v1.39.74：①【记一笔的日期改回原生控件】v1.39.73 给桌面端换的那套 ‹‹ ‹ [日期] › ›› 步进器实测下来更不好用，按用户要求撤掉，恢复系统原生 date 框（读 dateInput.value 的老逻辑本就零改动、手机端也从没动过）；顺手清掉步进器相关的 initDateStepper / refreshDateStepper / IS_TOUCH_PHONE 与 .date-stepper / .ds-group / .mw-new 样式。②【记月度账单：加行 / 加列挪到顶部】两个按钮从表格最底下挪到「本人 + 年月」那一行（.mw-addbtns，flex:0 0 auto、窄屏自动换行）；删掉前面那个输入框（对「增加列」本来就没用），改成点按钮直接弹窗填名字——「增加列」本来就是弹窗问，现在「增加账户」也一致（快捷键 chip 仍直接传名字、不再多问）；按钮变成静态 DOM 后必须加 dataset.bound 防重复绑定，否则每重绘一次就叠一层监听 → 点一下连着加出好几行 / 好几列；查看模式照旧隐藏这两个按钮。v1.39.73：四处日期控件按用户要求改造——①【月度账单弹窗默认「上个月」】以前没数据时退到 2015-01，现在一律默认今天的上个月（月初填上月账单最顺手）。②【记一笔的日期】桌面端（Mac 原生 App / 桌面浏览器）把原生日期框换成 ‹‹ ‹ [2026年10月19日] › ›› 步进器：‹‹›› 翻年、‹› 翻月，中间标签点开「年+月+日」三列轮盘；手机端不动，继续用系统原生日期控件（用户明确要求）。③【交易记录「所有月份」】年份折叠面板换成 iOS 风格双列轮盘，底部保留「所有月份」清除行。④【报表/资产负债/投资收益顶部】两个原生下拉（年+月）合并成一个「2026年10月」锚点按钮，点开同一个轮盘。通用轮盘挂 body 用 fixed 定位——普通页面容器有 overflow 会裁掉弹窗里那套 absolute 轮盘；支持 withDay（带日列）/ allowClear（清除行）。v1.39.72：修轮盘两个显示问题——①背景透出后面数字：.ym-wheel 误用未定义的 --bg-pop（无兜底 → 背景声明无效变透明），改成已定义的 --bg-card（不透明）；②偏右：原 right:0 锚在右侧栏右缘，改为 left:50%+translateX(-50%) 以其正中的「2026年10月」按钮为基准居中，整块落在弹窗内。v1.39.71：月度账单弹窗年月选择重做——【左右箭头】‹ › 逐月翻（跨年自动进位，2015-01 和当年当月处自动禁用）；【点中间「2026年10月」调出双列轮盘】iOS 风格，中条为选中、上下渐隐、scroll-snap 滚动停稳即选中；年份 2015 起到当年（v1.39.70 年份条从 1976 起被否：起点不对且不够优雅）。月份仍存在隐藏 select 里，沿用上期/清空/保存等老逻辑零改动。v1.39.70：①【粘贴静默错值】金额框粘贴科学计数法（1e5）被原清洗逻辑把"e"当杂质吃掉变成15——新增 pasteToCalcExpr：整段若是合法数字（含 1e5/1.5e3）先走 Number 展开，加减表达式才走老路径。②【月份选择器】月度账单弹窗年份从"手敲输入框"改为年份条（chip 横滑点选，覆盖 nowYear-50~nowYear 共约50年，远超旧下拉约10年上限；每个 chip ≥42px 触控友好）。v1.39.69：交易记录页四项修复——①【搜索彻底瘫痪】Excel 导入把数字单元格写进备注列（真实数据里有 note=2080 一笔），getFilteredTransactions 的 t.note.toLowerCase() 在这笔上抛 TypeError，任何搜索词都让整个筛选链崩掉、列表原样不动（用户体感"搜索框无效"）。修法三路：过滤时一律 String() 转型后再匹配（并顺带把搜索范围从"备注+分类"扩到"备注/分类/支付方式/金额"，和界面看得见的字段对齐）；loadState 加载时把非字符串备注统一规整成字符串（治存量）；Excel 导入时备注/时间/支付方式一律 String() 化（治增量）。②【金额不能粘贴】金额显示屏原是 readonly 且无 paste 监听，粘贴毫无反应。现允许直接键入/粘贴：paste 事件解析剪贴板文本（容忍 ¥ 、逗号、"元"等杂质）整体替换表达式；beforeinput 把键入的每个字符导进和数字键盘完全相同的 numpadPress 规则；input 事件兜底规整。inputmode=none 保留，手机不弹系统键盘。③【月份选择器】原生 select 平铺 100+ 个月份（真实数据 118 个月）难找难点。改成年份折叠面板：年份行从新到旧、默认全折叠（沿用报表"全部"视图同款交互），点年份展开该年月份、点月份即筛选，面板外点击自动收起。④【弹窗误触】编辑弹窗里删除按钮和关闭 X 原来只隔 6px，改 18px。v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -3968,20 +3968,34 @@ function toggleTxnAnomalyOnly() {
 
 // 异常订单"排除"：用户确认某笔不是真异常，把它从异常检测里摘掉（只读核对的一部分，不改任何金额数据）。
 // 只记 txnId，随账本持久化；恢复时直接删记录即可。
+// v1.39.76：排除后立刻给一条 8 秒的「撤销」提示条（和删记录/清空账户那几处一个套路）。
+// 之前是在提示条里常驻一个「已排除 N 笔·恢复」链接 —— 那个链接一直挂在页面上，
+// 手一抖点上去就把排除全撤销了，白排除一遍。现在链接去掉，撤销只给 8 秒；
+// 单笔的长期反悔仍可用该行上的「已排除」按钮。
 function excludeAnomaly(id) {
     if (!id) return;
     state.excludedAnomalies[id] = true;
     saveState();
     renderTransactions();
+    showExcludeUndoToast(id);
+}
+
+// 排除后的临时撤销条：8 秒后自动消失（和 showUndoToast 同一个时间窗）
+function showExcludeUndoToast(id) {
+    const container = document.getElementById('toastContainer');
+    if (!container) { showToast('已排除该笔的异常标记', 'success'); return; }
+    const toast = document.createElement('div');
+    toast.className = 'toast undo';
+    toast.innerHTML = '<i class="fa-solid fa-eye-slash"></i> 已排除该笔的异常标记'
+        + '<button class="toast-undo-btn" type="button">撤销</button>';
+    const btn = toast.querySelector('.toast-undo-btn');
+    if (btn) btn.addEventListener('click', () => { restoreAnomaly(id); toast.remove(); });
+    container.appendChild(toast);
+    setTimeout(() => { toast.classList.add('fade-out'); setTimeout(() => toast.remove(), 300); }, 8000);
 }
 function restoreAnomaly(id) {
     if (!id) return;
     delete state.excludedAnomalies[id];
-    saveState();
-    renderTransactions();
-}
-function restoreAllAnomalies() {
-    state.excludedAnomalies = {};
     saveState();
     renderTransactions();
 }
@@ -3997,13 +4011,14 @@ function renderTxnAnomalyHint() {
     // 当前筛选范围内被"排除"的异常订单数（只统计仍在列表里的，避免脏 id 干扰）
     const listIds = new Set(list.map(t => t.id));
     const excludedCount = Object.keys(state.excludedAnomalies).filter(id => listIds.has(id)).length;
-    const restoreLink = excludedCount
-        ? ` · <a class="txn-anomaly-restore" onclick="restoreAllAnomalies();event.stopPropagation();">已排除 ${excludedCount} 笔·恢复</a>`
-        : '';
+    // v1.39.76：这里不再挂常驻的「已排除 N 笔·恢复」链接 —— 它一直显示在页面上，
+    // 误触就会把排除全部撤销（白筛一遍）。撤销改成排除后 8 秒的临时提示条；
+    // 单笔想反悔，仍可点该行上的「已排除」按钮。
+    const excludedInfo = excludedCount ? ` · 已排除 ${excludedCount} 笔` : '';
     // 已处于"只看异常订单"模式：提示条变成可点的返回开关
     if (txnAnomalyOnly) {
         el.className = 'txn-anomaly-hint active';
-        el.innerHTML = `<i class="fa-solid fa-filter"></i> 正在只看异常订单（<b>${reasons.size}</b> 笔） · 点击查看全部${restoreLink}`;
+        el.innerHTML = `<i class="fa-solid fa-filter"></i> 正在只看异常订单（<b>${reasons.size}</b> 笔） · 点击查看全部${excludedInfo}`;
         el.onclick = toggleTxnAnomalyOnly;
         return;
     }
@@ -4015,9 +4030,7 @@ function renderTxnAnomalyHint() {
     }));
     if (!amountAnomaly && !dup) {
         el.className = 'txn-anomaly-hint ok';
-        el.innerHTML = excludedCount
-            ? `<i class="fa-solid fa-circle-check"></i> 未发现异常金额或重复记账 · <a class="txn-anomaly-restore" onclick="restoreAllAnomalies();event.stopPropagation();">已排除 ${excludedCount} 笔·恢复</a>`
-            : '<i class="fa-solid fa-circle-check"></i> 未发现异常金额或重复记账';
+        el.innerHTML = '<i class="fa-solid fa-circle-check"></i> 未发现异常金额或重复记账' + excludedInfo;
         el.onclick = null;
         return;
     }
@@ -4025,7 +4038,7 @@ function renderTxnAnomalyHint() {
     if (amountAnomaly) parts.push(`<b>${amountAnomaly}</b> 笔金额异常`);
     if (dup) parts.push(`<b>${dup}</b> 笔疑似重复`);
     el.className = 'txn-anomaly-hint warn';
-    el.innerHTML = '<i class="fa-solid fa-circle-info"></i> ' + parts.join(' · ') + '（点击只看这些）' + restoreLink;
+    el.innerHTML = '<i class="fa-solid fa-circle-info"></i> ' + parts.join(' · ') + '（点击只看这些）' + excludedInfo;
     el.onclick = toggleTxnAnomalyOnly;
 }
 
@@ -5130,6 +5143,7 @@ function renderDrillChart() {
         if (token !== drillRenderToken) return;
         const ctx = document.getElementById('drillChart');
         if (!ctx) return;
+        bindChartTouchGuard(ctx);
         if (chartType === 'pie') renderDrillPie(ctx, txns, metric);
         else renderDrillTrend(ctx, txns, range, gran, metric, chartType);
     });
@@ -5142,6 +5156,138 @@ function chartPalette() {
         text: isDark ? '#98989d' : '#6e6e73',
         grid: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)',
     };
+}
+
+// ==================== 图表：十字准星 + 左右拖动读数 ====================
+// 需求（v1.39.77）：
+//  · 鼠标在折线/柱状图上左右移动时，出现一条竖线标出"当前对着的是哪一期"，
+//    并直接显示那一期的数值 —— 不用把指针精确停在那个 3px 的小圆点上（点多时圆点半径甚至是 0）。
+//  · 手机上用手指左右拖动同样能读数；点一下某个点仍然打开明细。
+// 分工（改的是 Chart.js 的两套"判定"，别混）：
+//  ① interaction.mode='index' + intersect:false —— 提示框改成"取横向最近的一期"，
+//     指针/手指只要在图上左右移动就跟着换数。这是 v3 起唯一的入口
+//     （v3 把 tooltip.mode / tooltip.intersect 并进了 interaction，v4 只剩这一处）。
+//     ⚠️ 靠 fallback 的话，hover 也会跟着变成 index —— 所以下面显式把 hover 写回 nearest。
+//  ② hover.mode / hover.intersect 显式写回 nearest/true —— 图表自己的悬停与点击判定不变，
+//     "点某个点看明细"的老行为一点没变。
+//  ③ 竖线自己画（Chart.js 4 没有内置准星插件）。
+//  ④ 触屏时手指正压着数据点，原生提示框会被挡住 → 另在图表左上角画一条读数。
+function chartCrosshairPlugin(format) {
+    return {
+        id: 'chartCrosshair',
+        afterDatasetsDraw(chart) {
+            const tip = chart.tooltip;
+            // 用提示框自己的"激活元素"取当前这一期 —— 它是按 index 模式算的（横向最近），
+            // 正是我们要的那一期；图表自己的 _active 用的是 hover 模式（必须精确命中），不能用。
+            const active = tip && typeof tip.getActiveElements === 'function' ? tip.getActiveElements() : [];
+            if (!active || !active.length) return;
+            const area = chart.chartArea;
+            if (!area) return;
+            const ctx = chart.ctx;
+            const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+
+            // 竖线画在"当前这一期"上；多个数据集（分组柱状图）时取中间
+            let x = 0, n = 0;
+            active.forEach(a => {
+                if (a.element && a.element.x != null) { x += a.element.x; n++; }
+            });
+            if (!n) return;
+            x /= n;
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(x, area.top);
+            ctx.lineTo(x, area.bottom);
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = dark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.18)';
+            ctx.stroke();
+
+            // 触屏读数：手指压着的地方正是数据点，原生提示框被挡住 → 挪到图表左上角
+            if (format && chart.canvas && chart.canvas.__pointerType === 'touch') {
+                const entries = active.map(a => {
+                    const ds = chart.data.datasets[a.datasetIndex] || {};
+                    return {
+                        datasetIndex: a.datasetIndex,
+                        index: a.index,
+                        raw: ds.data ? ds.data[a.index] : null,
+                        label: (chart.data.labels || [])[a.index],
+                        datasetLabel: ds.label,
+                    };
+                });
+                const text = format(entries, chart);
+                if (text) {
+                    ctx.font = '600 12px -apple-system, "PingFang SC", sans-serif';
+                    const tw = ctx.measureText(text).width;
+                    const bw = Math.min(tw + 16, area.width - 8);
+                    const bh = 22;
+                    const bx = area.left + 4, by = area.top + 4;
+                    ctx.fillStyle = dark ? 'rgba(40,40,44,0.94)' : 'rgba(255,255,255,0.95)';
+                    ctx.strokeStyle = dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.rect(bx, by, bw, bh);
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.fillStyle = dark ? '#f2f2f7' : '#1c1c1e';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(text, bx + 8, by + bh / 2 + 0.5, bw - 14);
+                }
+            }
+            ctx.restore();
+        },
+    };
+}
+
+// 折线/柱状趋势图共用的选项：提示框跟着"横向最近的一期"走，悬停/点击判定保持原样。
+function chartReadOptions() {
+    return {
+        // 提示框：取横向最近的一期，不要求指针压在数据点上
+        interaction: { mode: 'index', intersect: false },
+        // 图表自己的悬停/点击：仍然要精确命中（"点某个点看明细"的老行为不变）
+        hover: { mode: 'nearest', intersect: true },
+    };
+}
+
+// 手机上：手指横向拖着看数，抬手后浏览器还会补一个 click，
+// 那个 click 不能当成"点某个点看明细"，否则读着数就把明细弹出来了。
+// 这里只负责在 canvas 上记一个"刚才拖过"的标记，由各图的 onClick 自己去判断要不要理它。
+const __chartTouchState = new WeakMap();
+
+function bindChartTouchGuard(canvas) {
+    if (!canvas || canvas.dataset.touchGuard === '1') return;
+    canvas.dataset.touchGuard = '1';
+    const st = { moved: false, timer: null };
+    __chartTouchState.set(canvas, st);
+    let sx = 0, sy = 0;
+    const mark = type => { if (canvas) canvas.__pointerType = type; };
+    canvas.addEventListener('touchstart', e => {
+        const t = e.touches && e.touches[0];
+        if (!t) return;
+        mark('touch');
+        sx = t.clientX; sy = t.clientY;
+        st.moved = false;
+    }, { passive: true });
+    canvas.addEventListener('touchmove', e => {
+        const t = e.touches && e.touches[0];
+        if (!t) return;
+        mark('touch');
+        if (Math.abs(t.clientX - sx) <= 8 && Math.abs(t.clientY - sy) <= 8) return;
+        st.moved = true;
+        // 标记留着给随后那个 click 消费；过一会儿没人消费就自己清掉，
+        // 免得标记一直挂着、把下一次正常点击也吃掉。
+        clearTimeout(st.timer);
+        st.timer = setTimeout(() => { st.moved = false; }, 1500);
+    }, { passive: true });
+    canvas.addEventListener('mousemove', () => mark('mouse'), { passive: true });
+}
+
+// onClick 里统一用这个判断：刚才是在拖动看数（不是"点某个点"）就忽略这次点击。
+function chartClickWasDrag(canvas) {
+    const st = canvas && __chartTouchState.get(canvas);
+    if (!st || !st.moved) return false;
+    st.moved = false;
+    clearTimeout(st.timer);
+    return true;
 }
 
 function openBucketLedger(bucketIndex) {
@@ -5191,10 +5337,19 @@ function renderDrillTrend(ctx, txns, range, gran, metric, chartType) {
                 maxBarThickness: 44,
             }],
         },
+        // 竖线准星 + 左右移动读数（v1.39.77）
+        plugins: [chartCrosshairPlugin(entries => {
+            const e0 = entries[0];
+            if (!e0) return '';
+            return `${e0.label}  ${meta.name} ${formatCurrency(e0.raw)}`;
+        })],
         options: {
+            ...chartReadOptions(),
             responsive: true,
             maintainAspectRatio: false,
             onClick: (evt, elements) => {
+                // 刚在用手指横向拖着看数 → 抬手后补发的这次 click 不算数
+                if (chartClickWasDrag(ctx)) return;
                 if (elements && elements.length) openBucketLedger(elements[0].index);
             },
             onHover: (evt, elements) => {
@@ -7444,6 +7599,7 @@ function renderBalanceChart() {
         if (token !== balanceRenderToken) return;
         const ctx = document.getElementById('balanceChart');
         if (!ctx) return;
+        bindChartTouchGuard(ctx);
         if (chartType === 'pie') renderBalancePie(ctx, info);
         else renderBalanceTrend(ctx, chartType, meta, metric);
     });
@@ -7491,10 +7647,18 @@ function renderBalanceTrend(ctx, chartType, meta, metric) {
                 maxBarThickness: 40,
             }],
         },
+        // 竖线准星 + 左右移动读数（v1.39.77）
+        plugins: [chartCrosshairPlugin(entries => {
+            const e0 = entries[0];
+            if (!e0 || e0.raw === null || e0.raw === undefined) return '';
+            return `${e0.label}  ${meta.name} ${maskMoney(e0.raw)}`;
+        })],
         options: {
+            ...chartReadOptions(),
             responsive: true,
             maintainAspectRatio: false,
             onClick: (evt, elements) => {
+                if (chartClickWasDrag(ctx)) return;
                 if (!elements || !elements.length) return;
                 const b = balanceTrendMonths()[elements[0].index];
                 if (b) openAccountHistoryForPeriod(b.key, b.label);
@@ -12083,6 +12247,7 @@ function renderAssetChange() {
 function renderTacChart(t) {
     const canvas = document.getElementById('tacChart');
     if (!canvas) return;
+    bindChartTouchGuard(canvas);
     const draw = () => {
         const member = state.balanceOwner;
         // 起点那个月也画进去，才看得出"从哪儿变到哪儿"
@@ -12112,7 +12277,14 @@ function renderTacChart(t) {
                     pointBackgroundColor: '#0a84ff',
                 }],
             },
+            // 竖线准星 + 左右移动读数（v1.39.77）
+            plugins: [chartCrosshairPlugin(entries => {
+                const e0 = entries[0];
+                if (!e0 || e0.raw === null || e0.raw === undefined) return '';
+                return `${e0.label}  总资产 ${maskMoney(e0.raw)}`;
+            })],
             options: {
+                ...chartReadOptions(),
                 responsive: true, maintainAspectRatio: false,
                 plugins: {
                     legend: { display: false },
@@ -12372,6 +12544,7 @@ function renderReturnChart() {
         if (token !== returnRenderToken) return;
         const ctx = document.getElementById('returnChart');
         if (!ctx) return;
+        bindChartTouchGuard(ctx);
         if (chartType === 'pie') renderReturnPie(ctx, info);
         else renderReturnTrend(ctx, chartType);
     });
@@ -12419,10 +12592,21 @@ function renderReturnTrend(ctx, chartType) {
                 maxBarThickness: 40,
             }],
         },
+        // 竖线准星 + 左右移动读数（v1.39.77）
+        plugins: [chartCrosshairPlugin(entries => {
+            const e0 = entries[0];
+            if (!e0) return '';
+            if (e0.raw === null || e0.raw === undefined) return `${e0.label}  本金未知，算不出收益率`;
+            return rate
+                ? `${e0.label}  收益率 ${e0.raw.toFixed(2)}%`
+                : `${e0.label}  收益 ${maskMoney(e0.raw)}`;
+        })],
         options: {
+            ...chartReadOptions(),
             responsive: true,
             maintainAspectRatio: false,
             onClick: (evt, elements) => {
+                if (chartClickWasDrag(ctx)) return;
                 if (!elements || !elements.length) return;
                 const b = returnTrendBuckets()[elements[0].index];
                 if (b) openReturnDetailForPeriod(b.months, b.label);
