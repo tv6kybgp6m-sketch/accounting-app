@@ -824,7 +824,29 @@
                         <div class="category-picker" id="categoryPicker"></div>
                     </div>
                     <div class="form-row">
-                        <div class="form-group">
+                        <div class="form-group form-group-date">
+                            <label>日期</label>
+                            <!-- v1.39.81：日期只显示「月.日」（10.22），不显示年。
+                                 做法：上面那层是只读的显示框（显示 10.22），
+                                 底下压着一个透明的原生 <input type="date"> ——
+                                 点它照样能唤起 iOS 原生日期选择器，
+                                 真值仍然存在 dateInput.value 里，保存逻辑零改动。
+                                 v1.39.82：HTML 顺序保持「日期/时间/成员/支付方式/备注」不变
+                                 （电脑端靠这个顺序），手机端要的另一套顺序用 CSS order 重排。 -->
+                            <div class="date-display">
+                                <input type="text" class="text-input" id="dateDisplay" readonly tabindex="-1">
+                                <input type="date" class="text-input" id="dateInput">
+                            </div>
+                        </div>
+                        <div class="form-group form-group-time">
+                            <label>时间</label>
+                            <input type="time" class="text-input" id="timeInput">
+                        </div>
+                        <div class="form-group" id="memberFormGroup" style="display:none">
+                            <label>归属成员</label>
+                            <select class="text-input" id="memberInput"></select>
+                        </div>
+                        <div class="form-group form-group-pay">
                             <label>支付方式</label>
                             <select class="text-input" id="paymentInput">
                                 <option value="微信" selected>微信</option>
@@ -838,26 +860,6 @@
                         <div class="form-group form-group-note">
                             <label>备注</label>
                             <input type="text" class="text-input" id="noteInput" placeholder="可选备注...">
-                        </div>
-                        <div class="form-group form-group-date">
-                            <label>日期</label>
-                            <!-- v1.39.81：日期只显示「月.日」（10.22），不显示年。
-                                 做法：上面那层是只读的显示框（显示 10.22），
-                                 底下压着一个透明的原生 <input type="date"> ——
-                                 点它照样能唤起 iOS 原生日期选择器，
-                                 真值仍然存在 dateInput.value 里，保存逻辑零改动。 -->
-                            <div class="date-display">
-                                <input type="text" class="text-input" id="dateDisplay" readonly tabindex="-1">
-                                <input type="date" class="text-input" id="dateInput">
-                            </div>
-                        </div>
-                        <div class="form-group form-group-time">
-                            <label>时间</label>
-                            <input type="time" class="text-input" id="timeInput">
-                        </div>
-                        <div class="form-group" id="memberFormGroup" style="display:none">
-                            <label>归属成员</label>
-                            <select class="text-input" id="memberInput"></select>
                         </div>
                     </div>
                     <!-- Custom calculator-style number pad -->
@@ -1374,7 +1376,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.81').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.82').catch(() => {});
             });
         }
     </script>

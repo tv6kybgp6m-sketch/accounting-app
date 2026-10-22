@@ -3571,7 +3571,7 @@ table.bill-stats {
        这样所有控件在同一条基线上，高度由行高统一，
        不管它是原生日期控件还是 select，视觉上都是齐的。
 
-       5 个格子一行：日期 / 时间 / 归属成员 / 支付方式 / 备注
+       5 个格子一行（顺序用 CSS order 重排，见下方 v1.39.82）。
        成员那格在单成员家庭会 display:none，此时其余四格自动均分（不会留空）。 */
     #transactionModal .form-row {
         display: grid;
@@ -3584,7 +3584,9 @@ table.bill-stats {
         margin: 0 0 6px;
         /* 靠竖线分隔格子，不要留白（gap 会让分隔线两侧不对称） */
         gap: 0;
-        background: var(--bg-input);
+        /* v1.39.82：底色去掉，用户要「不加底色」——
+           层次只靠上下两条横线 + 格子之间的竖线表达 */
+        background: transparent;
         border-radius: var(--radius-sm);
     }
     #transactionModal .form-row .form-group {
@@ -3611,8 +3613,24 @@ table.bill-stats {
     /* 备注是自由输入，文字可能比较长 —— 给它更多空间 */
     #transactionModal .form-group-note { flex: 0 0 auto; }
 
-    /* v1.39.81：输入框加一层浅灰底，跟白色行底区分开；
-       同时高度和字号都调大一点（40px→46px、12.5px→14px），手机上更好点、更好读。 */
+    /* v1.39.82：手机端用 CSS order 重排成「微信 / 备注 / 日期 / 时间 / 本人」。
+       ⚠️ HTML 顺序是两端共用的，所以绝不能为了改手机端顺序去动 HTML ——
+       那样会把电脑端的顺序一起改掉（v1.39.81 犯过这个错）。
+       这里保持 HTML 原顺序（日期/时间/成员/支付方式/备注）不动，
+       只用 order 在手机端重排 —— 两端互不影响。
+
+       ⚠️ 五个格子每个都要一条明确的 order，不能用 :not() 去"排除剩下的"：
+       `:not(.form-group-time)` 会同时命中支付方式/日期/成员/备注四个格子，
+       全被标成 order:1，再靠后面的规则逐个覆盖 —— 依赖 CSS 覆盖顺序，太脆弱。
+       所以给支付方式单独加了 .form-group-pay，五个格子一一对应。 */
+    #transactionModal .form-group-pay { order: 1; }
+    #transactionModal .form-group-note { order: 2; }
+    #transactionModal .form-group-date { order: 3; }
+    #transactionModal .form-group-time { order: 4; }
+    #transactionModal #memberFormGroup { order: 5; }
+
+    /* v1.39.82：输入框的灰底色去掉（用户要求），高度/字号保持 v1.39.81 的加大值。
+       视觉层次靠 form-row 的上下两条横线 + 格子之间的竖线来表达。 */
     #transactionModal .form-row .text-input {
         width: 100%;
         min-width: 0;
@@ -3623,8 +3641,8 @@ table.bill-stats {
         box-sizing: border-box;
         line-height: normal;
         border: none;
-        border-radius: 6px;
-        background: var(--bg-content);
+        border-radius: 0;
+        background: transparent;
         color: var(--text-primary);
     }
     /* iOS 原生日期/时间控件的内部元素：压掉它自带的 padding 和最小宽度，
@@ -3679,7 +3697,7 @@ table.bill-stats {
         display: block;
         position: relative;
         z-index: 1;
-        background: var(--bg-content);
+        background: transparent;   /* v1.39.82：底色去掉，跟其它格子一致 */
         pointer-events: none;   /* 让点击穿透到下面的原生控件 */
     }
     #transactionModal #dateInput {
