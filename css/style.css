@@ -2892,13 +2892,15 @@ body.cat-dragging {
         padding: 5px 2px;
         gap: 3px;
     }
+    /* v1.39.81：图标再大一点（34→38px）、文字 11.5→12.5px，
+       但每行每列的数量不变（仍是 5 列）。 */
     #transactionModal .cat-pick-icon {
-        width: 34px;
-        height: 34px;
-        font-size: 14.5px;
+        width: 38px;
+        height: 38px;
+        font-size: 16px;
     }
     #transactionModal .cat-pick-name {
-        font-size: 11.5px;
+        font-size: 12.5px;
     }
 
     /* Form row - tighter */
@@ -2915,14 +2917,16 @@ body.cat-dragging {
     /* Numpad - sticky bottom, always visible
        v1.39.78：这里原来写的是 background: var(--bg-modal)（白色），
        会把基础样式里的浅灰底覆盖掉（#id 的特异性比 .class 高）——
-       表现就是"加了浅灰背景但手机上还是白的"。改成 var(--bg-content)。 */
+       表现就是"加了浅灰背景但手机上还是白的"。改成 var(--bg-content)。
+       v1.39.81：按键放大一点（42→45px）、键与键的间隙缩小（5→1px），
+       但整个键盘模块占的高度分毫不变（4×45 + 3×1 = 183 = 原来的 4×42 + 3×5）。 */
     #transactionModal .numpad {
         position: sticky;
         bottom: 0;
         background: var(--bg-content);
         margin-top: auto;
         flex-shrink: 0;
-        gap: 5px;
+        gap: 1px;
         padding: 10px 14px max(10px, env(safe-area-inset-bottom, 0px));
         /* 负边距与 .modal-body 的左右 14px padding 对冲，让浅灰底铺满到弹窗两侧 */
         margin-left: -14px;
@@ -2930,11 +2934,16 @@ body.cat-dragging {
         border-radius: 0;
     }
     #transactionModal .numpad-btn {
-        height: 42px;
+        height: 45px;         /* v1.39.81：按键放大一点（42→45），更好按 */
         font-size: 18px;
         /* 边框也要在这条里加：#id 选择器会覆盖基础样式的 1px 边框 */
         border: 1px solid var(--border-strong);
     }
+    /* v1.39.81：键与键的间隙从 5px 缩到 1px（numpad 的 gap），
+       同时整个键盘模块的高度保持不变（原来 4×42 + 3×5 = 183px）。
+       算式：4×45 + 3×1 = 183px —— 分毫不差。
+       所以这里不需要任何负 margin 补偿（之前试过 -2.875px 那套，
+       会让行距变成 46.25px < 键高 50px，相邻两行的键会重叠）。 */
     /* v1.39.78：按压反馈必须用同样的 #id 写法，否则会被上面这条盖掉
        （#id 特异性 100 > .class:active 的 20）—— 表现就是"手机按了没反应"。 */
     #transactionModal .numpad-btn:active,
@@ -3536,6 +3545,16 @@ table.bill-stats {
 }
 
 /* ============================================
+   记一笔：日期显示层
+   —— 桌面端仍直接用原生日期框（显示完整日期），
+      那层「月.日」显示框是给手机端用的，桌面端藏掉。
+   ============================================ */
+#transactionModal .date-display { position: relative; width: 100%; }
+#transactionModal #dateDisplay { display: none; }
+#transactionModal #dateInput { position: static; width: 100%; height: 38px; opacity: 1; color: var(--text-primary); }
+#transactionModal #dateInput::-webkit-date-and-time-value { color: var(--text-primary); }
+
+/* ============================================
    记一笔（移动端）：日期/时间/支付方式 三个框等宽等高；
    弹出的日期/时间选择器贴近屏幕下方中央，方便拇指操作
    ============================================ */
@@ -3592,19 +3611,20 @@ table.bill-stats {
     /* 备注是自由输入，文字可能比较长 —— 给它更多空间 */
     #transactionModal .form-group-note { flex: 0 0 auto; }
 
-    /* 统一的控件样式：无边框、无圆角、透明底，全部靠分隔线区分格子 */
+    /* v1.39.81：输入框加一层浅灰底，跟白色行底区分开；
+       同时高度和字号都调大一点（40px→46px、12.5px→14px），手机上更好点、更好读。 */
     #transactionModal .form-row .text-input {
         width: 100%;
         min-width: 0;
-        height: 40px;
-        padding: 0;
-        font-size: 12.5px;
+        height: 46px;
+        padding: 0 6px;
+        font-size: 14px;
         text-align: center;
         box-sizing: border-box;
         line-height: normal;
         border: none;
-        border-radius: 0;
-        background: transparent;
+        border-radius: 6px;
+        background: var(--bg-content);
         color: var(--text-primary);
     }
     /* iOS 原生日期/时间控件的内部元素：压掉它自带的 padding 和最小宽度，
@@ -3620,7 +3640,7 @@ table.bill-stats {
     #transactionModal .form-row input[type="date"]::-webkit-date-and-time-value,
     #transactionModal .form-row input[type="time"]::-webkit-date-and-time-value {
         text-align: center;
-        font-size: 12.5px;
+        font-size: 14px;
     }
     #transactionModal .form-row input[type="date"]::-webkit-calendar-picker-indicator,
     #transactionModal .form-row input[type="time"]::-webkit-calendar-picker-indicator {
@@ -3643,6 +3663,36 @@ table.bill-stats {
         padding-right: 0;
         text-align: center;
     }
+
+    /* ---- v1.39.81：日期只显示「月.日」（10.22）----
+       dateDisplay 是可见的显示框，dateInput 是透明的原生日期控件，
+       两者叠在一起：点哪都能唤起 iOS 原生日期选择器，但看到的是 10.22。
+       ⚠️ 基础样式里 dateDisplay 是 display:none（给桌面端用的），
+       这里必须显式改回来 —— 否则手机端日期格是空的。 */
+    #transactionModal .form-group-date { position: relative; }
+    #transactionModal .date-display {
+        position: relative;
+        width: 100%;
+        display: flex;
+    }
+    #transactionModal #dateDisplay {
+        display: block;
+        position: relative;
+        z-index: 1;
+        background: var(--bg-content);
+        pointer-events: none;   /* 让点击穿透到下面的原生控件 */
+    }
+    #transactionModal #dateInput {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        width: 100%;
+        height: 100%;
+        opacity: 0;            /* 完全透明但仍可点 */
+        color: transparent;
+    }
+    /* 原生控件透明后，它的内部层也不能再显示文字 */
+    #transactionModal #dateInput::-webkit-date-and-time-value { color: transparent; }
 }
 
 
