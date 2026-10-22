@@ -2212,8 +2212,15 @@ body.cat-dragging {
     flex-direction: column;
     gap: 8px;
     margin-top: 8px;
-    padding-top: 14px;
+    /* v1.39.78：整个键盘区垫一层浅灰底（--bg-content = #f5f5f7）。
+       原来键盘直接贴在弹窗白底上，按键也是白底白边，看不出每个键的边界在哪。
+       负边距把浅灰铺满到弹窗两侧（与 .modal-body 的左右 14px padding 对冲），
+       这样键盘区是「一整块灰底 + 上面一排白键」，层次一下就出来了。 */
+    background: var(--bg-content);
+    padding: 10px 14px 14px;
+    margin: 8px -14px -8px;
     border-top: 0.5px solid var(--divider, var(--border));
+    border-radius: 0 0 var(--radius-lg, 12px) var(--radius-lg, 12px);
 }
 
 .numpad-row {
@@ -2224,48 +2231,65 @@ body.cat-dragging {
 
 .numpad-btn {
     height: 50px;
-    border: 0.5px solid var(--border, rgba(0,0,0,0.1));
+    /* v1.39.78：边框加深一档。键盘区变成浅灰底之后，
+       0.5px 的浅边框在这种对比下还是看不清每个键的边界。 */
+    border: 1px solid var(--border-strong);
     border-radius: 10px;
     background: var(--bg-card);
     color: var(--text-primary);
     font-size: 20px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.1s ease;
+    transition: background 0.08s ease, transform 0.08s ease, box-shadow 0.08s ease;
     display: flex;
     align-items: center;
     justify-content: center;
     font-family: var(--font);
     -webkit-tap-highlight-color: transparent;
     user-select: none;
+    touch-action: manipulation;
 }
 
+/* v1.39.78：按下反馈要看得见 —— 背景明显变灰 + 轻微下沉。
+   原来只有 transform: scale(0.95) 和一个跟白底几乎同色的背景，
+   手指按下去像没反应，不知道到底按没按上。
+   灰底用变量 --numpad-press（浅色 #d1d1d6 / 深色另配），别写死。 */
 .numpad-btn:active {
-    transform: scale(0.95);
-    background: var(--bg-content);
+    transform: scale(0.96);
+    background: var(--numpad-press, #d1d1d6);
+    color: var(--text-primary);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.12);
 }
+/* 数字键在按下时同样要变灰（原来 .numpad-num 没单独覆盖 :active） */
+.numpad-num:active { background: var(--numpad-press, #d1d1d6); }
+.numpad-op:active { background: var(--numpad-press-op, #c7c7cc); }
+.numpad-back:active { background: var(--numpad-press-op, #c7c7cc); }
+.numpad-quick:active { background: var(--numpad-press-op, #c7c7cc); }
 
 .numpad-num {
     font-size: 24px;
     font-weight: 400;
 }
 
+/* v1.39.78：键盘区底色改成浅灰后，这几个键原本也是 --bg-content（同一个浅灰），
+   会跟底色糊在一起、看不出边界。改成比底色更深的 --bg-card-hover 一档，
+   再叠一个明显的边框，层次才分得开。 */
 .numpad-op {
     font-size: 24px;
     color: var(--accent, #5865f2);
-    background: var(--bg-content);
+    background: var(--bg-card-hover);
 }
 
 .numpad-back {
     font-size: 18px;
     color: var(--text-secondary);
-    background: var(--bg-content);
+    background: var(--bg-card-hover);
 }
 
 .numpad-quick {
     font-size: 14px;
     color: var(--text-secondary);
-    background: var(--bg-content);
+    background: var(--bg-card-hover);
     font-weight: 500;
 }
 
@@ -2277,8 +2301,12 @@ body.cat-dragging {
     font-weight: 600;
 }
 
+/* OK 键是渐变色，不能用灰底覆盖（会盖掉渐变），
+   改成整体压暗一点，一样有明确的「按下去了」反馈 */
 .numpad-ok:active {
-    filter: brightness(0.95);
+    filter: brightness(0.88);
+    transform: scale(0.96);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.18);
 }
 
 [data-theme="dark"] .numpad-btn {
@@ -2286,10 +2314,17 @@ body.cat-dragging {
     border-color: var(--border);
 }
 
+/* v1.39.78：深色模式下的键盘区底色与按下反馈。
+   浅色那边用「浅灰底 + 更深的灰按下」，深色这边反过来：深色底 + 更亮的按下。 */
+[data-theme="dark"] .numpad {
+    --numpad-press: #48484a;
+    --numpad-press-op: #5a5a5d;
+}
+
 [data-theme="dark"] .numpad-op,
 [data-theme="dark"] .numpad-back,
 [data-theme="dark"] .numpad-quick {
-    background: var(--bg-content);
+    background: var(--bg-card-hover);
 }
 
 /* Category Picker */
@@ -2839,22 +2874,24 @@ body.cat-dragging {
         margin-top: 2px;
     }
 
-    /* Category picker - 5 per row, tighter gap */
+    /* Category picker - 5 per row, tighter gap
+       v1.39.78：图标 30→34、文字 10→11.5 稍微放大一点，
+       但列数仍是 5（不改一排几个的结构） */
     #transactionModal .category-picker {
         grid-template-columns: repeat(5, 1fr);
         gap: 4px;
     }
     #transactionModal .cat-pick-item {
         padding: 5px 2px;
-        gap: 2px;
+        gap: 3px;
     }
     #transactionModal .cat-pick-icon {
-        width: 30px;
-        height: 30px;
-        font-size: 13px;
+        width: 34px;
+        height: 34px;
+        font-size: 14.5px;
     }
     #transactionModal .cat-pick-name {
-        font-size: 10px;
+        font-size: 11.5px;
     }
 
     /* Form row - tighter */
@@ -3272,9 +3309,9 @@ body.cat-dragging {
         /* 锁定高度后，多余空白留在底部，不要被拉伸到行上 */
         align-content: start;
     }
-    #transactionModal .cat-pick-item { padding: 3px 1px; gap: 2px; }
-    #transactionModal .cat-pick-icon { width: 30px; height: 30px; font-size: 13px; }
-    #transactionModal .cat-pick-name { font-size: 10px; }
+    #transactionModal .cat-pick-item { padding: 3px 1px; gap: 3px; }
+    #transactionModal .cat-pick-icon { width: 34px; height: 34px; font-size: 14.5px; }
+    #transactionModal .cat-pick-name { font-size: 11.5px; }
     #transactionModal .form-row { gap: 8px; margin-bottom: 6px; }
     #transactionModal .text-input { padding: 6px 9px; font-size: 13px; }
     #transactionModal .numpad { display: none !important; }
@@ -3428,19 +3465,45 @@ table.bill-stats {
 }
 #transactionModal .form-row { align-items: flex-start; }
 
+/* v1.39.78：桌面端备注单独占一整行。
+   桌面的弹窗只有 460px 宽，四个框（日期/时间/成员/支付方式）已经占满，
+   再塞一个备注进去每个框只剩 80px 出头 —— 备注是自由文本，太窄根本没法写字。
+   手机端没有这个问题（那边是 2×2 网格 + 备注跨两列）。 */
+@media (min-width: 641px) {
+    #transactionModal .form-row {
+        /* 备注要能换到下一行占满整行，所以这里必须允许换行 */
+        flex-wrap: wrap;
+    }
+    #transactionModal .form-group-note {
+        flex: 1 0 100%;
+        margin-top: 8px;
+    }
+    #transactionModal .form-group-note .text-input { text-align: left; }
+}
+
 /* ============================================
    记一笔（移动端）：日期/时间/支付方式 三个框等宽等高；
    弹出的日期/时间选择器贴近屏幕下方中央，方便拇指操作
    ============================================ */
 @media (max-width: 640px) {
-    /* grid 的 1fr 强制三等分，不受原生 date/time 控件内容宽度影响 */
+    /* v1.39.78：四个框改 2×2 网格。
+       原来 3 列放 4 个框，归属成员掉到第二行、右侧空两格 —— 看着像漏了东西。
+       备注也从独立一行挪进来（grid-column: span 2），跟支付方式同一行占满。
+       顺序：日期 / 时间 ／ 归属成员 / 支付方式 ／ 备注(跨两列) */
     #transactionModal .form-row {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
         align-items: stretch;
     }
     #transactionModal .form-row .form-group { min-width: 0; margin-bottom: 0; }
+    #transactionModal .form-group-note {
+        grid-column: span 2;
+        /* 备注框跟上面几个框同高，不留半截 */
+        display: flex;
+        align-items: center;
+    }
+    #transactionModal .form-group-note .text-input { height: 44px; }
 
     /* 三个框强制同一高度。支付方式必须 appearance:none，否则 iOS 会用原生
        menulist 外观（带上下箭头），高度不受 CSS 控制，比另外两个框高出一截 */
@@ -3458,6 +3521,8 @@ table.bill-stats {
         background-color: var(--bg-input);
         color: var(--text-primary);
     }
+    /* 备注是自由输入，左对齐比居中好读 */
+    #transactionModal .form-group-note .text-input { text-align: left; }
     #transactionModal select#paymentInput {
         -webkit-appearance: none;
         appearance: none;
@@ -4135,6 +4200,8 @@ table.bill-stats {
 }
 .ret-cal-foot b { font-variant-numeric: tabular-nums; }
 .rc-note { font-size: 11.5px; color: var(--text-tertiary); text-align: right; }
+/* v1.39.78：算不出时的说明文字（比"—"更具体：告诉用户要补录什么） */
+.rc-muted { color: var(--text-tertiary); font-weight: 400; }
 @media (max-width: 640px) {
     /* 手机上一行放 3 个月（年收益同样一行 3 年）；桌面维持 4 列不动 */
     .ret-cal-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -4166,6 +4233,65 @@ table.bill-stats {
 .tac-tile.total { background: var(--bg-card); border: 0.5px solid var(--border-strong); }
 .tac-tile.total .tt-v { font-size: 18px; }
 .tac-na { color: var(--text-tertiary); font-weight: 500; }
+
+/* ---- v1.39.78：总资产变动归因（投入 / 收益 / 其他 三列并排）----
+   原来这三项混在 6 个瓦片里纵向排，看不出"涨的 10 万里多少是自己存的"。
+   单独拎出来并排成三列，每列带一条占比条，一眼看清归因。 */
+.tac-attr {
+    margin-top: 12px;
+    padding: 12px 14px 14px;
+    border-radius: 10px;
+    background: var(--bg-content);
+}
+.tac-attr-head {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+}
+.tac-attr-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+.tac-attr-col { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.tac-attr-col .ta-k { font-size: 12px; color: var(--text-secondary); }
+.tac-attr-col .ta-v {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    word-break: break-all;
+}
+/* 占比条：底槽 + 填充。填充色跟着方向走（涨用收入色、跌用支出色） */
+.tac-attr-col .ta-bar {
+    height: 5px;
+    border-radius: 3px;
+    background: var(--bg-card);
+    overflow: hidden;
+    margin: 2px 0 1px;
+}
+.tac-attr-col .ta-bar i {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--text-tertiary);
+}
+.tac-attr-col.attr-up .ta-bar i { background: var(--income); }
+.tac-attr-col.attr-down .ta-bar i { background: var(--expense); }
+/* 三项各给一个固定色，未看数也知道哪根是哪项 */
+.tac-attr-col.attr-in .ta-bar i { background: var(--accent); }
+.tac-attr-col.attr-earn .ta-bar i { background: var(--income); }
+.tac-attr-col.attr-other .ta-bar i { background: var(--text-tertiary); }
+.tac-attr-col .ta-s { font-size: 10.5px; color: var(--text-tertiary); line-height: 1.4; }
+/* 数字颜色跟全局一致；投资收益页是 A 股习惯（涨红跌绿），由下面的覆盖规则接管 */
+.tac-attr-col.attr-up .ta-v { color: var(--income); }
+.tac-attr-col.attr-down .ta-v { color: var(--expense); }
+@media (max-width: 640px) {
+    .tac-attr { padding: 10px 12px 12px; }
+    .tac-attr-row { gap: 8px; }
+    .tac-attr-col .ta-v { font-size: 13.5px; }
+    .tac-attr-col .ta-s { font-size: 10px; }
+}
 .tac-trend { margin-top: 12px; position: relative; }
 .tac-note { margin-top: 10px; font-size: 11.5px; line-height: 1.6; color: var(--text-tertiary); }
 .tac-note i { margin-right: 5px; }
@@ -4189,6 +4315,11 @@ table.bill-stats {
 .returns-tone .tac-tile.up .tt-v { color: var(--expense); }
 #view-returns .tac-tile.down .tt-v,
 .returns-tone .tac-tile.down .tt-v { color: var(--income); }
+/* v1.39.78：归因三列也跟着本页配色（涨红跌绿） */
+#view-returns .tac-attr-col.attr-up .ta-v,
+.returns-tone .tac-attr-col.attr-up .ta-v { color: var(--expense); }
+#view-returns .tac-attr-col.attr-down .ta-v,
+.returns-tone .tac-attr-col.attr-down .ta-v { color: var(--income); }
 #view-returns .breakdown-rate.income { color: var(--expense); }
 #view-returns .breakdown-rate.expense { color: var(--income); }
 

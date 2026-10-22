@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.77';  // v1.39.77：①【交易记录「已排除 N 笔·恢复」去掉】那个链接一直常驻在顶部提示条上，手一抖点上去就把排除全部撤销（白筛一遍）。删掉链接与 restoreAllAnomalies()，改成排除后弹 8 秒的临时「撤销」提示条（与删记录同一个时间窗）；单笔长期反悔仍点该行上的「已排除」按钮。②【折线/柱状图：竖线 + 左右移动读数】鼠标进入折线图/柱状图即出现一条竖线，左右移动就显示那一期的数值，不必把指针精确停在那个 3px 小圆点上（点多时圆点半径甚至是 0）。做法是 Chart.js 的两套判定分开设：interaction={mode:'index',intersect:false} 让提示框按「横向最近一期」取值（v3 起 tooltip.mode/intersect 已并入 interaction），同时把 hover 显式写回 nearest/true —— 不写回的话 hover 会跟着 fallback 变 index，「点某个点看明细」就会误触发。竖线用内联插件 chartCrosshairPlugin 在 afterDatasetsDraw 里自绘（Chart.js 4 无内置准星插件），数据源是 chart.tooltip.getActiveElements()（index 模式那一份），不是 chart.getActiveElements()（hover 模式，必须精确命中，用它竖线就不出现）。③【手机端手指左右拖动读数】四张图（报表走势 drillChart / 资产负债走势 balanceChart / 投资收益走势 returnChart / 总资产变化 tacChart）加 touch-action:pan-y —— 纵向滚动照常交给页面，横向手势留给图表，否则一横着划整页跟着动、图表收不到 touchmove。拖动读数后浏览器补发的 click 会被 bindChartTouchGuard/chartClickWasDrag（8px 阈值 + WeakMap 标记）拦掉，读着数不会误弹明细面板；「点一下某个点看详细数据」的老行为完全保留。v1.39.76：①【报表轮盘只列账本里真有的年月】新增 reportWheelYears / reportWheelMonths，年份 = 有交易的年份（+当年），某年下的月份 = 那年真正记过的月份（+当月）；空年份（如账本最早 2017 才有交易、轮盘却冒出 2015）不再出现。轮盘新增 opts.years / opts.monthsFor(year) / opts.withMonth 三个可选参数，ymWheelPick 换年份时按新年份重建月份列。②【按年看时不出现月份】报表/资产负债/投资收益在「年报」口径下 withMonth:false，月份整列不显示（月份本就没参与统计）。③【手机轮盘「2026年」折行】.ym-wheel-col > div 加 white-space:nowrap，并在 ≤640px 再收一档字号/内边距（桌面端本来就一行，无副作用）。④「＋ 增加账户 / ＋ 增加列」去掉文字里的加号。v1.39.75：①【轮盘永远停在第一格 → 默认不是当月】根因：openYmWheel / toggleMonthWheel 都是「先建列（里面设 scrollTop）再 hidden=false」，而 display:none 的元素没有滚动区域、此时设 scrollTop 会被忽略（一直是 0）→ 打开就停在年/月的第一格（月份第一格是「1月」）。改成「先显示、再建列」，两套轮盘都改。②【交易记录「所有月份」】点开默认停留当月。③【报表分析】月报右边的日期默认当月、点开也停当月。④【资产负债 / 投资收益】日期默认「上个月」——当月还没记、要下个月才记；并且选中「当月及以后」时也退回上个月。⑤【记月度账单】统一走新增的 prevMonthYM()，默认 = 上个月。⑥【加行 / 加列常驻显示】查看模式不再隐藏这两个按钮；并补齐 .btn-mini 的基础样式（此前全项目根本没有 .btn-mini 样式、一直靠浏览器默认按钮外观），字号 / 高度与「本人」下拉一致（13px / 32px）。⑦删掉底部常用渠道 chip（+支付宝…）与「一行 = 一个放钱的地方…」说明文字，连同它们的 CSS 一起清掉。v1.39.74：①【记一笔的日期改回原生控件】v1.39.73 给桌面端换的那套 ‹‹ ‹ [日期] › ›› 步进器实测下来更不好用，按用户要求撤掉，恢复系统原生 date 框（读 dateInput.value 的老逻辑本就零改动、手机端也从没动过）；顺手清掉步进器相关的 initDateStepper / refreshDateStepper / IS_TOUCH_PHONE 与 .date-stepper / .ds-group / .mw-new 样式。②【记月度账单：加行 / 加列挪到顶部】两个按钮从表格最底下挪到「本人 + 年月」那一行（.mw-addbtns，flex:0 0 auto、窄屏自动换行）；删掉前面那个输入框（对「增加列」本来就没用），改成点按钮直接弹窗填名字——「增加列」本来就是弹窗问，现在「增加账户」也一致（快捷键 chip 仍直接传名字、不再多问）；按钮变成静态 DOM 后必须加 dataset.bound 防重复绑定，否则每重绘一次就叠一层监听 → 点一下连着加出好几行 / 好几列；查看模式照旧隐藏这两个按钮。v1.39.73：四处日期控件按用户要求改造——①【月度账单弹窗默认「上个月」】以前没数据时退到 2015-01，现在一律默认今天的上个月（月初填上月账单最顺手）。②【记一笔的日期】桌面端（Mac 原生 App / 桌面浏览器）把原生日期框换成 ‹‹ ‹ [2026年10月19日] › ›› 步进器：‹‹›› 翻年、‹› 翻月，中间标签点开「年+月+日」三列轮盘；手机端不动，继续用系统原生日期控件（用户明确要求）。③【交易记录「所有月份」】年份折叠面板换成 iOS 风格双列轮盘，底部保留「所有月份」清除行。④【报表/资产负债/投资收益顶部】两个原生下拉（年+月）合并成一个「2026年10月」锚点按钮，点开同一个轮盘。通用轮盘挂 body 用 fixed 定位——普通页面容器有 overflow 会裁掉弹窗里那套 absolute 轮盘；支持 withDay（带日列）/ allowClear（清除行）。v1.39.72：修轮盘两个显示问题——①背景透出后面数字：.ym-wheel 误用未定义的 --bg-pop（无兜底 → 背景声明无效变透明），改成已定义的 --bg-card（不透明）；②偏右：原 right:0 锚在右侧栏右缘，改为 left:50%+translateX(-50%) 以其正中的「2026年10月」按钮为基准居中，整块落在弹窗内。v1.39.71：月度账单弹窗年月选择重做——【左右箭头】‹ › 逐月翻（跨年自动进位，2015-01 和当年当月处自动禁用）；【点中间「2026年10月」调出双列轮盘】iOS 风格，中条为选中、上下渐隐、scroll-snap 滚动停稳即选中；年份 2015 起到当年（v1.39.70 年份条从 1976 起被否：起点不对且不够优雅）。月份仍存在隐藏 select 里，沿用上期/清空/保存等老逻辑零改动。v1.39.70：①【粘贴静默错值】金额框粘贴科学计数法（1e5）被原清洗逻辑把"e"当杂质吃掉变成15——新增 pasteToCalcExpr：整段若是合法数字（含 1e5/1.5e3）先走 Number 展开，加减表达式才走老路径。②【月份选择器】月度账单弹窗年份从"手敲输入框"改为年份条（chip 横滑点选，覆盖 nowYear-50~nowYear 共约50年，远超旧下拉约10年上限；每个 chip ≥42px 触控友好）。v1.39.69：交易记录页四项修复——①【搜索彻底瘫痪】Excel 导入把数字单元格写进备注列（真实数据里有 note=2080 一笔），getFilteredTransactions 的 t.note.toLowerCase() 在这笔上抛 TypeError，任何搜索词都让整个筛选链崩掉、列表原样不动（用户体感"搜索框无效"）。修法三路：过滤时一律 String() 转型后再匹配（并顺带把搜索范围从"备注+分类"扩到"备注/分类/支付方式/金额"，和界面看得见的字段对齐）；loadState 加载时把非字符串备注统一规整成字符串（治存量）；Excel 导入时备注/时间/支付方式一律 String() 化（治增量）。②【金额不能粘贴】金额显示屏原是 readonly 且无 paste 监听，粘贴毫无反应。现允许直接键入/粘贴：paste 事件解析剪贴板文本（容忍 ¥ 、逗号、"元"等杂质）整体替换表达式；beforeinput 把键入的每个字符导进和数字键盘完全相同的 numpadPress 规则；input 事件兜底规整。inputmode=none 保留，手机不弹系统键盘。③【月份选择器】原生 select 平铺 100+ 个月份（真实数据 118 个月）难找难点。改成年份折叠面板：年份行从新到旧、默认全折叠（沿用报表"全部"视图同款交互），点年份展开该年月份、点月份即筛选，面板外点击自动收起。④【弹窗误触】编辑弹窗里删除按钮和关闭 X 原来只隔 6px，改 18px。v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.78';  // v1.39.78：①【记账弹窗布局（手机端）】支付方式与归属成员对调位置，备注从独立一行挪进 form-row 与支付方式同排（grid-column: span 2），四个框改 2×2 网格 —— 原来 3 列放 4 个框，归属成员掉到第二行、右侧空两格，看着像漏了东西。②【分类图标文字放大】手机端图标 30→34px、文字 10→11.5px，桌面端同步放大，但一排几个的结构不变（手机仍 5 个、桌面仍 6 个）。③【数字键盘】整块垫浅灰底（--bg-content）并与弹窗左右 padding 对冲，键与底色分得开；按键边框 0.5px→1px；按下时背景明显变灰 + 轻微下沉 + 内阴影（原来只有 scale(0.95) 和一个跟白底几乎同色的背景，手指按下去像没反应）；深色模式另配一套按下配色。④【收益率双口径 TWR + IRR】新增严格 IRR（资金加权）：现有的是时间加权（逐月连乘），剔掉加钱时点的影响；IRR 回答「你的钱实际赚了多少」，中途加钱越多两者差得越远。现金流构造三个坑：t=0 投 -(期初市值)、中途每期 -(净入金)（投入是负现金流）、期末 +(期末市值)；⚠️中途绝不能再加 profit，期末市值已含全部累计收益，加了就是重复计算（我第一版就错在这，算出来差一倍）。二分法求根，不引第三方库。算不出就给 null 并说明原因（没录净入金 / 缺期初余额 / 至少要 2 个月），绝不编数。行业里（Portfolio Performance / Wealthfolio / justETF）都是两个口径并列给。⑤【净资产变动归因拆解】把「投入 / 收益 / 其他」从 6 个瓦片里拎出来并排成三列，各带占比条 —— 一眼看清总资产涨的 10 万里多少是自己存的、多少是市场涨的（口径同 Wealthfolio / nett.money）。只读展示：这三项本来就算好的（other = delta − flow − profit），软件不替用户写任何数。v1.39.77：①【交易记录「已排除 N 笔·恢复」去掉】那个链接一直常驻在顶部提示条上，手一抖点上去就把排除全部撤销（白筛一遍）。删掉链接与 restoreAllAnomalies()，改成排除后弹 8 秒的临时「撤销」提示条（与删记录同一个时间窗）；单笔长期反悔仍点该行上的「已排除」按钮。②【折线/柱状图：竖线 + 左右移动读数】鼠标进入折线图/柱状图即出现一条竖线，左右移动就显示那一期的数值，不必把指针精确停在那个 3px 小圆点上（点多时圆点半径甚至是 0）。做法是 Chart.js 的两套判定分开设：interaction={mode:'index',intersect:false} 让提示框按「横向最近一期」取值（v3 起 tooltip.mode/intersect 已并入 interaction），同时把 hover 显式写回 nearest/true —— 不写回的话 hover 会跟着 fallback 变 index，「点某个点看明细」就会误触发。竖线用内联插件 chartCrosshairPlugin 在 afterDatasetsDraw 里自绘（Chart.js 4 无内置准星插件），数据源是 chart.tooltip.getActiveElements()（index 模式那一份），不是 chart.getActiveElements()（hover 模式，必须精确命中，用它竖线就不出现）。③【手机端手指左右拖动读数】四张图（报表走势 drillChart / 资产负债走势 balanceChart / 投资收益走势 returnChart / 总资产变化 tacChart）加 touch-action:pan-y —— 纵向滚动照常交给页面，横向手势留给图表，否则一横着划整页跟着动、图表收不到 touchmove。拖动读数后浏览器补发的 click 会被 bindChartTouchGuard/chartClickWasDrag（8px 阈值 + WeakMap 标记）拦掉，读着数不会误弹明细面板；「点一下某个点看详细数据」的老行为完全保留。v1.39.76：①【报表轮盘只列账本里真有的年月】新增 reportWheelYears / reportWheelMonths，年份 = 有交易的年份（+当年），某年下的月份 = 那年真正记过的月份（+当月）；空年份（如账本最早 2017 才有交易、轮盘却冒出 2015）不再出现。轮盘新增 opts.years / opts.monthsFor(year) / opts.withMonth 三个可选参数，ymWheelPick 换年份时按新年份重建月份列。②【按年看时不出现月份】报表/资产负债/投资收益在「年报」口径下 withMonth:false，月份整列不显示（月份本就没参与统计）。③【手机轮盘「2026年」折行】.ym-wheel-col > div 加 white-space:nowrap，并在 ≤640px 再收一档字号/内边距（桌面端本来就一行，无副作用）。④「＋ 增加账户 / ＋ 增加列」去掉文字里的加号。v1.39.75：①【轮盘永远停在第一格 → 默认不是当月】根因：openYmWheel / toggleMonthWheel 都是「先建列（里面设 scrollTop）再 hidden=false」，而 display:none 的元素没有滚动区域、此时设 scrollTop 会被忽略（一直是 0）→ 打开就停在年/月的第一格（月份第一格是「1月」）。改成「先显示、再建列」，两套轮盘都改。②【交易记录「所有月份」】点开默认停留当月。③【报表分析】月报右边的日期默认当月、点开也停当月。④【资产负债 / 投资收益】日期默认「上个月」——当月还没记、要下个月才记；并且选中「当月及以后」时也退回上个月。⑤【记月度账单】统一走新增的 prevMonthYM()，默认 = 上个月。⑥【加行 / 加列常驻显示】查看模式不再隐藏这两个按钮；并补齐 .btn-mini 的基础样式（此前全项目根本没有 .btn-mini 样式、一直靠浏览器默认按钮外观），字号 / 高度与「本人」下拉一致（13px / 32px）。⑦删掉底部常用渠道 chip（+支付宝…）与「一行 = 一个放钱的地方…」说明文字，连同它们的 CSS 一起清掉。v1.39.74：①【记一笔的日期改回原生控件】v1.39.73 给桌面端换的那套 ‹‹ ‹ [日期] › ›› 步进器实测下来更不好用，按用户要求撤掉，恢复系统原生 date 框（读 dateInput.value 的老逻辑本就零改动、手机端也从没动过）；顺手清掉步进器相关的 initDateStepper / refreshDateStepper / IS_TOUCH_PHONE 与 .date-stepper / .ds-group / .mw-new 样式。②【记月度账单：加行 / 加列挪到顶部】两个按钮从表格最底下挪到「本人 + 年月」那一行（.mw-addbtns，flex:0 0 auto、窄屏自动换行）；删掉前面那个输入框（对「增加列」本来就没用），改成点按钮直接弹窗填名字——「增加列」本来就是弹窗问，现在「增加账户」也一致（快捷键 chip 仍直接传名字、不再多问）；按钮变成静态 DOM 后必须加 dataset.bound 防重复绑定，否则每重绘一次就叠一层监听 → 点一下连着加出好几行 / 好几列；查看模式照旧隐藏这两个按钮。v1.39.73：四处日期控件按用户要求改造——①【月度账单弹窗默认「上个月」】以前没数据时退到 2015-01，现在一律默认今天的上个月（月初填上月账单最顺手）。②【记一笔的日期】桌面端（Mac 原生 App / 桌面浏览器）把原生日期框换成 ‹‹ ‹ [2026年10月19日] › ›› 步进器：‹‹›› 翻年、‹› 翻月，中间标签点开「年+月+日」三列轮盘；手机端不动，继续用系统原生日期控件（用户明确要求）。③【交易记录「所有月份」】年份折叠面板换成 iOS 风格双列轮盘，底部保留「所有月份」清除行。④【报表/资产负债/投资收益顶部】两个原生下拉（年+月）合并成一个「2026年10月」锚点按钮，点开同一个轮盘。通用轮盘挂 body 用 fixed 定位——普通页面容器有 overflow 会裁掉弹窗里那套 absolute 轮盘；支持 withDay（带日列）/ allowClear（清除行）。v1.39.72：修轮盘两个显示问题——①背景透出后面数字：.ym-wheel 误用未定义的 --bg-pop（无兜底 → 背景声明无效变透明），改成已定义的 --bg-card（不透明）；②偏右：原 right:0 锚在右侧栏右缘，改为 left:50%+translateX(-50%) 以其正中的「2026年10月」按钮为基准居中，整块落在弹窗内。v1.39.71：月度账单弹窗年月选择重做——【左右箭头】‹ › 逐月翻（跨年自动进位，2015-01 和当年当月处自动禁用）；【点中间「2026年10月」调出双列轮盘】iOS 风格，中条为选中、上下渐隐、scroll-snap 滚动停稳即选中；年份 2015 起到当年（v1.39.70 年份条从 1976 起被否：起点不对且不够优雅）。月份仍存在隐藏 select 里，沿用上期/清空/保存等老逻辑零改动。v1.39.70：①【粘贴静默错值】金额框粘贴科学计数法（1e5）被原清洗逻辑把"e"当杂质吃掉变成15——新增 pasteToCalcExpr：整段若是合法数字（含 1e5/1.5e3）先走 Number 展开，加减表达式才走老路径。②【月份选择器】月度账单弹窗年份从"手敲输入框"改为年份条（chip 横滑点选，覆盖 nowYear-50~nowYear 共约50年，远超旧下拉约10年上限；每个 chip ≥42px 触控友好）。v1.39.69：交易记录页四项修复——①【搜索彻底瘫痪】Excel 导入把数字单元格写进备注列（真实数据里有 note=2080 一笔），getFilteredTransactions 的 t.note.toLowerCase() 在这笔上抛 TypeError，任何搜索词都让整个筛选链崩掉、列表原样不动（用户体感"搜索框无效"）。修法三路：过滤时一律 String() 转型后再匹配（并顺带把搜索范围从"备注+分类"扩到"备注/分类/支付方式/金额"，和界面看得见的字段对齐）；loadState 加载时把非字符串备注统一规整成字符串（治存量）；Excel 导入时备注/时间/支付方式一律 String() 化（治增量）。②【金额不能粘贴】金额显示屏原是 readonly 且无 paste 监听，粘贴毫无反应。现允许直接键入/粘贴：paste 事件解析剪贴板文本（容忍 ¥ 、逗号、"元"等杂质）整体替换表达式；beforeinput 把键入的每个字符导进和数字键盘完全相同的 numpadPress 规则；input 事件兜底规整。inputmode=none 保留，手机不弹系统键盘。③【月份选择器】原生 select 平铺 100+ 个月份（真实数据 118 个月）难找难点。改成年份折叠面板：年份行从新到旧、默认全折叠（沿用报表"全部"视图同款交互），点年份展开该年月份、点月份即筛选，面板外点击自动收起。④【弹窗误触】编辑弹窗里删除按钮和关闭 X 原来只隔 6px，改 18px。v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -11958,6 +11958,203 @@ function pctText(r, digits) {
     return (r * 100).toFixed(digits === undefined ? 2 : digits) + '%';
 }
 
+// IRR 算不出来时的原因说明（v1.39.78）。
+// 说人话：告诉用户"要补录什么"才能算出来，而不是干巴巴一个"—"。
+function irrReasonText(reason) {
+    switch (reason) {
+        case 'no-flow': return '需录净入金';
+        case 'no-opening': return '缺期初余额';
+        case 'no-capital': return '本金未知';
+        case 'too-short': return '至少要 2 个月';
+        case 'no-root': return '无解';
+        case 'no-account': return '无投资账户';
+        case 'no-month': return '无记录';
+        default: return '算不出';
+    }
+}
+
+// IRR 缺失时补一句「怎么才能算出来」（只读提示，不替用户写数）
+function irrHintText(reason) {
+    if (reason === 'no-flow') return ' 资金加权要靠「净入金」算：在记月度账单时把净入金填上就能出数。';
+    if (reason === 'no-opening') return ' 资金加权还需要上个月的余额。';
+    return '';
+}
+
+// ==================== 收益率第二口径：资金加权（IRR）====================
+// 为什么要有第二个口径（v1.39.78）：
+// 现有的「逐月 (1+r) 连乘」是时间加权（TWR）—— 它把"你什么时候加钱进去"这件事
+// 剔掉了，所以能公平比较两个规模不同的账户，代价是"你自己实际赚了多少"看不出来。
+//
+// IRR（资金加权）回答的是另一个问题：「我投进去的真金白银，最后拿回来多少」。
+// 中途加钱越多，两者差得越远：加钱之前赚的会被后来的大本金摊薄，
+// 所以 TWR 通常比 IRR 好看。行业里（Portfolio Performance / Wealthfolio / justETF）
+// 都是两个口径并列给出，只报一个数等于只说了一半。
+//
+// ---------- 现金流怎么构造（这一步最容易错）----------
+// 我们只有月度快照：每月的 v0(期初市值) / v1(期末市值) / flow(净入金) / profit(收益)，
+// 且恒等式成立：v1 = v0 + flow + profit。
+//
+// 投资者视角的真实现金流（严格 IRR）：
+//   t=0 : -(v0_1)      期初已持有的市值 = 一开始投进去的钱
+//   t=i : -(flow_i)    第 i 期新投进去的钱（投入 = 负现金流）
+//   t=n : +(v_n)       期末一次性把市值全部变现
+//
+// ⚠️ 两个必须记住的坑：
+//  1) 中途【不能】再加 profit。期末的 v_n 已经包含了全部累计收益，
+//     再逐月加一遍就是重复计算（我第一版就是这么写的，算出来差了一倍）。
+//  2) 净入金是"把钱投进去"，在现金流里必须是【负数】。
+//
+// 验证（已知答案）：
+//   本金 10000 放着不动，3 个月后 10300 → 月 IRR 0.990163%，3 月累计 3.000000% ✓
+//   中途第 2 月加投 5000，3 月后共 16000 → 月 IRR 2.789811%
+//     （均匀投入是 2.1746%，因这 5000 只投了 1 期所以 IRR 略高，符合直觉）✓
+//
+// 用二分法求根（-99% ~ +100%/期），不引入任何第三方库。
+//
+// ⚠️ 铁律：算不出就返回 null，绝不编一个数出来。
+// 净入金没录（flow 为空）时无法构造现金流序列 → 直接给 null 并说明原因。
+function irrMonthly(cashflows) {
+    // cashflows: [{ period: n, amount: number }]，amount 为正=流入、负=流出
+    // period = 距起点的期数（这里 1 期 = 1 个月）
+    if (!cashflows || cashflows.length < 2) return null;
+    const npv = (r) => cashflows.reduce((s, cf) => s + cf.amount / Math.pow(1 + r, cf.period), 0);
+    let lo = -0.99, hi = 1.0;
+    let fLo = npv(lo), fHi = npv(hi);
+    if (!isFinite(fLo) || !isFinite(fHi)) return null;
+    if (fLo * fHi > 0) return null;          // 区间内无根 → 算不出
+    for (let i = 0; i < 80; i++) {
+        const mid = (lo + hi) / 2;
+        const fMid = npv(mid);
+        if (fLo * fMid <= 0) { hi = mid; fHi = fMid; }
+        else { lo = mid; fLo = fMid; }
+    }
+    const r = (lo + hi) / 2;
+    return isFinite(r) ? r : null;
+}
+
+// 每期（1 个月）收益率 → 区间累计收益率，与 TWR 的口径对齐。
+// 1 个月的期数直接就是它自己；n 个月则复利连乘 n 次。
+// 注意：不能简单 ×n（算术平均），那在高波动时会低估复利。
+function irrPeriodToCumulative(rPerPeriod, periods) {
+    if (rPerPeriod === null || rPerPeriod === undefined || !isFinite(rPerPeriod)) return null;
+    const n = Math.max(1, periods || 1);
+    return Math.pow(1 + rPerPeriod, n) - 1;
+}
+
+// 月份 → 距起点的期数（用于 IRR 的折现指数）
+function monthIndex(month, baseMonth) {
+    const [y, m] = month.split('-').map(Number);
+    const [by, bm] = baseMonth.split('-').map(Number);
+    return (y - by) * 12 + (m - bm);
+}
+
+// 组合/账户的资金加权收益率（IRR）。
+// 每个月需要：期初市值 v0、期末市值 v1、本月净入金 flow、本期收益 profit。
+// 数据不足（净入金没录 / 期初市值未知）时返回 reason，让界面说明为什么没数字。
+//
+// ⚠️ 这里不直接用 portfolioMonthStats 的 eligible：
+// 那个函数是给 TWR 用的，它会把「期初市值 = 0」的月份整个剔掉
+//（分母算不出来 → 不给假的高收益率）。但 IRR 不一样 ——
+// 期初为 0 恰恰说明「钱是这一个月里进来的」，那一期正是现金流的起点，必须留下。
+// 所以下面自己取数，口径与 portfolioMonthStats 保持一致（同样的成员过滤、同样的净入金规则）。
+function portfolioIrr(months, member, accountId) {
+    const list = (months || returnMonths()).filter(Boolean).slice().sort();
+    const res = { irr: null, months: 0, reason: '', series: [] };
+    // member 为空时取当前查看的成员（与 portfolioMonthStats 的默认值一致）
+    const who = member || state.balanceOwner || 'all';
+    if (!list.length) { res.reason = 'no-month'; return res; }
+
+    const scope = accountId ? [accountId] : investmentAccountIds();
+    if (!scope.length) { res.reason = 'no-account'; return res; }
+
+    // 逐月取三要素。缺净入金 → 整段不给数（现金流序列断了，算出来的不可信）
+    const rows = [];
+    let missingFlow = false;
+    for (const month of list) {
+        const prev = previousMonthOf(month);
+        const prevMap = prev ? balancesAtMonth(prev, who) : {};
+        const curMap = balancesAtMonth(month, who);
+        const retMap = returnsAtMonth(month, who);
+
+        // 本月净入金（留空 = 未录）
+        let flow = 0, flowKnown = false;
+        state.returns.forEach(r => {
+            if (r.month !== month || !scope.includes(r.accountId)) return;
+            if (who !== 'all' && r.member !== who) return;
+            if (r.flow === undefined || r.flow === null || r.flow === '') return;
+            flow += (Number(r.flow) || 0);
+            flowKnown = true;
+        });
+
+        // 只统计"有余额或有收益"的账户；某个账户期初未知就不进这个月的合计
+        let v0 = 0, v1 = 0, profit = 0, hasV1 = false, hasProfit = false, hasV0 = false;
+        scope.forEach(id => {
+            const p = prevMap[id], c = curMap[id], pft = retMap[id];
+            if (p !== undefined) { v0 += (Number(p) || 0); hasV0 = true; }
+            if (c !== undefined) { v1 += (Number(c) || 0); hasV1 = true; }
+            if (pft !== undefined && pft !== null) { profit += (Number(pft) || 0); hasProfit = true; }
+        });
+        if (!hasV1 && !hasProfit) continue;      // 这一月完全没数据 → 跳过
+        if (!flowKnown) { missingFlow = true; continue; }
+
+        rows.push({ month, v0, v1, flow, profit, hasV1, hasProfit, hasV0 });
+    }
+    if (!rows.length) {
+        res.reason = missingFlow ? 'no-flow' : 'no-capital';
+        return res;
+    }
+    // 中途有任何一个月缺净入金，整段 IRR 就不准了（现金流序列断了）→ 不给数
+    if (missingFlow) { res.reason = 'no-flow'; return res; }
+
+    // ---- 从「期初市值已知」的那一行开始 ----
+    // 期初未知 = 上一月的余额没记，现金流的起点无从谈起（起点为 0 会让 NPV 恒正、无根）。
+    // 从有期初的那行往后算，v0 就是上月的 v1，是真实已知的，不算编数。
+    // 之后若又出现期初未知的一行，说明中间断了一期 —— 同样从那里截断。
+    let start = rows.findIndex(r => r.hasV0);
+    if (start < 0) { res.reason = 'no-opening'; return res; }
+    const usable = [];
+    for (let i = start; i < rows.length; i++) {
+        if (!rows[i].hasV0) break;     // 断了 → 截断
+        usable.push(rows[i]);
+    }
+    if (usable.length < 2) { res.reason = usable.length ? 'too-short' : 'no-opening'; return res; }
+    // 后续一律用 usable 这段（期初已知的连续月份）
+    const rows2 = usable;
+
+    const base = rows2[0].month;
+    // 严格 IRR 的现金流构造（详见 irrMonthly 上方的注释）：
+    //   t=0 : -(v0_1)    期初已持有的市值 = 一开始投进去的钱
+    //   t=i : -(flow_i)  中途新投进去的钱（投入 = 负现金流）
+    //   t=n : +(v_n)     期末一次性变现全部
+    // ⚠️ 中途绝不能再加 profit —— 期末的 v_n 已经包含全部累计收益，加了就是重复计算。
+    const cfs = [];
+    cfs.push({ period: 0, amount: -rows2[0].v0 });
+    rows2.forEach((r, i) => {
+        const per = monthIndex(r.month, base) + 1;
+        const last = (i === rows2.length - 1);
+        cfs.push({ period: per, amount: last ? r.v1 : -r.flow });
+    });
+    // 合并同一期的现金流（上面会产生同 period 的两条）
+    const merged = [];
+    cfs.sort((a, b) => a.period - b.period);
+    cfs.forEach(cf => {
+        const last = merged[merged.length - 1];
+        if (last && last.period === cf.period) last.amount += cf.amount;
+        else merged.push({ ...cf });
+    });
+
+    const r = irrMonthly(merged);
+    if (r === null) { res.reason = 'no-root'; return res; }
+    // irrMonthly 解出的是「每期（1 个月）」收益率，这里换算成区间累计口径，
+    // 与 TWR 的「逐月连乘」保持同一维度，两个数字才能并排比。
+    const periods = monthIndex(rows2[rows2.length - 1].month, base) + 1;
+    res.irr = irrPeriodToCumulative(r, periods);
+    res.months = rows2.length;
+    res.periods = periods;
+    res.series = rows2.map(x => ({ month: x.month, profit: x.profit, flow: x.flow }));
+    return res;
+}
+
 // 单账户收益率：把组合算法按 accountId 切一刀，再逐月连乘（时间加权）。
 // 本金未知的月份（没记上月余额、也没录净入金）跳过并计数，绝不当成 0% 拖低结果。
 function accountReturnRate(accountId, months, member) {
@@ -12232,6 +12429,49 @@ function renderAssetChange() {
         + `<span class="tt-v">${t.delta === null ? '<span class="tac-na">—</span>' : _esc(signed(t.delta))}</span>`
         + `<span class="tt-s">${t.delta !== null && t.open ? (t.delta / t.open * 100).toFixed(2) + '%' : ''}</span></div>`;
     stats.innerHTML = html;
+
+    // ---- v1.39.78：净资产变动归因拆解（投入 / 收益 / 其他 三列并排）----
+    // 为什么要有这个：原来「净入金 / 投资收益 / 其他资产变动」是混在 6 个瓦片里纵向排的，
+    // 一眼看不出"总资产涨了 10 万里，多少是我自己存进去的、多少是市场涨的"。
+    // 现在把三项单独拎出来并排成三列，各带一条占比条 —— 一眼就看清归因。
+    // 口径与 Wealthfolio / nett.money 一致：把净资产变动拆成「新增储蓄 / 市场涨跌 / 其余」。
+    // ⚠️ 只读展示：这三项本来就算好的（other = delta − flow − profit），软件不替用户写任何数。
+    const attrBox = document.getElementById('tacAttr');
+    if (attrBox) {
+        if (t.delta === null) {
+            attrBox.classList.add('hidden');
+            attrBox.innerHTML = '';
+        } else {
+            attrBox.classList.remove('hidden');
+            const items = [
+                { k: '投入', v: t.flowKnown ? t.flow : null, sub: '自己存进去的钱', cls: 'attr-in' },
+                { k: '收益', v: t.profit, sub: '市场涨跌赚的', cls: 'attr-earn' },
+                { k: '其他', v: t.other, sub: '日常收支 / 还款 / 非投资账户', cls: 'attr-other' },
+            ];
+            // 占比：以「总变动」的绝对值为分母。变动很小或为 0 时不显示比例（算出来没意义）。
+            const base = Math.abs(t.delta);
+            const pctOf = (v) => (base > 0 && v !== null && v !== undefined && isFinite(v))
+                ? Math.round(Math.abs(v) / base * 100) : null;
+            const maxAbs = Math.max(...items.map(i => Math.abs(Number(i.v) || 0)), 1);
+            attrBox.innerHTML = `
+                <div class="tac-attr-head">总资产变动 ${t.delta >= 0 ? '怎么来的' : '怎么没的'}</div>
+                <div class="tac-attr-row">
+                    ${items.map(it => {
+                        const na = it.v === null || it.v === undefined;
+                        const val = na ? '<span class="tac-na">未录入</span>' : _esc(signed(it.v));
+                        const p = pctOf(it.v);
+                        const w = na ? 0 : Math.max(3, Math.round(Math.abs(Number(it.v) || 0) / maxAbs * 100));
+                        const dir = na ? '' : ((it.v > 0) ? ' attr-up' : ((it.v < 0) ? ' attr-down' : ''));
+                        return `<div class="tac-attr-col ${it.cls}${dir}">
+                            <div class="ta-k">${_esc(it.k)}</div>
+                            <div class="ta-v">${val}</div>
+                            <div class="ta-bar"><i style="width:${w}%"></i></div>
+                            <div class="ta-s">${p === null ? _esc(it.sub) : `占 ${p}% · ${_esc(it.sub)}`}</div>
+                        </div>`;
+                    }).join('')}
+                </div>`;
+        }
+    }
 
     const note = document.getElementById('tacNote');
     note.innerHTML = t.open === null
@@ -12834,16 +13074,31 @@ function renderReturnCalendar() {
     const totalEl = document.getElementById('retCalTotal');
     if (rate) {
         const ok = (cum.cumulative || 0) >= 0;
-        totalEl.innerHTML = `${byYear ? '全部累计收益率' : '本年累计收益率'} <b class="${ok ? 'income' : 'expense'}">${pctText(cum.cumulative)}</b>`;
+        // v1.39.78：收益率并列给两个口径。
+        //   时间加权（TWR）= 现有算法，剔掉「什么时候加钱」的影响 → 看投资本身表现
+        //   资金加权（IRR）= 你的钱实际赚了多少，中途加钱越多差得越远
+        // 行业惯例（Portfolio Performance / Wealthfolio / justETF）都是两个一起给。
+        const irr = portfolioIrr(byYear ? months : months.filter(m => m.slice(0, 4) === String(year)));
+        const twrHTML = `${byYear ? '全部累计收益率' : '本年累计收益率'} <b class="${ok ? 'income' : 'expense'}">${pctText(cum.cumulative)}</b>`;
+        let irrHTML = '';
+        if (irr.irr !== null) {
+            const okI = irr.irr >= 0;
+            irrHTML = ` · 资金加权 <b class="${okI ? 'income' : 'expense'}">${pctText(irr.irr)}</b>`;
+        } else {
+            irrHTML = ` · 资金加权 <b class="rc-muted">${irrReasonText(irr.reason)}</b>`;
+        }
+        totalEl.innerHTML = twrHTML + irrHTML;
     } else {
         totalEl.innerHTML = `${byYear ? '全部收益' : '当年收益'} <b class="${amountTotal >= 0 ? 'income' : 'expense'}">${maskMoney(amountTotal)}</b>`;
     }
     const note = document.getElementById('retCalNote');
     if (byYear) {
-        note.textContent = rate ? '点年份看该年各月；— = 该年本金未知算不出' : '点年份看该年各月';
+        note.textContent = rate
+            ? '时间加权=剔掉加钱时点的影响；资金加权=你的钱实际赚了多少。' + irrHintText(portfolioIrr(months).reason)
+            : '点年份看该年各月';
     } else {
         note.textContent = rate
-            ? '空白 = 该月没记录；— = 缺上月余额，本金未知算不出收益率'
+            ? '空白 = 该月没记录；— = 缺上月余额，本金未知算不出收益率。' + irrHintText(portfolioIrr(months.filter(m => m.slice(0, 4) === String(year))).reason)
             : '空白 = 该月没记录';
     }
 
@@ -12934,8 +13189,14 @@ function openReturnDetailForPeriod(months, label) {
     if (editBtn) editBtn.style.display = 'none';
     const sum = document.getElementById('acctHistSummary');
     const portCum = portfolioCumulative(months, 'all');
+    // v1.39.78：组合层面也给双口径
+    const portIrr = portfolioIrr(months, 'all');
+    const portIrrTxt = portIrr.irr !== null
+        ? `<span class="${portIrr.irr >= 0 ? 'income' : 'expense'}">${pctText(portIrr.irr)}</span>`
+        : `<span class="breakdown-rate-unknown">${irrReasonText(portIrr.reason)}</span>`;
     if (sum) sum.innerHTML = `<span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">净收益 <b>${maskMoney(total)}</b></span>
-        <span class="cat-txn-summary-item">组合收益率 <b>${pctText(portCum.cumulative)}</b></span>
+        <span class="cat-txn-summary-item" title="时间加权：剔掉「什么时候加钱」的影响">时间加权 <b>${pctText(portCum.cumulative)}</b></span>
+        <span class="cat-txn-summary-item" title="资金加权：钱实际赚了多少">资金加权 <b>${portIrrTxt}</b></span>
         <span class="cat-txn-summary-item">涉及 <b>${rows.length}</b> 个账户</span>`;
     const list = document.getElementById('acctHistList');
     if (list) list.innerHTML = rows.length ? rows.map(r => {
@@ -12997,13 +13258,24 @@ function renderReturnAccountHistory() {
         .sort((x, y) => y.month.localeCompare(x.month) || String(x.member).localeCompare(String(y.member)));
     const all = state.returns.filter(r => r.accountId === returnHistoryAccountId);
     const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-    const rr = accountReturnRate(returnHistoryAccountId, [...new Set(rows.map(r => r.month))]);
+    const monthsAll = [...new Set(rows.map(r => r.month))].sort();
+    const rr = accountReturnRate(returnHistoryAccountId, monthsAll);
     const rateTxt = rr.rate !== null ? pctText(rr.rate) : (rr.skipped ? '本金未知' : '');
+    // v1.39.78：账户级也给两个口径。
+    //   时间加权 = 剔掉加钱时点，看投资本身表现
+    //   资金加权 = 这个账户的钱实际赚了多少
+    // 账户历史是跨成员的（见 renderReturnAccountHistory 注释），所以 member 传 'all'。
+    // 传 null 会让 balancesAtMonth / returnsAtMonth 的成员过滤匹配不到任何数据。
+    const irr = portfolioIrr(monthsAll, 'all', returnHistoryAccountId);
+    const irrTxt = irr.irr !== null
+        ? `<span class="${irr.irr >= 0 ? 'income' : 'expense'}">${pctText(irr.irr)}</span>`
+        : `<span class="breakdown-rate-unknown">${irrReasonText(irr.reason)}</span>`;
     const sum = document.getElementById('acctHistSummary');
     if (sum) sum.innerHTML = `
-        <span class="cat-txn-summary-item">共 <b>${[...new Set(rows.map(r => r.month))].length}</b> 期</span>
+        <span class="cat-txn-summary-item">共 <b>${monthsAll.length}</b> 期</span>
         <span class="cat-txn-summary-item ${total >= 0 ? 'income' : 'expense'}">累计 <b>${maskMoney(total)}</b></span>
-        <span class="cat-txn-summary-item">收益率 <b>${rateTxt || '—'}</b></span>
+        <span class="cat-txn-summary-item" title="时间加权：剔掉「什么时候加钱」的影响，看投资本身的表现">时间加权 <b>${rateTxt || '—'}</b></span>
+        <span class="cat-txn-summary-item" title="资金加权：这个账户的钱实际赚了多少；中途加钱越多，与时间加权差得越远">资金加权 <b>${irrTxt}</b></span>
         <span class="cat-txn-summary-item">最新 <b>${rows.length ? maskMoney(rows[0].amount) : '—'}</b></span>`;
     const list = document.getElementById('acctHistList');
     if (list) list.innerHTML = rows.length ? rows.map(r => {
