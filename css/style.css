@@ -3521,58 +3521,127 @@ table.bill-stats {
 }
 
 /* ============================================
+   记一笔：支付方式 / 归属成员 的下拉箭头
+   —— 桌面端保留箭头（用户要求电脑端不动）
+   ============================================ */
+#transactionModal select#paymentInput,
+#transactionModal select#memberInput {
+    -webkit-appearance: none;
+    appearance: none;
+    padding-right: 20px;
+    background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%236e6e73' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+    background-size: 10px 6px;
+}
+
+/* ============================================
    记一笔（移动端）：日期/时间/支付方式 三个框等宽等高；
    弹出的日期/时间选择器贴近屏幕下方中央，方便拇指操作
    ============================================ */
 @media (max-width: 640px) {
-    /* v1.39.78：三个框一行 + 备注跟支付方式同排。
-       排布 = 第一行「日期 / 时间 / 归属成员」，第二行「支付方式 / 备注(跨两列)」。
-       3 列刚好填满两行，一个空缺都没有：
-         第一行  日期(1) 时间(1) 成员(1)
-         第二行  支付方式(1) 备注(跨2)
-       成员那一格用 display:none 藏起来时（单成员家庭），
-       支付方式会自动补到第一行第三格，备注仍然跨两列 —— 也不会留空。 */
+    /* v1.39.80：改成「一整行 5 格 + 两条分隔线」的排版。
+       为什么换方案：之前用「输入框 + 边框」来区分格子，
+       但 iOS 上原生 <input type="date"> / <input type="time"> 有自己的内部渲染，
+       强制 height 也压不住内部元素（::-webkit-date-and-time-value），
+       于是日期/时间两个框总比别的框高一截 —— 排版反复出问题就是卡在这。
+
+       新做法：不再给输入框画边框，改用
+         · 整行上下各一条横线（父容器 border-top / border-bottom）
+         · 格子之间一条竖线（相邻格子用 border-left 画）
+       这样所有控件在同一条基线上，高度由行高统一，
+       不管它是原生日期控件还是 select，视觉上都是齐的。
+
+       5 个格子一行：日期 / 时间 / 归属成员 / 支付方式 / 备注
+       成员那格在单成员家庭会 display:none，此时其余四格自动均分（不会留空）。 */
     #transactionModal .form-row {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 8px;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         align-items: stretch;
+        /* 上下两条横线 */
+        border-top: 1px solid var(--border-strong);
+        border-bottom: 1px solid var(--border-strong);
+        padding: 0;
+        margin: 0 0 6px;
+        /* 靠竖线分隔格子，不要留白（gap 会让分隔线两侧不对称） */
+        gap: 0;
+        background: var(--bg-input);
+        border-radius: var(--radius-sm);
     }
-    #transactionModal .form-row .form-group { min-width: 0; margin-bottom: 0; }
-    /* 备注跨两列：第一行三格、第二行 支付方式 + 备注(2) = 正好铺满 */
-    #transactionModal .form-group-note {
-        grid-column: span 2;
+    #transactionModal .form-row .form-group {
+        min-width: 0;
+        margin-bottom: 0;
+        padding: 0 4px;
         display: flex;
         align-items: center;
+        justify-content: center;
+        position: relative;
     }
-    #transactionModal .form-group-note .text-input { height: 44px; }
+    /* 格子之间的竖线：除了第一个格子，其余都画一条左边线。
+       用 ::after 画在 .form-group 上（不是 input 上），
+       这样即使控件本身高度不一致，分隔线也是齐的。 */
+    #transactionModal .form-row .form-group + .form-group::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 6px;
+        bottom: 6px;
+        width: 1px;
+        background: var(--border-strong);
+    }
+    /* 备注是自由输入，文字可能比较长 —— 给它更多空间 */
+    #transactionModal .form-group-note { flex: 0 0 auto; }
 
-    /* 三个框强制同一高度。支付方式必须 appearance:none，否则 iOS 会用原生
-       menulist 外观（带上下箭头），高度不受 CSS 控制，比另外两个框高出一截 */
+    /* 统一的控件样式：无边框、无圆角、透明底，全部靠分隔线区分格子 */
     #transactionModal .form-row .text-input {
         width: 100%;
         min-width: 0;
-        height: 44px;
-        padding: 0 6px;
-        font-size: 13px;
+        height: 40px;
+        padding: 0;
+        font-size: 12.5px;
         text-align: center;
         box-sizing: border-box;
         line-height: normal;
-        border: 1px solid var(--border-strong);
-        border-radius: var(--radius-sm);
-        background-color: var(--bg-input);
+        border: none;
+        border-radius: 0;
+        background: transparent;
         color: var(--text-primary);
     }
-    /* 备注是自由输入，左对齐比居中好读 */
-    #transactionModal .form-group-note .text-input { text-align: left; }
-    #transactionModal select#paymentInput {
+    /* iOS 原生日期/时间控件的内部元素：压掉它自带的 padding 和最小宽度，
+       否则它会比别的框宽、把整行的分隔线挤歪。
+       （-webkit-date-and-time-value 是 iOS 内部渲染的那一层） */
+    #transactionModal .form-row input[type="date"],
+    #transactionModal .form-row input[type="time"] {
         -webkit-appearance: none;
         appearance: none;
-        padding-right: 20px;
-        background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%236e6e73' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
-        background-repeat: no-repeat;
-        background-position: right 6px center;
-        background-size: 10px 6px;
+        min-width: 0;
+        text-align: center;
+    }
+    #transactionModal .form-row input[type="date"]::-webkit-date-and-time-value,
+    #transactionModal .form-row input[type="time"]::-webkit-date-and-time-value {
+        text-align: center;
+        font-size: 12.5px;
+    }
+    #transactionModal .form-row input[type="date"]::-webkit-calendar-picker-indicator,
+    #transactionModal .form-row input[type="time"]::-webkit-calendar-picker-indicator {
+        opacity: 0;      /* 藏掉 iOS 自带的日历图标（会占宽） */
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+    }
+    /* 备注左对齐更好读 */
+    #transactionModal .form-group-note .text-input { text-align: left; }
+    /* v1.39.80：手机端把成员和支付方式右边的下拉小三角去掉。
+       基础样式里那条箭头规则是给桌面端用的（电脑端保持原样），
+       这里在手机端覆盖掉它 —— 靠分隔线区分格子就够了。 */
+    #transactionModal select#paymentInput,
+    #transactionModal select#memberInput {
+        -webkit-appearance: none;
+        appearance: none;
+        background-image: none;
+        padding-right: 0;
+        text-align: center;
     }
 }
 
