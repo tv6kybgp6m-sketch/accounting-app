@@ -2253,18 +2253,25 @@ body.cat-dragging {
 /* v1.39.78：按下反馈要看得见 —— 背景明显变灰 + 轻微下沉。
    原来只有 transform: scale(0.95) 和一个跟白底几乎同色的背景，
    手指按下去像没反应，不知道到底按没按上。
-   灰底用变量 --numpad-press（浅色 #d1d1d6 / 深色另配），别写死。 */
-.numpad-btn:active {
+   灰底用变量 --numpad-press（浅色 #d1d1d6 / 深色另配），别写死。
+
+   ⚠️ 特异性问题：手机端有 `#transactionModal .numpad-btn`（#id = 100 分），
+   它会盖过这里的 `.numpad-btn:active`（20 分）→ 手机上按压反馈等于没写。
+   所以下面这组必须用同样的 #id 写法。
+   另外 iOS Safari 的 :active 在 touch 设备上本来就不可靠，
+   所以 JS 那边还会用 touchstart/touchend 切 .is-pressed 类，两条路一起走。 */
+.numpad-btn:active,
+.numpad-btn.is-pressed {
     transform: scale(0.96);
     background: var(--numpad-press, #d1d1d6);
     color: var(--text-primary);
     box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 /* 数字键在按下时同样要变灰（原来 .numpad-num 没单独覆盖 :active） */
-.numpad-num:active { background: var(--numpad-press, #d1d1d6); }
-.numpad-op:active { background: var(--numpad-press-op, #c7c7cc); }
-.numpad-back:active { background: var(--numpad-press-op, #c7c7cc); }
-.numpad-quick:active { background: var(--numpad-press-op, #c7c7cc); }
+.numpad-num:active, .numpad-num.is-pressed { background: var(--numpad-press, #d1d1d6); }
+.numpad-op:active, .numpad-op.is-pressed { background: var(--numpad-press-op, #c7c7cc); }
+.numpad-back:active, .numpad-back.is-pressed { background: var(--numpad-press-op, #c7c7cc); }
+.numpad-quick:active, .numpad-quick.is-pressed { background: var(--numpad-press-op, #c7c7cc); }
 
 .numpad-num {
     font-size: 24px;
@@ -2905,20 +2912,52 @@ body.cat-dragging {
         font-size: 14px;
     }
 
-    /* Numpad - sticky bottom, always visible */
+    /* Numpad - sticky bottom, always visible
+       v1.39.78：这里原来写的是 background: var(--bg-modal)（白色），
+       会把基础样式里的浅灰底覆盖掉（#id 的特异性比 .class 高）——
+       表现就是"加了浅灰背景但手机上还是白的"。改成 var(--bg-content)。 */
     #transactionModal .numpad {
         position: sticky;
         bottom: 0;
-        background: var(--bg-modal);
+        background: var(--bg-content);
         margin-top: auto;
         flex-shrink: 0;
         gap: 5px;
-        padding-top: 8px;
-        padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+        padding: 10px 14px max(10px, env(safe-area-inset-bottom, 0px));
+        /* 负边距与 .modal-body 的左右 14px padding 对冲，让浅灰底铺满到弹窗两侧 */
+        margin-left: -14px;
+        margin-right: -14px;
+        border-radius: 0;
     }
     #transactionModal .numpad-btn {
         height: 42px;
         font-size: 18px;
+        /* 边框也要在这条里加：#id 选择器会覆盖基础样式的 1px 边框 */
+        border: 1px solid var(--border-strong);
+    }
+    /* v1.39.78：按压反馈必须用同样的 #id 写法，否则会被上面这条盖掉
+       （#id 特异性 100 > .class:active 的 20）—— 表现就是"手机按了没反应"。 */
+    #transactionModal .numpad-btn:active,
+    #transactionModal .numpad-btn.is-pressed {
+        background: var(--numpad-press, #d1d1d6);
+        color: var(--text-primary);
+        transform: scale(0.96);
+        box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.12);
+    }
+    #transactionModal .numpad-num:active,
+    #transactionModal .numpad-num.is-pressed { background: var(--numpad-press, #d1d1d6); }
+    #transactionModal .numpad-op:active,
+    #transactionModal .numpad-op.is-pressed { background: var(--numpad-press-op, #c7c7cc); }
+    #transactionModal .numpad-back:active,
+    #transactionModal .numpad-back.is-pressed { background: var(--numpad-press-op, #c7c7cc); }
+    #transactionModal .numpad-quick:active,
+    #transactionModal .numpad-quick.is-pressed { background: var(--numpad-press-op, #c7c7cc); }
+    /* OK 键是渐变色，不能用灰底盖掉，改成整体压暗 */
+    #transactionModal .numpad-ok:active,
+    #transactionModal .numpad-ok.is-pressed {
+        filter: brightness(0.86);
+        transform: scale(0.96);
+        box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.18);
     }
     #transactionModal .numpad-num {
         font-size: 20px;
@@ -3468,7 +3507,7 @@ table.bill-stats {
 /* v1.39.78：桌面端备注单独占一整行。
    桌面的弹窗只有 460px 宽，四个框（日期/时间/成员/支付方式）已经占满，
    再塞一个备注进去每个框只剩 80px 出头 —— 备注是自由文本，太窄根本没法写字。
-   手机端没有这个问题（那边是 2×2 网格 + 备注跨两列）。 */
+   手机端是 3 列网格：日期/时间/成员 一行，支付方式 + 备注(跨两列) 一行。 */
 @media (min-width: 641px) {
     #transactionModal .form-row {
         /* 备注要能换到下一行占满整行，所以这里必须允许换行 */
@@ -3486,20 +3525,23 @@ table.bill-stats {
    弹出的日期/时间选择器贴近屏幕下方中央，方便拇指操作
    ============================================ */
 @media (max-width: 640px) {
-    /* v1.39.78：四个框改 2×2 网格。
-       原来 3 列放 4 个框，归属成员掉到第二行、右侧空两格 —— 看着像漏了东西。
-       备注也从独立一行挪进来（grid-column: span 2），跟支付方式同一行占满。
-       顺序：日期 / 时间 ／ 归属成员 / 支付方式 ／ 备注(跨两列) */
+    /* v1.39.78：三个框一行 + 备注跟支付方式同排。
+       排布 = 第一行「日期 / 时间 / 归属成员」，第二行「支付方式 / 备注(跨两列)」。
+       3 列刚好填满两行，一个空缺都没有：
+         第一行  日期(1) 时间(1) 成员(1)
+         第二行  支付方式(1) 备注(跨2)
+       成员那一格用 display:none 藏起来时（单成员家庭），
+       支付方式会自动补到第一行第三格，备注仍然跨两列 —— 也不会留空。 */
     #transactionModal .form-row {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 8px;
         align-items: stretch;
     }
     #transactionModal .form-row .form-group { min-width: 0; margin-bottom: 0; }
+    /* 备注跨两列：第一行三格、第二行 支付方式 + 备注(2) = 正好铺满 */
     #transactionModal .form-group-note {
         grid-column: span 2;
-        /* 备注框跟上面几个框同高，不留半截 */
         display: flex;
         align-items: center;
     }
