@@ -275,11 +275,13 @@
                             <button class="secondary-btn" id="fundAccountsBtn">
                                 <i class="fa-solid fa-tags"></i> 账户归类
                             </button>
+                            <button class="secondary-btn" id="fundTargetBtn">
+                                <i class="fa-solid fa-bullseye"></i> 设置目标
+                            </button>
                         </div>
                     </div>
                     <div id="fundAsOf" class="ff-asof"></div>
                     <div class="fund-quadrant" id="fundQuadrant"></div>
-                    <div class="fund-cards" id="fundCards"></div>
                     <div class="chart-card">
                         <div class="chart-header">
                             <div class="drill-title-wrap"><h3>资产配比</h3></div>
@@ -957,6 +959,47 @@
             </div>
         </div>
 
+        <!-- 月度结账：排除"无余额账户" -->
+        <div class="action-sheet-overlay hidden" id="excludeBalanceSheet" onclick="if(event.target===this)closeExcludeBalanceSheet()">
+            <div class="action-sheet">
+                <div class="action-sheet-header">
+                    <div class="action-sheet-icon"><i class="fa-solid fa-circle-check"></i></div>
+                    <div class="action-sheet-title">排除无余额账户</div>
+                </div>
+                <div class="action-sheet-note">确认这些账户真的没有余额？排除后不再当作待办，并会同步到其他设备。</div>
+                <div id="excludeBalanceList"></div>
+                <button class="action-sheet-cancel" onclick="closeExcludeBalanceSheet()">取消</button>
+            </div>
+        </div>
+
+        <!-- 四笔钱：设置目标 -->
+        <div class="modal-overlay hidden" id="fundTargetModal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2>设置四笔钱目标</h2>
+                    <button class="modal-close" onclick="closeFundTargetModal()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>活钱管理目标金额</label>
+                        <div class="rs-inline"><span class="ft-cur">¥</span><input type="number" class="text-input" id="ft_cash" inputmode="decimal" placeholder="0"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>稳健理财目标金额</label>
+                        <div class="rs-inline"><span class="ft-cur">¥</span><input type="number" class="text-input" id="ft_steady" inputmode="decimal" placeholder="0"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>长期投资目标金额</label>
+                        <div class="rs-inline"><span class="ft-cur">¥</span><input type="number" class="text-input" id="ft_growth" inputmode="decimal" placeholder="0"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="secondary-btn" onclick="closeFundTargetModal()">取消</button>
+                        <button class="primary-btn" onclick="saveFundTargetModal()">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Budget Modal -->
         <div class="modal-overlay hidden" id="budgetModal">
             <div class="modal">
@@ -1376,7 +1419,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.82').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.83').catch(() => {});
             });
         }
     </script>
