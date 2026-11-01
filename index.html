@@ -1127,6 +1127,11 @@
                     <div class="account-new">
                         <input type="text" class="text-input" id="newAccountName" placeholder="放钱的地方，如 中国银行 / 支付宝">
                         <select class="text-input" id="newAccountGroup"></select>
+                        <select class="text-input" id="newAccountCurrency">
+                            <option value="CNY">人民币</option>
+                            <option value="USD">美元</option>
+                            <option value="HKD">港币</option>
+                        </select>
                         <button class="primary-btn" onclick="addAccount()"><i class="fa-solid fa-plus"></i> 添加</button>
                         <button class="primary-btn" id="accEditBtn" onclick="toggleAccountsViewMode()" style="display:none"><i class="fa-solid fa-pen"></i> <span id="accEditBtnLabel">编辑</span></button>
                         <span class="acc-viewtag" id="accViewTag" style="display:none">（只读查看）</span>
@@ -1249,6 +1254,16 @@
                             <input type="text" class="text-input" id="acctEditWallet" list="walletChoices" placeholder="留空 = 单独一组">
                         </div>
                     </div>
+                    <div class="acct-edit-pair">
+                        <div>
+                            <label class="settings-label">币种</label>
+                            <select class="text-input" id="acctEditCurrency">
+                                <option value="CNY">人民币</option>
+                                <option value="USD">美元</option>
+                                <option value="HKD">港币</option>
+                            </select>
+                        </div>
+                    </div>
                     <datalist id="walletChoices"></datalist>
                     <div class="settings-sublabel">账户不再分资产还是负债 —— 一个账户里可以同时有活期、定期、货基、股基、黄金和信用卡欠款，
                         记账时资产填对应的类别列、欠款填「负债」列就行。</div>
@@ -1263,6 +1278,34 @@
                     <div class="acct-edit-actions">
                         <button class="secondary-btn" onclick="closeAccountEdit()">取消</button>
                         <button class="primary-btn" onclick="saveAccountEdit()"><i class="fa-solid fa-check"></i> 保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 外币换算 Modal -->
+        <div class="modal-overlay hidden" id="fxModal">
+            <div class="modal balance-modal">
+                <div class="modal-header">
+                    <div class="drill-title-wrap">
+                        <h2 id="fxTitle">外币换算</h2>
+                        <div class="cat-txn-sub" id="fxSub"></div>
+                    </div>
+                    <button class="modal-close" onclick="closeFxModal()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="fx-row">
+                        <label class="settings-label">外币数额（<span id="fxCurLabel">美元</span>）</label>
+                        <input type="text" inputmode="decimal" class="text-input" id="fxForeign" placeholder="如 1000">
+                    </div>
+                    <div class="fx-row">
+                        <label class="settings-label">汇率（1 <span id="fxCurUnit">美元</span> = ? 人民币）</label>
+                        <input type="text" inputmode="decimal" class="text-input" id="fxRate" placeholder="如 7.2">
+                    </div>
+                    <div class="fx-result">算出来人民币 <b id="fxResult">—</b></div>
+                    <div class="acct-edit-actions">
+                        <button class="secondary-btn" onclick="closeFxModal()">取消</button>
+                        <button class="primary-btn" onclick="confirmFx()"><i class="fa-solid fa-check"></i> 算好填入</button>
                     </div>
                 </div>
             </div>
@@ -1419,7 +1462,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.86').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.87').catch(() => {});
             });
         }
     </script>
