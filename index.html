@@ -1066,6 +1066,15 @@
                         <div class="form-group">
                             <select class="text-input" id="monthlyMemberSelect"></select>
                         </div>
+                        <!-- v1.39.89：币种口径。默认「人民币」= 一个账户一行、记人民币；
+                             切成「其他币种」= 一个账户按币种展开成多行（人民币 / 美元 / 港币…），
+                             格子只记真实原币数，人民币换算统一在右侧合计里做。 -->
+                        <div class="form-group">
+                            <select class="text-input" id="monthlyCurrencyMode" title="记账币种：人民币 = 一个账户一行；其他币种 = 一个账户按币种分成几行">
+                                <option value="CNY">人民币</option>
+                                <option value="MULTI">其他币种</option>
+                            </select>
+                        </div>
                         <div class="form-group be-ym-group">
                             <div class="ym-pair">
                                 <div class="ym-nav">
@@ -1081,6 +1090,9 @@
                             </div>
                             <select id="monthlyInMonth" hidden></select>
                         </div>
+                        <!-- v1.39.89：汇率输入条（每个币种一个小框），只在「其他币种」模式下出现。
+                             填一次，下面所有同币种的行都按这个汇率自动换算成人民币。 -->
+                        <div class="form-group mw-fxstrip hidden" id="mwFxStrip"></div>
                         <!-- v1.39.74：加行 / 加列从表格最底下挪到「本人」这一行，抬头就能点 -->
                         <!-- v1.39.76：去掉文字里的「＋」——按钮本身就有边框，再加个加号显得啰嗦 -->
                         <div class="form-group mw-addbtns">
@@ -1283,34 +1295,6 @@
             </div>
         </div>
 
-        <!-- 外币换算 Modal -->
-        <div class="modal-overlay hidden" id="fxModal">
-            <div class="modal balance-modal">
-                <div class="modal-header">
-                    <div class="drill-title-wrap">
-                        <h2 id="fxTitle">外币换算</h2>
-                        <div class="cat-txn-sub" id="fxSub"></div>
-                    </div>
-                    <button class="modal-close" onclick="closeFxModal()"><i class="fa-solid fa-xmark"></i></button>
-                </div>
-                <div class="modal-body">
-                    <div class="fx-row">
-                        <label class="settings-label">外币数额（<span id="fxCurLabel">美元</span>）</label>
-                        <input type="text" inputmode="decimal" class="text-input" id="fxForeign" placeholder="如 1000">
-                    </div>
-                    <div class="fx-row">
-                        <label class="settings-label">汇率（1 <span id="fxCurUnit">美元</span> = ? 人民币）</label>
-                        <input type="text" inputmode="decimal" class="text-input" id="fxRate" placeholder="如 7.2">
-                    </div>
-                    <div class="fx-result">算出来人民币 <b id="fxResult">—</b></div>
-                    <div class="acct-edit-actions">
-                        <button class="secondary-btn" onclick="closeFxModal()">取消</button>
-                        <button class="primary-btn" onclick="confirmFx()"><i class="fa-solid fa-check"></i> 算好填入</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- Account History Modal -->
         <div class="modal-overlay hidden" id="guardModal">
             <div class="modal balance-modal guard-modal">
@@ -1462,7 +1446,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.88').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.89').catch(() => {});
             });
         }
     </script>

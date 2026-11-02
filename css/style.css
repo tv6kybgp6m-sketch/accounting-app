@@ -4017,6 +4017,28 @@ table.bill-stats {
     border-color: transparent;
 }
 .bal-entry-head .mw-addbtns .btn-mini.primary:hover { filter: brightness(1.08); }
+/* v1.39.89：汇率输入条 —— 每个币种一个小框，填一次下面同币种的行就全按它换算。
+   只在「币种 = 其他币种」时出现（切回人民币就藏起来）。 */
+.bal-entry-head .mw-fxstrip {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 0 2px;
+}
+.bal-entry-head .mw-fxstrip.hidden { display: none; }
+.mw-fx-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.mw-fx-item { display: inline-flex; align-items: center; gap: 4px; }
+.mw-fx-cur { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.mw-fx-in {
+    width: 72px; height: 32px; font-size: 13px; font-family: var(--font);
+    text-align: center; padding: 0 6px;
+}
+.bal-entry-head .mw-fxstrip .btn-mini {
+    white-space: nowrap; height: 32px; font-size: 12px; font-family: var(--font);
+    padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    background: var(--bg-input); color: var(--text-primary); cursor: pointer;
+}
+.bal-entry-head .mw-fxstrip .btn-mini:hover { background: var(--bg-card-hover); }
+/* v1.39.89：多币种模式下的行 —— 同一个账户的几行靠币种角标区分，人民币那行不染色 */
+.mw-tr[data-mw-cur="CNY"] .mw-rowname { background: var(--bg-content); }
 .ym-pair { display: flex; gap: 6px; position: relative; }
 .ym-pair > * { flex: 1 1 0; min-width: 0; width: auto; }
 /* ‹ 2026年10月 › ：左右箭头逐月翻；点中间调出双列轮盘 */
@@ -5013,27 +5035,13 @@ table.bill-stats {
 }
 .mw-cell-locked .text-input:focus { outline: none; box-shadow: none; border-color: var(--border); }
 /* 外币账户格子里的「汇率」小按钮：点开换算窗口；只有外币账户才出现（人民币账户不显示） */
-.mw-fxbtn {
-    position: absolute; bottom: 1px; right: 2px; z-index: 3;
-    padding: 0 3px; height: 13px; line-height: 13px; border: none; border-radius: 3px;
-    background: #ff9500; color: #fff; cursor: pointer; font-size: 9px; font-weight: 600;
-    opacity: .5; transition: opacity .12s, background .12s; white-space: nowrap;
-}
-.mw-c:hover .mw-fxbtn { opacity: 1; }
-.mw-fxbtn:hover { opacity: 1; background: #e08600; }
-.mw-c:has(.mw-fxbtn) .text-input { padding-right: 22px; }
-/* 月度账单行头的币种小标签（外币账户才显示） */
+/* 月度账单行头的币种小标签（外币账户 / 多币种行才显示） */
 .mw-cur-badge {
     display: inline-flex; align-items: center; justify-content: center;
     margin-left: 4px; padding: 0 4px; height: 14px; line-height: 14px;
     border-radius: 4px; background: rgba(255,149,0,.16); color: #ff9500;
     font-size: 9px; font-weight: 600; vertical-align: middle;
 }
-/* 外币换算窗口 */
-.fx-row { margin-bottom: 12px; }
-.fx-row .text-input { font-size: 16px; padding: 8px 10px; }
-.fx-result { margin: 14px 0; padding: 10px 12px; border-radius: 8px; background: var(--bg-content, #f5f5f7); font-size: 14px; }
-.fx-result b { font-size: 18px; color: var(--accent); margin-left: 4px; }
 [data-theme="dark"] .mw-cell-locked {
     background: repeating-linear-gradient(45deg, transparent 0 5px, rgba(255,255,255,.04) 5px 10px);
 }
