@@ -168,6 +168,19 @@ body {
 /* 原生 Mac 壳里系统已有真标题栏，网页这套假的(含红绿灯)整体藏掉，只留系统那一套 */
 .native-shell .title-bar { display: none; }
 
+/* v1.39.90：原生壳里页面要跟着窗口走。
+   原来 .mac-window 写死了 max-width:1200 / max-height:780 —— 窗口拉大只是外面多一圈空白，
+   看起来就是「怎么拉都不大」；拉小则内容被裁掉一截。
+   原生壳下放开这两个上限，整个 App 铺满窗口（系统标题栏本来就是外面那一层，不受影响）。 */
+.native-shell .mac-window {
+    max-width: none;
+    max-height: none;
+    width: 100%;
+    height: 100vh;
+    border-radius: 0;
+    box-shadow: none;
+}
+
 .title-text {
     position: absolute;
     left: 50%;
@@ -1994,8 +2007,36 @@ body.cat-dragging {
     max-width: 90vw;
     box-shadow: var(--shadow-lg);
     overflow: hidden;
+    position: relative;          /* v1.39.90：右下角缩放手柄要相对弹窗定位 */
     animation: modalIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
+/* v1.39.90：弹窗可缩放。
+   只在用户真的拖过之后才加 .modal-resized —— 默认外观一点不变，
+   拖过之后弹窗变成「上中下」三段：头和脚固定，中间那块自己滚动，
+   所以拉大拉小都不会把排版撑散（原来 .modal-body 的 max-height 限制也要一起放开，
+   否则拉高了中间那块还是老高度，下面留一大块空白）。 */
+.modal.modal-resized {
+    display: flex;
+    flex-direction: column;
+    max-height: 96vh;
+    max-width: 96vw;
+}
+.modal.modal-resized .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none !important;
+}
+.modal-resize-grip {
+    position: absolute; right: 0; bottom: 0; width: 20px; height: 20px;
+    cursor: nwse-resize; z-index: 30; touch-action: none;
+    opacity: .45;
+    background: linear-gradient(135deg,
+        transparent 45%, var(--text-tertiary, #8a8a8a) 45%, var(--text-tertiary, #8a8a8a) 53%, transparent 53%,
+        transparent 66%, var(--text-tertiary, #8a8a8a) 66%, var(--text-tertiary, #8a8a8a) 74%, transparent 74%);
+}
+.modal-resize-grip:hover { opacity: .9; }
+/* 手机上弹窗本来就是全屏的，缩放手柄没必要，藏起来免得碍事 */
+@media (max-width: 640px) { .modal-resize-grip { display: none; } }
 
 @keyframes modalIn {
     from { opacity: 0; transform: scale(0.9) translateY(20px); }
@@ -3158,6 +3199,14 @@ body.cat-dragging {
     margin-bottom: 14px;
 }
 .account-new .text-input { padding: 8px 10px; font-size: 13px; }
+/* v1.39.90：账户管理「添加」那一行的多币种开关（自己占一行，别挤在输入框后面） */
+.account-new .acc-multi-toggle {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text-secondary); cursor: pointer; user-select: none;
+}
+.account-new .acc-multi-toggle input { width: auto; height: auto; margin: 0; flex: 0 0 auto; }
+.account-new .acc-multi-toggle:hover { color: var(--text-primary); }
 .account-section-title {
     font-size: 11px;
     font-weight: 600;
@@ -3986,13 +4035,16 @@ table.bill-stats {
 
 /* ---- 记余额/记收益：成员+月份同行；余额分资产/负债两段 ---- */
 .bal-entry-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 4px; flex-wrap: wrap; }
-.bal-entry-head .form-group { flex: 1 1 0; min-width: 0; margin-bottom: 0; }
+/* v1.39.90：这几个控件不许缩成 0 宽 —— 以前 min-width:0 会让它们一路压扁，
+   最后把右边的「增加账户 / 增加列」挤出弹窗、按钮直接看不见了。
+   给了最小宽度以后，放不下就整块换行，按钮始终看得见。 */
+.bal-entry-head .form-group { flex: 1 1 0; min-width: 96px; margin-bottom: 0; }
 /* 控件自身 min-width:auto 会让两栏分不匀；高度也要显式统一，
    否则成员下拉和月份下拉在不同内核下会一高一低 */
 .bal-entry-head .form-group select,
 .bal-entry-head .form-group input { width: 100%; min-width: 0; height: 32px; font-size: 13px; padding: 0 8px; box-sizing: border-box; }
 /* 归属月份 = 「年（手输）+ 月（下拉）」，等分等高的规则要同时覆盖两种控件 */
-.bal-entry-head .form-group.be-ym-group { flex: 1.5 1 0; }
+.bal-entry-head .form-group.be-ym-group { flex: 1.5 1 0; min-width: 150px; }
 /* v1.39.74：加行 / 加列挪到这一行；按钮按内容宽、不参与等分，窄屏放不下就整块换行 */
 .bal-entry-head .mw-addbtns { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
 /* v1.39.75：加行 / 加列常驻显示（查看模式也不藏）；字号跟「本人」下拉一致（13px）。
@@ -4018,18 +4070,20 @@ table.bill-stats {
 }
 .bal-entry-head .mw-addbtns .btn-mini.primary:hover { filter: brightness(1.08); }
 /* v1.39.89：汇率输入条 —— 每个币种一个小框，填一次下面同币种的行就全按它换算。
-   只在「币种 = 其他币种」时出现（切回人民币就藏起来）。 */
+   只在「币种 = 其他币种」时出现（切回人民币就藏起来）。
+   v1.39.90：输入框改小（跟「美元」两个字差不多宽），字多了才自己变宽 ——
+   原来 72px 一个框，四个币种就把抬头挤爆了，右边「增加账户/增加列」按钮被推出可视区。 */
 .bal-entry-head .mw-fxstrip {
-    flex: 0 0 auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    flex: 0 0 auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     padding: 0 2px;
 }
 .bal-entry-head .mw-fxstrip.hidden { display: none; }
 .mw-fx-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
-.mw-fx-item { display: inline-flex; align-items: center; gap: 4px; }
+.mw-fx-item { display: inline-flex; align-items: center; gap: 3px; }
 .mw-fx-cur { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
 .mw-fx-in {
-    width: 72px; height: 32px; font-size: 13px; font-family: var(--font);
-    text-align: center; padding: 0 6px;
+    width: 46px; min-width: 40px; height: 32px; font-size: 13px; font-family: var(--font);
+    text-align: center; padding: 0 4px;
 }
 .bal-entry-head .mw-fxstrip .btn-mini {
     white-space: nowrap; height: 32px; font-size: 12px; font-family: var(--font);

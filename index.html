@@ -1147,6 +1147,11 @@
                         <button class="primary-btn" onclick="addAccount()"><i class="fa-solid fa-plus"></i> 添加</button>
                         <button class="primary-btn" id="accEditBtn" onclick="toggleAccountsViewMode()" style="display:none"><i class="fa-solid fa-pen"></i> <span id="accEditBtnLabel">编辑</span></button>
                         <span class="acc-viewtag" id="accViewTag" style="display:none">（只读查看）</span>
+                        <!-- v1.39.90：多币种账户 —— 勾了的账户，记月度账单选「其他币种」时才按币种分成几行 -->
+                        <label class="acc-multi-toggle" title="这个账户里有美元 / 港币 / 其它币种时勾上。记月度账单把上面的「币种」切成「其他币种」时，勾了的账户会按币种分成几行分别记账">
+                            <input type="checkbox" id="newAccountMulti">
+                            <span>多币种账户（里面有美元 / 港币时勾上）</span>
+                        </label>
                     </div>
                     <div id="accountManageList"></div>
                 </div>
@@ -1282,6 +1287,11 @@
                     <label class="switch-row">
                         <input type="checkbox" id="acctEditEarns">
                         <span>这个账户会有收益<span class="sr-hint">关掉后不会出现在记账单的收益那一列里；本月已录过的仍然能改</span></span>
+                    </label>
+                    <!-- v1.39.90：多币种账户 -->
+                    <label class="switch-row">
+                        <input type="checkbox" id="acctEditMulti">
+                        <span>多币种账户<span class="sr-hint">这个账户里有美元 / 港币时打开；记月度账单选「其他币种」时，它才会按币种分成几行分别记账</span></span>
                     </label>
                     <label class="settings-label">图标</label>
                     <div class="icon-picker" id="acctEditIcons"></div>
@@ -1446,7 +1456,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.89').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.90').catch(() => {});
             });
         }
     </script>

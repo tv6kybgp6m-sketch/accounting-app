@@ -106,11 +106,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.39.89"
+        webView.customUserAgent = "BookkeepingMacApp/1.39.90"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"
         window.contentView = webView
+        // v1.39.90：窗口可以拉大拉小 —— 网页那边把 1200×780 的上限放开了，
+        // 这里只要保证内容跟着窗口走（contentView 本来就会跟着，再显式写一次更保险）。
+        webView.autoresizingMask = [.width, .height]
+        // 最小尺寸：缩得太小的话侧边栏 + 内容会挤成一团，排版就散了
+        window.contentMinSize = NSSize(width: 880, height: 580)
+        // 记住用户上次拉的大小（自己做，不用 setFrameAutosaveName ——
+        // 那个和下面 isRestorable = false 在某些系统版本上会互相打架）
+        let savedW = UserDefaults.standard.double(forKey: "BookkeepingWindowWidth")
+        let savedH = UserDefaults.standard.double(forKey: "BookkeepingWindowHeight")
+        if savedW >= 880, savedH >= 580 {
+            window.setContentSize(NSSize(width: savedW, height: savedH))
+        }
         window.center()
         window.delegate = self
         window.makeKeyAndOrderFront(nil)
@@ -132,6 +144,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if let p = pendingImportPath { pendingImportPath = nil; importFile(at: p) }
+    }
+
+    // v1.39.90：用户拉过窗口之后，把新的大小记下来，下次启动照着来
+    func windowDidResize(_ notification: Notification) {
+        guard let w = window else { return }
+        UserDefaults.standard.set(Double(w.frame.width), forKey: "BookkeepingWindowWidth")
+        UserDefaults.standard.set(Double(w.frame.height), forKey: "BookkeepingWindowHeight")
     }
 
     // MARK: JS 对话框（prompt / confirm / alert）
