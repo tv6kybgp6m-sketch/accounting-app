@@ -4072,30 +4072,32 @@ table.bill-stats {
 /* v1.39.89：汇率输入条 —— 每个币种一个小框，填一次下面同币种的行就全按它换算。
    只在「币种 = 其他币种」时出现（切回人民币就藏起来）。
    v1.39.90：输入框改小（跟「美元」两个字差不多宽），字多了才自己变宽 ——
-   原来 72px 一个框，四个币种就把抬头挤爆了，右边「增加账户/增加列」按钮被推出可视区。 */
+   原来 72px 一个框，四个币种就把抬头挤爆了，右边「增加账户/增加列」按钮被推出可视区。
+   v1.39.93：改成竖着摆 —— 币种名字在上面、汇率框在下面，一眼能对上哪个框是哪个币种；
+   「汇率」那两个字去掉了（每个币种名字都在旁边，不用再标一遍）。 */
 .bal-entry-head .mw-fxstrip {
-    flex: 0 0 auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    flex: 0 0 auto; display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;
     padding: 0 2px;
 }
 .bal-entry-head .mw-fxstrip.hidden { display: none; }
-.mw-fx-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
-.mw-fx-item { display: inline-flex; align-items: center; gap: 3px; }
-.mw-fx-grp { display: inline-flex; align-items: center; gap: 2px; }
-.mw-fx-cur { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
-/* v1.39.91：删掉这个币种的小 × */
-.mw-fx-del {
-    width: 18px; height: 18px; flex: 0 0 auto; padding: 0;
-    border: none; border-radius: 50%; cursor: pointer;
-    background: var(--bg-card-hover); color: var(--text-secondary);
-    font-size: 13px; line-height: 1; font-family: var(--font);
-}
-.mw-fx-del:hover { background: var(--expense, #ff3b30); color: #fff; }
+.mw-fx-grp { display: inline-flex; align-items: flex-start; gap: 1px; }
+.mw-fx-item { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
+.mw-fx-cur { font-size: 11px; line-height: 1.2; color: var(--text-secondary); white-space: nowrap; }
 .mw-fx-in {
-    width: 46px; min-width: 40px; height: 32px; font-size: 13px; font-family: var(--font);
+    width: 46px; min-width: 40px; height: 28px; font-size: 13px; font-family: var(--font);
     text-align: center; padding: 0 4px;
 }
+/* v1.39.91：删掉这个币种的小 × */
+.mw-fx-del {
+    width: 16px; height: 16px; flex: 0 0 auto; padding: 0; margin-top: -1px;
+    border: none; border-radius: 50%; cursor: pointer;
+    background: var(--bg-card-hover); color: var(--text-secondary);
+    font-size: 12px; line-height: 1; font-family: var(--font);
+}
+.mw-fx-del:hover { background: var(--expense, #ff3b30); color: #fff; }
 .bal-entry-head .mw-fxstrip .btn-mini {
-    white-space: nowrap; height: 32px; font-size: 12px; font-family: var(--font);
+    white-space: nowrap; height: 28px; font-size: 12px; font-family: var(--font);
+    margin-top: 15px;                 /* 和下面那排汇率框对齐（上面是币种名字那一行） */
     padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
     background: var(--bg-input); color: var(--text-primary); cursor: pointer;
 }
@@ -4883,12 +4885,9 @@ table.bill-stats {
 .mw-name:hover { border-bottom-color: var(--border-strong); }
 .mw-name:active { cursor: grabbing; }
 .mw-name.dragging { cursor: grabbing; opacity: .4; }
-/* 行名撞了资产类别名（现金/货币基金…）时标一下，提醒改成「放钱的地方」 */
-.mw-name-warn { color: var(--warning, #ff9500); }
-.mw-badge {
-    flex: none; font-size: 9px; line-height: 13px; padding: 0 4px; border-radius: 6px; cursor: text;
-    color: var(--warning, #ff9500); background: rgba(255, 149, 0, .12); white-space: nowrap;
-}
+/* v1.39.93：行名撞了资产类别名（现金/货币基金…）时的「类别名」小牌子已经去掉 ——
+   账户叫「现金」是实体现金的意思，其它账户的钱记在「现金」那一列，不是同一回事，
+   没必要再提醒改名。点账户名照样能直接改名。 */
 /* 账户行的 修改/删除 已改为悬停显示「⋯」菜单（见 .mw-more），这里不再放常驻按钮 */
 /* 月度账单：行 / 列的「⋯ 更多」浮层按钮——平时隐藏，悬停该行/列才淡显 */
 /* 行 / 列的「⋯ 更多」浮层按钮——平时隐藏，悬停该行/列才淡显；
