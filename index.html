@@ -1091,6 +1091,9 @@
                                     title="加一行：放钱的地方（支付宝 / 微信 / 工商银行 / 摩根…）">增加账户</button>
                             <button type="button" class="btn-mini" id="mwAddColBtn"
                                     title="新增资产列或负债列">增加列</button>
+                            <!-- v1.39.94：收起来的列 / 账户从这里再打开（数据一行都没动） -->
+                            <button type="button" class="btn-mini hidden" id="mwHiddenBtn"
+                                    title="打开收起来的列 / 账户">隐藏的</button>
                         </div>
                     </div>
                     <div class="bal-entry-actions">
@@ -1266,6 +1269,9 @@
                             </select>
                         </div>
                     </div>
+                    <!-- v1.39.94：账户属于哪些家庭成员（每个家庭成员的账户可以不一样） -->
+                    <label class="settings-label">属于哪些家庭成员</label>
+                    <div class="acct-member-picker" id="acctEditMembers"></div>
                     <div class="settings-sublabel">账户不再分资产还是负债 —— 一个账户里可以同时有活期、定期、货基、股基、黄金和信用卡欠款，
                         记账时资产填对应的类别列、欠款填「负债」列就行。</div>
                     <label class="switch-row">
@@ -1440,7 +1446,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.93').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.94').catch(() => {});
             });
         }
     </script>
