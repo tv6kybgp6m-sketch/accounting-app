@@ -4045,7 +4045,7 @@ table.bill-stats {
    v1.39.96：家庭成员下拉缩小一点，成员 + 日期靠左排，别的按钮靠右排，
    中间那块留给币种和汇率 —— 不然「加币种」的时候没地方放。 */
 .bal-entry-head .form-group { flex: 1 1 0; min-width: 96px; margin-bottom: 0; }
-.bal-entry-head .mw-member-group { flex: 0 0 128px; min-width: 0; }
+.bal-entry-head .mw-member-group { flex: 0 0 auto; min-width: 0; }
 /* 控件自身 min-width:auto 会让两栏分不匀；高度也要显式统一，
    否则成员下拉和月份下拉在不同内核下会一高一低 */
 .bal-entry-head .form-group select,
