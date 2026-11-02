@@ -3,7 +3,7 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.91';  // v1.39.91：①删掉月度账单的「币种」下拉 —— 页面固定就是多币种那套，哪些账户展开成几行由账户自己的「多币种账户」开关决定 ②汇率条上每个币种后面加「×」，可以删掉这个币种（连它记过的余额/收益一起删，8 秒内可撤销）③账户行的「⋯」菜单里能直接勾/取消「多币种账户」。v1.39.90：①汇率输入框改小（跟币种名一样宽，字多了自动变宽），抬头不再把「增加账户/增加列」挤出可视区 ②账户管理加「多币种账户」开关，只有勾了的账户在「其他币种」口径下才按币种展开成几行 ③所有弹窗右下角加缩放手柄，可拉大拉小（大小记在本地，排版不会散）④原生窗口放开 1200×780 上限、跟着窗口走，并记住上次的大小。v1.39.89：月度账单支持多币种 —— ①「本人」旁边加「币种」下拉（人民币 / 其他币种，默认人民币）②选「其他币种」后每个账户按币种展开成多行（人民币+美元+港币，币种可自己加）③「增加账户」前加汇率输入条，填一次下面同币种的行全按它换算 ④格子只记真实原币数，人民币换算统一在右侧小计/合计里做 ⑤没填汇率不许保存（不猜）⑥删掉格子里的旧「汇率」按钮（v1.39.87 那套会把人民币盖掉真实原币数）⑦余额 id 升到五段（含币种）、收益 id 升到四段，老数据自动迁移成 CNY。v1.39.88：自定义列（月度账单+资产负债）跨设备同步——buildSyncPayload 补 sheetCols、fingerprintOfPayload 与 mergeRemoteData 同步处理，Mac 增/删/移列后手机会收到。v1.39.87：外币账户支持——①账户可设币种（人民币/美元/港币）②月度账单外币账户格子点「汇率」填外币数额+自己输的汇率→自动算成人民币 ③汇率记在该账户上、下次自动带上。v1.39.86：月度账单①粘贴带千分位逗号的金额现在能完整识别（不再只认逗号前）②输入框失焦即把「1,234+50」之类规整成算好的数字 ③合计/占比/自检面板同样支持逗号与加减表达式。v1.39.85：四个饼图中心文字（金额+小标题）全部清空，只留扇区占比。v1.39.84：①云同步（GitHub Token）已开启时，手机/PWA 不再弹"已 N 天没备份"导出提醒 ②报表/资产负债/四笔钱/投资收益四个饼图中心删除金额、只留占比。v1.39.83：月度结账改造（排除异常/无异常隐藏/同步状态重写）+ 四笔钱精简（删冗余块+设置目标）。v1.39.82：①【电脑端记一笔恢复 v1.39.80 原样】v1.39.81 为了改手机端顺序，直接动了 index.html 的 DOM 顺序 —— 但 HTML 是两端共用的，电脑端顺序被一起改掉了（用户发现）。改法：HTML 顺序恢复成「日期/时间/归属成员/支付方式/备注」，手机端要的另一套顺序改用 CSS order 重排 —— 两端互不影响。②【手机端输入框底色去掉】v1.39.81 加的浅灰底不要了：输入框、日期显示层、整行 form-row 三处 background 全部改回 transparent；高度 46px、字号 14px 保留（v1.39.81 的加大值用户没要求撤）。层次只靠上下两条横线 + 格子之间的竖线表达。v1.39.81：①【手机端记一笔：顺序改为 微信/备注/日期/时间/本人】五个格子一行（v1.39.80 的顺序是 日期/时间/成员/支付方式/备注）。②【日期只显示「月.日」】如 10.22，不显示年，更简洁。做法：dateDisplay 是一层只读的 text 显示框（显示 10.22），底下压着透明的原生 <input type=date> —— 点它照样唤起 iOS 原生日期选择器，真值仍在 dateInput.value 里，保存逻辑一行没改（saveTransaction 读的还是完整日期）。新增 syncDateDisplay()：2026-10-22 → 10.22（单数字月/日不补零）；打开弹窗时同步，dateInput 的 change/input 事件也同步。⚠️ 桌面端仍直接用原生日期框（显示完整日期），那层显示框在桌面端藏掉。③【手机端数字键盘】按键 42→45px、键间隙 5→1px，但整个键盘模块占的高度分毫不变（4×45 + 3×1 = 183 = 原来的 4×42 + 3×5）。（试过用负 margin 补偿，会让行距 46.25px < 键高、上下两行的键重叠，不可用。）④【手机端分类图标】34→38px、字号 14.5→16px，文字 11.5→12.5px，每行仍是 5 个不变。⑤【手机端输入框】加浅灰底色（--bg-content）、高度 40→46px、字号 12.5→14px、圆角 6px。⚠️ 全部锁在 @media (max-width: 640px) 内，电脑端一字未动。v1.39.80：①【记账弹窗改成「一整行 5 格 + 两条线」排版】用户反馈：之前用「输入框 + 边框」区分格子，但 iOS 上原生 <input type=date>/<input type=time> 有自己的内部渲染（::-webkit-date-and-time-value），强制 height 也压不住，所以日期/时间两个框总比别的框高一截 —— 排版反复出问题就卡在这。新做法：不再给输入框画边框，改用「整行上下两条横线 + 格子之间一条竖线」分隔，所有控件在同一条基线上，高度由行高统一，不管它是原生日期控件还是 select，视觉上都是齐的。5 个格子一行：日期 / 时间 / 归属成员 / 支付方式 / 备注；单成员家庭藏掉成员格后其余四格自动均分。顺带压掉 iOS 日期控件自带的日历图标（占宽会把分隔线挤歪）。②【删掉「微信支付」支付方式】用户账本里「微信」716 笔、「微信支付」0 笔，下拉框里重复且「微信支付」三个字太长。默认列表改成 ['微信','支付宝','现金','银行卡','信用卡','其他']，所有 `|| '微信支付'` 兜底与图标映射同步改掉；加一次性迁移把已有账本里的「微信支付」并进「微信」（含历史交易的 paymentMethod、默认支付方式、墓碑标记、pmAddedAt）—— 不丢任何数据。③【删掉成员和支付方式右边的下拉小三角】select 改成 background-image:none + padding-right:0，靠分隔线区分格子即可。v1.39.79：①【记账弹窗排布按用户要求重排】手机端改成 3 列网格：第一行「日期 / 时间 / 归属成员」，第二行「支付方式 / 备注(跨两列)」—— 3 列正好填满两行，一个空缺都没有。（上一版做成了 2×2 两列，方向错了，用户指出后重做。）桌面端维持 4 个一行 + 备注独占整行（460px 弹窗塞不下 3 列）。②【数字键盘浅灰底与按压反馈在手机端真正生效】根因：手机端有 #transactionModal .numpad 规则（#id 选择器，特异性 100），把基础样式的浅灰底又盖回 var(--bg-modal) 白色，按压反馈的 :active 也被同样压住 —— 表现就是「加了却没反应」。已在该规则内改掉（background → var(--bg-content)、margin 负边距 -14px 与父级 padding 对冲、border 1px），并补上同优先级的 #transactionModal .numpad-btn:active / .is-pressed 规则（含 numpad-num/op/back/quick 各自覆盖，OK 键用 filter: brightness 压暗以保留渐变）。③【按压反馈加 JS 兜底】iOS Safari 光靠 :active 常看不到变化（手指抬起才触发 click，颜色来不及被看到）—— 新增 bindNumpadPressFeedback()：touchstart/touchend/touchcancel 显式切 .is-pressed 类，手指一碰就变灰、抬起就还原（与系统键盘手感一致）；桌面端走 mousedown/mouseup；幂等（dataset.pressBound 守卫），滑出按钮外也会还原。v1.39.78：①【记账弹窗布局（手机端）】支付方式与归属成员对调位置，备注从独立一行挪进 form-row 与支付方式同排（grid-column: span 2），四个框改 2×2 网格 —— 原来 3 列放 4 个框，归属成员掉到第二行、右侧空两格，看着像漏了东西。②【分类图标文字放大】手机端图标 30→34px、文字 10→11.5px，桌面端同步放大，但一排几个的结构不变（手机仍 5 个、桌面仍 6 个）。③【数字键盘】整块垫浅灰底（--bg-content）并与弹窗左右 padding 对冲，键与底色分得开；按键边框 0.5px→1px；按下时背景明显变灰 + 轻微下沉 + 内阴影（原来只有 scale(0.95) 和一个跟白底几乎同色的背景，手指按下去像没反应）；深色模式另配一套按下配色。④【收益率双口径 TWR + IRR】新增严格 IRR（资金加权）：现有的是时间加权（逐月连乘），剔掉加钱时点的影响；IRR 回答「你的钱实际赚了多少」，中途加钱越多两者差得越远。现金流构造三个坑：t=0 投 -(期初市值)、中途每期 -(净入金)（投入是负现金流）、期末 +(期末市值)；⚠️中途绝不能再加 profit，期末市值已含全部累计收益，加了就是重复计算（我第一版就错在这，算出来差一倍）。二分法求根，不引第三方库。算不出就给 null 并说明原因（没录净入金 / 缺期初余额 / 至少要 2 个月），绝不编数。行业里（Portfolio Performance / Wealthfolio / justETF）都是两个口径并列给。⑤【净资产变动归因拆解】把「投入 / 收益 / 其他」从 6 个瓦片里拎出来并排成三列，各带占比条 —— 一眼看清总资产涨的 10 万里多少是自己存的、多少是市场涨的（口径同 Wealthfolio / nett.money）。只读展示：这三项本来就算好的（other = delta − flow − profit），软件不替用户写任何数。v1.39.77：①【交易记录「已排除 N 笔·恢复」去掉】那个链接一直常驻在顶部提示条上，手一抖点上去就把排除全部撤销（白筛一遍）。删掉链接与 restoreAllAnomalies()，改成排除后弹 8 秒的临时「撤销」提示条（与删记录同一个时间窗）；单笔长期反悔仍点该行上的「已排除」按钮。②【折线/柱状图：竖线 + 左右移动读数】鼠标进入折线图/柱状图即出现一条竖线，左右移动就显示那一期的数值，不必把指针精确停在那个 3px 小圆点上（点多时圆点半径甚至是 0）。做法是 Chart.js 的两套判定分开设：interaction={mode:'index',intersect:false} 让提示框按「横向最近一期」取值（v3 起 tooltip.mode/intersect 已并入 interaction），同时把 hover 显式写回 nearest/true —— 不写回的话 hover 会跟着 fallback 变 index，「点某个点看明细」就会误触发。竖线用内联插件 chartCrosshairPlugin 在 afterDatasetsDraw 里自绘（Chart.js 4 无内置准星插件），数据源是 chart.tooltip.getActiveElements()（index 模式那一份），不是 chart.getActiveElements()（hover 模式，必须精确命中，用它竖线就不出现）。③【手机端手指左右拖动读数】四张图（报表走势 drillChart / 资产负债走势 balanceChart / 投资收益走势 returnChart / 总资产变化 tacChart）加 touch-action:pan-y —— 纵向滚动照常交给页面，横向手势留给图表，否则一横着划整页跟着动、图表收不到 touchmove。拖动读数后浏览器补发的 click 会被 bindChartTouchGuard/chartClickWasDrag（8px 阈值 + WeakMap 标记）拦掉，读着数不会误弹明细面板；「点一下某个点看详细数据」的老行为完全保留。v1.39.76：①【报表轮盘只列账本里真有的年月】新增 reportWheelYears / reportWheelMonths，年份 = 有交易的年份（+当年），某年下的月份 = 那年真正记过的月份（+当月）；空年份（如账本最早 2017 才有交易、轮盘却冒出 2015）不再出现。轮盘新增 opts.years / opts.monthsFor(year) / opts.withMonth 三个可选参数，ymWheelPick 换年份时按新年份重建月份列。②【按年看时不出现月份】报表/资产负债/投资收益在「年报」口径下 withMonth:false，月份整列不显示（月份本就没参与统计）。③【手机轮盘「2026年」折行】.ym-wheel-col > div 加 white-space:nowrap，并在 ≤640px 再收一档字号/内边距（桌面端本来就一行，无副作用）。④「＋ 增加账户 / ＋ 增加列」去掉文字里的加号。v1.39.75：①【轮盘永远停在第一格 → 默认不是当月】根因：openYmWheel / toggleMonthWheel 都是「先建列（里面设 scrollTop）再 hidden=false」，而 display:none 的元素没有滚动区域、此时设 scrollTop 会被忽略（一直是 0）→ 打开就停在年/月的第一格（月份第一格是「1月」）。改成「先显示、再建列」，两套轮盘都改。②【交易记录「所有月份」】点开默认停留当月。③【报表分析】月报右边的日期默认当月、点开也停当月。④【资产负债 / 投资收益】日期默认「上个月」——当月还没记、要下个月才记；并且选中「当月及以后」时也退回上个月。⑤【记月度账单】统一走新增的 prevMonthYM()，默认 = 上个月。⑥【加行 / 加列常驻显示】查看模式不再隐藏这两个按钮；并补齐 .btn-mini 的基础样式（此前全项目根本没有 .btn-mini 样式、一直靠浏览器默认按钮外观），字号 / 高度与「本人」下拉一致（13px / 32px）。⑦删掉底部常用渠道 chip（+支付宝…）与「一行 = 一个放钱的地方…」说明文字，连同它们的 CSS 一起清掉。v1.39.74：①【记一笔的日期改回原生控件】v1.39.73 给桌面端换的那套 ‹‹ ‹ [日期] › ›› 步进器实测下来更不好用，按用户要求撤掉，恢复系统原生 date 框（读 dateInput.value 的老逻辑本就零改动、手机端也从没动过）；顺手清掉步进器相关的 initDateStepper / refreshDateStepper / IS_TOUCH_PHONE 与 .date-stepper / .ds-group / .mw-new 样式。②【记月度账单：加行 / 加列挪到顶部】两个按钮从表格最底下挪到「本人 + 年月」那一行（.mw-addbtns，flex:0 0 auto、窄屏自动换行）；删掉前面那个输入框（对「增加列」本来就没用），改成点按钮直接弹窗填名字——「增加列」本来就是弹窗问，现在「增加账户」也一致（快捷键 chip 仍直接传名字、不再多问）；按钮变成静态 DOM 后必须加 dataset.bound 防重复绑定，否则每重绘一次就叠一层监听 → 点一下连着加出好几行 / 好几列；查看模式照旧隐藏这两个按钮。v1.39.73：四处日期控件按用户要求改造——①【月度账单弹窗默认「上个月」】以前没数据时退到 2015-01，现在一律默认今天的上个月（月初填上月账单最顺手）。②【记一笔的日期】桌面端（Mac 原生 App / 桌面浏览器）把原生日期框换成 ‹‹ ‹ [2026年10月19日] › ›› 步进器：‹‹›› 翻年、‹› 翻月，中间标签点开「年+月+日」三列轮盘；手机端不动，继续用系统原生日期控件（用户明确要求）。③【交易记录「所有月份」】年份折叠面板换成 iOS 风格双列轮盘，底部保留「所有月份」清除行。④【报表/资产负债/投资收益顶部】两个原生下拉（年+月）合并成一个「2026年10月」锚点按钮，点开同一个轮盘。通用轮盘挂 body 用 fixed 定位——普通页面容器有 overflow 会裁掉弹窗里那套 absolute 轮盘；支持 withDay（带日列）/ allowClear（清除行）。v1.39.72：修轮盘两个显示问题——①背景透出后面数字：.ym-wheel 误用未定义的 --bg-pop（无兜底 → 背景声明无效变透明），改成已定义的 --bg-card（不透明）；②偏右：原 right:0 锚在右侧栏右缘，改为 left:50%+translateX(-50%) 以其正中的「2026年10月」按钮为基准居中，整块落在弹窗内。v1.39.71：月度账单弹窗年月选择重做——【左右箭头】‹ › 逐月翻（跨年自动进位，2015-01 和当年当月处自动禁用）；【点中间「2026年10月」调出双列轮盘】iOS 风格，中条为选中、上下渐隐、scroll-snap 滚动停稳即选中；年份 2015 起到当年（v1.39.70 年份条从 1976 起被否：起点不对且不够优雅）。月份仍存在隐藏 select 里，沿用上期/清空/保存等老逻辑零改动。v1.39.70：①【粘贴静默错值】金额框粘贴科学计数法（1e5）被原清洗逻辑把"e"当杂质吃掉变成15——新增 pasteToCalcExpr：整段若是合法数字（含 1e5/1.5e3）先走 Number 展开，加减表达式才走老路径。②【月份选择器】月度账单弹窗年份从"手敲输入框"改为年份条（chip 横滑点选，覆盖 nowYear-50~nowYear 共约50年，远超旧下拉约10年上限；每个 chip ≥42px 触控友好）。v1.39.69：交易记录页四项修复——①【搜索彻底瘫痪】Excel 导入把数字单元格写进备注列（真实数据里有 note=2080 一笔），getFilteredTransactions 的 t.note.toLowerCase() 在这笔上抛 TypeError，任何搜索词都让整个筛选链崩掉、列表原样不动（用户体感"搜索框无效"）。修法三路：过滤时一律 String() 转型后再匹配（并顺带把搜索范围从"备注+分类"扩到"备注/分类/支付方式/金额"，和界面看得见的字段对齐）；loadState 加载时把非字符串备注统一规整成字符串（治存量）；Excel 导入时备注/时间/支付方式一律 String() 化（治增量）。②【金额不能粘贴】金额显示屏原是 readonly 且无 paste 监听，粘贴毫无反应。现允许直接键入/粘贴：paste 事件解析剪贴板文本（容忍 ¥ 、逗号、"元"等杂质）整体替换表达式；beforeinput 把键入的每个字符导进和数字键盘完全相同的 numpadPress 规则；input 事件兜底规整。inputmode=none 保留，手机不弹系统键盘。③【月份选择器】原生 select 平铺 100+ 个月份（真实数据 118 个月）难找难点。改成年份折叠面板：年份行从新到旧、默认全折叠（沿用报表"全部"视图同款交互），点年份展开该年月份、点月份即筛选，面板外点击自动收起。④【弹窗误触】编辑弹窗里删除按钮和关闭 X 原来只隔 6px，改 18px。v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+const APP_VERSION = '1.39.92';  // v1.39.92：修两个 bug —— ①删掉的币种会被云端那份「并集」搬回来（现在币种删除也打墓碑，合并时跳过；再添加同名内置币种会自动复活墓碑）②多币种账户的「⋯」菜单原来只有「删除」，一点把整个账户都删了；现在多币种账户的菜单里「删掉这一行（某币种）」只删那一行（记录一起删，8 秒内可撤销），「删除这个账户」才是删整个账户。v1.39.91：①删掉月度账单的「币种」下拉 —— 页面固定就是多币种那套，哪些账户展开成几行由账户自己的「多币种账户」开关决定 ②汇率条上每个币种后面加「×」，可以删掉这个币种（连它记过的余额/收益一起删，8 秒内可撤销）③账户行的「⋯」菜单里能直接勾/取消「多币种账户」。v1.39.90：①汇率输入框改小（跟币种名一样宽，字多了自动变宽），抬头不再把「增加账户/增加列」挤出可视区 ②账户管理加「多币种账户」开关，只有勾了的账户在「其他币种」口径下才按币种展开成几行 ③所有弹窗右下角加缩放手柄，可拉大拉小（大小记在本地，排版不会散）④原生窗口放开 1200×780 上限、跟着窗口走，并记住上次的大小。v1.39.89：月度账单支持多币种 —— ①「本人」旁边加「币种」下拉（人民币 / 其他币种，默认人民币）②选「其他币种」后每个账户按币种展开成多行（人民币+美元+港币，币种可自己加）③「增加账户」前加汇率输入条，填一次下面同币种的行全按它换算 ④格子只记真实原币数，人民币换算统一在右侧小计/合计里做 ⑤没填汇率不许保存（不猜）⑥删掉格子里的旧「汇率」按钮（v1.39.87 那套会把人民币盖掉真实原币数）⑦余额 id 升到五段（含币种）、收益 id 升到四段，老数据自动迁移成 CNY。v1.39.88：自定义列（月度账单+资产负债）跨设备同步——buildSyncPayload 补 sheetCols、fingerprintOfPayload 与 mergeRemoteData 同步处理，Mac 增/删/移列后手机会收到。v1.39.87：外币账户支持——①账户可设币种（人民币/美元/港币）②月度账单外币账户格子点「汇率」填外币数额+自己输的汇率→自动算成人民币 ③汇率记在该账户上、下次自动带上。v1.39.86：月度账单①粘贴带千分位逗号的金额现在能完整识别（不再只认逗号前）②输入框失焦即把「1,234+50」之类规整成算好的数字 ③合计/占比/自检面板同样支持逗号与加减表达式。v1.39.85：四个饼图中心文字（金额+小标题）全部清空，只留扇区占比。v1.39.84：①云同步（GitHub Token）已开启时，手机/PWA 不再弹"已 N 天没备份"导出提醒 ②报表/资产负债/四笔钱/投资收益四个饼图中心删除金额、只留占比。v1.39.83：月度结账改造（排除异常/无异常隐藏/同步状态重写）+ 四笔钱精简（删冗余块+设置目标）。v1.39.82：①【电脑端记一笔恢复 v1.39.80 原样】v1.39.81 为了改手机端顺序，直接动了 index.html 的 DOM 顺序 —— 但 HTML 是两端共用的，电脑端顺序被一起改掉了（用户发现）。改法：HTML 顺序恢复成「日期/时间/归属成员/支付方式/备注」，手机端要的另一套顺序改用 CSS order 重排 —— 两端互不影响。②【手机端输入框底色去掉】v1.39.81 加的浅灰底不要了：输入框、日期显示层、整行 form-row 三处 background 全部改回 transparent；高度 46px、字号 14px 保留（v1.39.81 的加大值用户没要求撤）。层次只靠上下两条横线 + 格子之间的竖线表达。v1.39.81：①【手机端记一笔：顺序改为 微信/备注/日期/时间/本人】五个格子一行（v1.39.80 的顺序是 日期/时间/成员/支付方式/备注）。②【日期只显示「月.日」】如 10.22，不显示年，更简洁。做法：dateDisplay 是一层只读的 text 显示框（显示 10.22），底下压着透明的原生 <input type=date> —— 点它照样唤起 iOS 原生日期选择器，真值仍在 dateInput.value 里，保存逻辑一行没改（saveTransaction 读的还是完整日期）。新增 syncDateDisplay()：2026-10-22 → 10.22（单数字月/日不补零）；打开弹窗时同步，dateInput 的 change/input 事件也同步。⚠️ 桌面端仍直接用原生日期框（显示完整日期），那层显示框在桌面端藏掉。③【手机端数字键盘】按键 42→45px、键间隙 5→1px，但整个键盘模块占的高度分毫不变（4×45 + 3×1 = 183 = 原来的 4×42 + 3×5）。（试过用负 margin 补偿，会让行距 46.25px < 键高、上下两行的键重叠，不可用。）④【手机端分类图标】34→38px、字号 14.5→16px，文字 11.5→12.5px，每行仍是 5 个不变。⑤【手机端输入框】加浅灰底色（--bg-content）、高度 40→46px、字号 12.5→14px、圆角 6px。⚠️ 全部锁在 @media (max-width: 640px) 内，电脑端一字未动。v1.39.80：①【记账弹窗改成「一整行 5 格 + 两条线」排版】用户反馈：之前用「输入框 + 边框」区分格子，但 iOS 上原生 <input type=date>/<input type=time> 有自己的内部渲染（::-webkit-date-and-time-value），强制 height 也压不住，所以日期/时间两个框总比别的框高一截 —— 排版反复出问题就卡在这。新做法：不再给输入框画边框，改用「整行上下两条横线 + 格子之间一条竖线」分隔，所有控件在同一条基线上，高度由行高统一，不管它是原生日期控件还是 select，视觉上都是齐的。5 个格子一行：日期 / 时间 / 归属成员 / 支付方式 / 备注；单成员家庭藏掉成员格后其余四格自动均分。顺带压掉 iOS 日期控件自带的日历图标（占宽会把分隔线挤歪）。②【删掉「微信支付」支付方式】用户账本里「微信」716 笔、「微信支付」0 笔，下拉框里重复且「微信支付」三个字太长。默认列表改成 ['微信','支付宝','现金','银行卡','信用卡','其他']，所有 `|| '微信支付'` 兜底与图标映射同步改掉；加一次性迁移把已有账本里的「微信支付」并进「微信」（含历史交易的 paymentMethod、默认支付方式、墓碑标记、pmAddedAt）—— 不丢任何数据。③【删掉成员和支付方式右边的下拉小三角】select 改成 background-image:none + padding-right:0，靠分隔线区分格子即可。v1.39.79：①【记账弹窗排布按用户要求重排】手机端改成 3 列网格：第一行「日期 / 时间 / 归属成员」，第二行「支付方式 / 备注(跨两列)」—— 3 列正好填满两行，一个空缺都没有。（上一版做成了 2×2 两列，方向错了，用户指出后重做。）桌面端维持 4 个一行 + 备注独占整行（460px 弹窗塞不下 3 列）。②【数字键盘浅灰底与按压反馈在手机端真正生效】根因：手机端有 #transactionModal .numpad 规则（#id 选择器，特异性 100），把基础样式的浅灰底又盖回 var(--bg-modal) 白色，按压反馈的 :active 也被同样压住 —— 表现就是「加了却没反应」。已在该规则内改掉（background → var(--bg-content)、margin 负边距 -14px 与父级 padding 对冲、border 1px），并补上同优先级的 #transactionModal .numpad-btn:active / .is-pressed 规则（含 numpad-num/op/back/quick 各自覆盖，OK 键用 filter: brightness 压暗以保留渐变）。③【按压反馈加 JS 兜底】iOS Safari 光靠 :active 常看不到变化（手指抬起才触发 click，颜色来不及被看到）—— 新增 bindNumpadPressFeedback()：touchstart/touchend/touchcancel 显式切 .is-pressed 类，手指一碰就变灰、抬起就还原（与系统键盘手感一致）；桌面端走 mousedown/mouseup；幂等（dataset.pressBound 守卫），滑出按钮外也会还原。v1.39.78：①【记账弹窗布局（手机端）】支付方式与归属成员对调位置，备注从独立一行挪进 form-row 与支付方式同排（grid-column: span 2），四个框改 2×2 网格 —— 原来 3 列放 4 个框，归属成员掉到第二行、右侧空两格，看着像漏了东西。②【分类图标文字放大】手机端图标 30→34px、文字 10→11.5px，桌面端同步放大，但一排几个的结构不变（手机仍 5 个、桌面仍 6 个）。③【数字键盘】整块垫浅灰底（--bg-content）并与弹窗左右 padding 对冲，键与底色分得开；按键边框 0.5px→1px；按下时背景明显变灰 + 轻微下沉 + 内阴影（原来只有 scale(0.95) 和一个跟白底几乎同色的背景，手指按下去像没反应）；深色模式另配一套按下配色。④【收益率双口径 TWR + IRR】新增严格 IRR（资金加权）：现有的是时间加权（逐月连乘），剔掉加钱时点的影响；IRR 回答「你的钱实际赚了多少」，中途加钱越多两者差得越远。现金流构造三个坑：t=0 投 -(期初市值)、中途每期 -(净入金)（投入是负现金流）、期末 +(期末市值)；⚠️中途绝不能再加 profit，期末市值已含全部累计收益，加了就是重复计算（我第一版就错在这，算出来差一倍）。二分法求根，不引第三方库。算不出就给 null 并说明原因（没录净入金 / 缺期初余额 / 至少要 2 个月），绝不编数。行业里（Portfolio Performance / Wealthfolio / justETF）都是两个口径并列给。⑤【净资产变动归因拆解】把「投入 / 收益 / 其他」从 6 个瓦片里拎出来并排成三列，各带占比条 —— 一眼看清总资产涨的 10 万里多少是自己存的、多少是市场涨的（口径同 Wealthfolio / nett.money）。只读展示：这三项本来就算好的（other = delta − flow − profit），软件不替用户写任何数。v1.39.77：①【交易记录「已排除 N 笔·恢复」去掉】那个链接一直常驻在顶部提示条上，手一抖点上去就把排除全部撤销（白筛一遍）。删掉链接与 restoreAllAnomalies()，改成排除后弹 8 秒的临时「撤销」提示条（与删记录同一个时间窗）；单笔长期反悔仍点该行上的「已排除」按钮。②【折线/柱状图：竖线 + 左右移动读数】鼠标进入折线图/柱状图即出现一条竖线，左右移动就显示那一期的数值，不必把指针精确停在那个 3px 小圆点上（点多时圆点半径甚至是 0）。做法是 Chart.js 的两套判定分开设：interaction={mode:'index',intersect:false} 让提示框按「横向最近一期」取值（v3 起 tooltip.mode/intersect 已并入 interaction），同时把 hover 显式写回 nearest/true —— 不写回的话 hover 会跟着 fallback 变 index，「点某个点看明细」就会误触发。竖线用内联插件 chartCrosshairPlugin 在 afterDatasetsDraw 里自绘（Chart.js 4 无内置准星插件），数据源是 chart.tooltip.getActiveElements()（index 模式那一份），不是 chart.getActiveElements()（hover 模式，必须精确命中，用它竖线就不出现）。③【手机端手指左右拖动读数】四张图（报表走势 drillChart / 资产负债走势 balanceChart / 投资收益走势 returnChart / 总资产变化 tacChart）加 touch-action:pan-y —— 纵向滚动照常交给页面，横向手势留给图表，否则一横着划整页跟着动、图表收不到 touchmove。拖动读数后浏览器补发的 click 会被 bindChartTouchGuard/chartClickWasDrag（8px 阈值 + WeakMap 标记）拦掉，读着数不会误弹明细面板；「点一下某个点看详细数据」的老行为完全保留。v1.39.76：①【报表轮盘只列账本里真有的年月】新增 reportWheelYears / reportWheelMonths，年份 = 有交易的年份（+当年），某年下的月份 = 那年真正记过的月份（+当月）；空年份（如账本最早 2017 才有交易、轮盘却冒出 2015）不再出现。轮盘新增 opts.years / opts.monthsFor(year) / opts.withMonth 三个可选参数，ymWheelPick 换年份时按新年份重建月份列。②【按年看时不出现月份】报表/资产负债/投资收益在「年报」口径下 withMonth:false，月份整列不显示（月份本就没参与统计）。③【手机轮盘「2026年」折行】.ym-wheel-col > div 加 white-space:nowrap，并在 ≤640px 再收一档字号/内边距（桌面端本来就一行，无副作用）。④「＋ 增加账户 / ＋ 增加列」去掉文字里的加号。v1.39.75：①【轮盘永远停在第一格 → 默认不是当月】根因：openYmWheel / toggleMonthWheel 都是「先建列（里面设 scrollTop）再 hidden=false」，而 display:none 的元素没有滚动区域、此时设 scrollTop 会被忽略（一直是 0）→ 打开就停在年/月的第一格（月份第一格是「1月」）。改成「先显示、再建列」，两套轮盘都改。②【交易记录「所有月份」】点开默认停留当月。③【报表分析】月报右边的日期默认当月、点开也停当月。④【资产负债 / 投资收益】日期默认「上个月」——当月还没记、要下个月才记；并且选中「当月及以后」时也退回上个月。⑤【记月度账单】统一走新增的 prevMonthYM()，默认 = 上个月。⑥【加行 / 加列常驻显示】查看模式不再隐藏这两个按钮；并补齐 .btn-mini 的基础样式（此前全项目根本没有 .btn-mini 样式、一直靠浏览器默认按钮外观），字号 / 高度与「本人」下拉一致（13px / 32px）。⑦删掉底部常用渠道 chip（+支付宝…）与「一行 = 一个放钱的地方…」说明文字，连同它们的 CSS 一起清掉。v1.39.74：①【记一笔的日期改回原生控件】v1.39.73 给桌面端换的那套 ‹‹ ‹ [日期] › ›› 步进器实测下来更不好用，按用户要求撤掉，恢复系统原生 date 框（读 dateInput.value 的老逻辑本就零改动、手机端也从没动过）；顺手清掉步进器相关的 initDateStepper / refreshDateStepper / IS_TOUCH_PHONE 与 .date-stepper / .ds-group / .mw-new 样式。②【记月度账单：加行 / 加列挪到顶部】两个按钮从表格最底下挪到「本人 + 年月」那一行（.mw-addbtns，flex:0 0 auto、窄屏自动换行）；删掉前面那个输入框（对「增加列」本来就没用），改成点按钮直接弹窗填名字——「增加列」本来就是弹窗问，现在「增加账户」也一致（快捷键 chip 仍直接传名字、不再多问）；按钮变成静态 DOM 后必须加 dataset.bound 防重复绑定，否则每重绘一次就叠一层监听 → 点一下连着加出好几行 / 好几列；查看模式照旧隐藏这两个按钮。v1.39.73：四处日期控件按用户要求改造——①【月度账单弹窗默认「上个月」】以前没数据时退到 2015-01，现在一律默认今天的上个月（月初填上月账单最顺手）。②【记一笔的日期】桌面端（Mac 原生 App / 桌面浏览器）把原生日期框换成 ‹‹ ‹ [2026年10月19日] › ›› 步进器：‹‹›› 翻年、‹› 翻月，中间标签点开「年+月+日」三列轮盘；手机端不动，继续用系统原生日期控件（用户明确要求）。③【交易记录「所有月份」】年份折叠面板换成 iOS 风格双列轮盘，底部保留「所有月份」清除行。④【报表/资产负债/投资收益顶部】两个原生下拉（年+月）合并成一个「2026年10月」锚点按钮，点开同一个轮盘。通用轮盘挂 body 用 fixed 定位——普通页面容器有 overflow 会裁掉弹窗里那套 absolute 轮盘；支持 withDay（带日列）/ allowClear（清除行）。v1.39.72：修轮盘两个显示问题——①背景透出后面数字：.ym-wheel 误用未定义的 --bg-pop（无兜底 → 背景声明无效变透明），改成已定义的 --bg-card（不透明）；②偏右：原 right:0 锚在右侧栏右缘，改为 left:50%+translateX(-50%) 以其正中的「2026年10月」按钮为基准居中，整块落在弹窗内。v1.39.71：月度账单弹窗年月选择重做——【左右箭头】‹ › 逐月翻（跨年自动进位，2015-01 和当年当月处自动禁用）；【点中间「2026年10月」调出双列轮盘】iOS 风格，中条为选中、上下渐隐、scroll-snap 滚动停稳即选中；年份 2015 起到当年（v1.39.70 年份条从 1976 起被否：起点不对且不够优雅）。月份仍存在隐藏 select 里，沿用上期/清空/保存等老逻辑零改动。v1.39.70：①【粘贴静默错值】金额框粘贴科学计数法（1e5）被原清洗逻辑把"e"当杂质吃掉变成15——新增 pasteToCalcExpr：整段若是合法数字（含 1e5/1.5e3）先走 Number 展开，加减表达式才走老路径。②【月份选择器】月度账单弹窗年份从"手敲输入框"改为年份条（chip 横滑点选，覆盖 nowYear-50~nowYear 共约50年，远超旧下拉约10年上限；每个 chip ≥42px 触控友好）。v1.39.69：交易记录页四项修复——①【搜索彻底瘫痪】Excel 导入把数字单元格写进备注列（真实数据里有 note=2080 一笔），getFilteredTransactions 的 t.note.toLowerCase() 在这笔上抛 TypeError，任何搜索词都让整个筛选链崩掉、列表原样不动（用户体感"搜索框无效"）。修法三路：过滤时一律 String() 转型后再匹配（并顺带把搜索范围从"备注+分类"扩到"备注/分类/支付方式/金额"，和界面看得见的字段对齐）；loadState 加载时把非字符串备注统一规整成字符串（治存量）；Excel 导入时备注/时间/支付方式一律 String() 化（治增量）。②【金额不能粘贴】金额显示屏原是 readonly 且无 paste 监听，粘贴毫无反应。现允许直接键入/粘贴：paste 事件解析剪贴板文本（容忍 ¥ 、逗号、"元"等杂质）整体替换表达式；beforeinput 把键入的每个字符导进和数字键盘完全相同的 numpadPress 规则；input 事件兜底规整。inputmode=none 保留，手机不弹系统键盘。③【月份选择器】原生 select 平铺 100+ 个月份（真实数据 118 个月）难找难点。改成年份折叠面板：年份行从新到旧、默认全折叠（沿用报表"全部"视图同款交互），点年份展开该年月份、点月份即筛选，面板外点击自动收起。④【弹窗误触】编辑弹窗里删除按钮和关闭 X 原来只隔 6px，改 18px。v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -307,7 +307,7 @@ let state = {
     reportPeriod: 'month',
     reportYear: null,
     reportMonth: null,
-    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [], recurring: [], cols: [] },  // soft-delete markers  // soft-delete markers
+    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [], recurring: [], cols: [], currencies: [] },  // soft-delete markers  // soft-delete markers
     pmAddedAt: {},          // payment method name -> when it was added (names are the identity)
     lastExportAt: 0,        // 最近一次导出的时间戳，用于备份提醒
     fundTargets: { cash: 0, steady: 0, growth: 0 },
@@ -1170,6 +1170,7 @@ function normalizeTombstones(raw) {
         insurance: clean(src.insurance),
         recurring: clean(src.recurring),
         cols: clean(src.cols),
+        currencies: clean(src.currencies),   // v1.39.92：删掉的币种也要有墓碑
     };
 }
 
@@ -1337,6 +1338,13 @@ function applyTombstones() {
     state.returns = drop(state.returns, state.deleted.returns);
     state.recurring = drop(state.recurring || [], state.deleted.recurring);
     state.insurancePolicies = drop(state.insurancePolicies, state.deleted.insurance);
+
+    // v1.39.92：删掉的币种（墓碑记着的）从清单里去掉 ——
+    // 不然「本机删了、云端还留着」时，这个币种又会冒出来。
+    if (Array.isArray(state.deleted.currencies) && state.deleted.currencies.length) {
+        const marks = new Set(state.deleted.currencies.map(m => m.id));
+        state.currencies = (state.currencies || []).filter(c => c && c.code && !marks.has(c.code));
+    }
 
     // 成员名单也是「名字即身份」的纯字符串，所以「什么时候加的」记在 memberAddedAt，
     // 删除标记按名字裁决：删得比加得晚就消失（和支付方式同一套逻辑）。
@@ -1711,8 +1719,10 @@ function mergeRemoteData(remoteData) {
         insuranceMembers: mergeTombstoneList(state.deleted.insuranceMembers, remoteDeleted.insuranceMembers),
         insurance: mergeTombstoneList(state.deleted.insurance, remoteDeleted.insurance),
         recurring: mergeTombstoneList(state.deleted.recurring, remoteDeleted.recurring),
-            cols: mergeTombstoneList(state.deleted.cols || [], remoteDeleted.cols),
-        };
+        cols: mergeTombstoneList(state.deleted.cols || [], remoteDeleted.cols),
+        // v1.39.92：币种删除也要随同步走 —— 不然删掉的币种会被云端那份「并集」重新搬回来
+        currencies: mergeTombstoneList(state.deleted.currencies || [], remoteDeleted.currencies),
+    };
 
     // 自定义列（月度账单 + 资产负债页共用）跨设备同步：
     // 按 key 取并集——本地已有的列顺序不动，远端独有、且未被墓碑删除的列补到末尾；
@@ -1731,9 +1741,14 @@ function mergeRemoteData(remoteData) {
 
     // v1.39.89：币种清单（并集）与汇率（按月×币种，后者取较新的一份）。
     {
-        const seenCur = new Set(currencyList().map(c => c.code));
+        // 删掉的币种有墓碑：本地有墓碑的，从清单里去掉；云端那份里的同名币种也别再搬回来。
+        // （以前这里是纯并集，删掉日元后下一次同步就会把日元带回来 —— v1.39.92 修）
+        const curMarks = new Set((state.deleted.currencies || []).map(m => m.id));
+        state.currencies = (state.currencies || []).filter(c => c && c.code && !curMarks.has(c.code));
+        const seenCur = new Set(state.currencies.map(c => c.code));
         (remote.currencies || []).forEach(c => {
             if (!c || !c.code || c.code === 'CNY' || seenCur.has(c.code)) return;
+            if (curMarks.has(c.code)) return;      // 这个币种被删过，别又搬回来
             seenCur.add(c.code);
             state.currencies.push({ code: c.code, label: c.label || c.code, symbol: c.symbol || '' });
         });
@@ -8707,6 +8722,54 @@ function toggleAccountMultiCur(accountId) {
     showToast(on ? `「${a.name}」已设成多币种账户：按币种分成几行` : `「${a.name}」已取消多币种：只记人民币一行`, 'success');
 }
 
+// 某个账户在月度账单里要显示哪几行（哪些币种）：
+// 普通账户就一行人民币；多币种账户按币种清单展开，但删掉过的币种（skipCurrencies）不再显示。
+function accountCurrencyRows(a) {
+    if (!a || !a.multiCur) return ['CNY'];
+    const skip = Array.isArray(a.skipCurrencies) ? a.skipCurrencies : [];
+    return monthlyCurrencyRows().filter(c => !skip.includes(c));
+}
+
+// 删掉多币种账户里的某一行（某个币种）：这个账户以后就不再显示这一行了。
+// 这一行记过的余额 / 收益（所有月份）也一起删 —— 只藏起来不删的话，那些数会变成
+// 「看不见却还算在资产负债里」的数据。8 秒内可以撤销。
+function removeAccountCurrencyRow(accountId, cur) {
+    const a = accountById(accountId);
+    if (!a || !cur) return;
+    // 至少要留一行，不然这个账户在月度账单里就彻底没了
+    const remaining = accountCurrencyRows(a).filter(c => c !== cur);
+    if (!remaining.length) { showToast('这个账户至少要留一行', 'error'); return; }
+    const bals = (state.balances || []).filter(b => b.accountId === accountId && (b.cur || 'CNY') === cur);
+    const rets = (state.returns || []).filter(r => r.accountId === accountId && (r.cur || 'CNY') === cur);
+    if (bals.length || rets.length) {
+        const ok = confirm(`「${a.name}」的${currencyLabel(cur)}这一行还有 ${bals.length} 条余额、${rets.length} 条收益（所有月份）。\n`
+            + `删掉这一行会连这些记录一起删掉，8 秒内可以撤销。\n确定吗？`);
+        if (!ok) return;
+    }
+    const canUndo = pushUndo('「' + a.name + '」的' + currencyLabel(cur) + '这一行', {
+        arraySnapshot: [
+            { rows: (state.balances || []).slice(), snapColl: 'balances' },
+            { rows: (state.returns || []).slice(), snapColl: 'returns' },
+            // 账户要深拷贝：skipCurrencies 是数组，浅拷贝会被后面的改动带偏
+            { rows: JSON.parse(JSON.stringify(state.accounts || [])), snapColl: 'accounts' },
+            { rows: JSON.parse(JSON.stringify(state.deleted || {})), snapColl: 'deleted' },
+        ]
+    });
+    (state.balances || []).forEach(b => { if (b.accountId === accountId && (b.cur || 'CNY') === cur) addTombstone('balances', b.id); });
+    (state.returns || []).forEach(r => { if (r.accountId === accountId && (r.cur || 'CNY') === cur) addTombstone('returns', r.id); });
+    state.balances = (state.balances || []).filter(b => !(b.accountId === accountId && (b.cur || 'CNY') === cur));
+    state.returns = (state.returns || []).filter(r => !(r.accountId === accountId && (r.cur || 'CNY') === cur));
+    if (!Array.isArray(a.skipCurrencies)) a.skipCurrencies = [];
+    if (!a.skipCurrencies.includes(cur)) a.skipCurrencies.push(cur);
+    a.updatedAt = Date.now();
+    saveState();
+    renderMonthlyEntry();
+    renderAccountManageList();
+    if (state.currentView === 'balance') renderBalance();
+    showToast(`已删掉「${a.name}」的${currencyLabel(cur)}这一行`, 'success');
+    if (canUndo) showUndoToast('「' + a.name + '」的' + currencyLabel(cur) + '这一行');
+}
+
 function initAccountEditModal() {
     const kind = document.getElementById('acctEditKind');
     if (kind) kind.addEventListener('change', () => paintAcctEditGroups(kind.value, groupsForKind(kind.value)[0]));
@@ -9700,8 +9763,19 @@ function addCurrency() {
     if (!state.currencies) state.currencies = [];
     const dup = state.currencies.some(c => c && (c.label === name || c.code === name));
     if (dup) { showToast('这个币种已经有了', 'error'); return; }
-    const code = 'C_' + uid();
-    state.currencies.push({ code, label: name, symbol: '' });
+    // 之前删过同名币种的话（内置币种才有墓碑），把它复活 —— 用原来的代码，
+    // 不然新代码和墓碑对不上，同一个币种会变成两个
+    const builtin = Object.keys(CURRENCY_DEFS).map(k => CURRENCY_DEFS[k]).find(d => d.label === name);
+    let code;
+    if (builtin) {
+        code = builtin.code;
+        if (Array.isArray(state.deleted.currencies)) {
+            state.deleted.currencies = state.deleted.currencies.filter(t => t.id !== code);
+        }
+    } else {
+        code = 'C_' + uid();
+    }
+    state.currencies.push({ code, label: name, symbol: builtin ? builtin.symbol : '' });
     saveState();
     renderFxStrip();
     renderMonthlyEntry();
@@ -9735,6 +9809,8 @@ function removeCurrency(code) {
     });
     (state.balances || []).forEach(b => { if ((b.cur || 'CNY') === code) addTombstone('balances', b.id); });
     (state.returns || []).forEach(r => { if ((r.cur || 'CNY') === code) addTombstone('returns', r.id); });
+    // v1.39.92：币种本身也打墓碑 —— 少了这一步，云端那份「币种并集」会把删掉的币种搬回来
+    addTombstone('currencies', code);
     state.balances = (state.balances || []).filter(b => (b.cur || 'CNY') !== code);
     state.returns = (state.returns || []).filter(r => (r.cur || 'CNY') !== code);
     state.currencies = (state.currencies || []).filter(c => c && c.code !== code);
@@ -9857,8 +9933,9 @@ function renderMonthlyEntry() {
     }
     const member = monthlyMember();
     // v1.39.91：不再有「币种」下拉 —— 页面固定就是多币种那套。
-    // 哪些账户展开成几行，由账户自己的「多币种账户」开关决定（multiCur）。
-    const curRowsOf = (a) => (a.multiCur ? monthlyCurrencyRows() : ['CNY']);
+    // 哪些账户展开成几行，由账户自己的「多币种账户」开关决定（multiCur）；
+    // 某一行的币种被删掉后，这个账户就不再显示那一行（skipCurrencies）。
+    const curRowsOf = (a) => accountCurrencyRows(a);
     const sub = document.getElementById('monthlyModalSub');
     if (sub) sub.textContent = month
         ? `${member} · ${month.replace('-', '年')}月：一行 = 一个放钱的地方（支付宝 / 微信 / 工商银行 / 摩根…），一列 = 一类资产；勾了「多币种账户」的账户会按币种分成几行，格子填真实数额，右侧合计按汇率换算成人民币`
@@ -9967,7 +10044,7 @@ function renderMonthlyEntry() {
                     title="点一下这里改名">${_esc(a.name)}</span>
                 ${badge}
                 ${like ? `<span class="mw-badge" data-rename="${a.id}" title="这个名字是资产类别，建议改成放钱的地方">类别名</span>` : ''}
-                <button class="mw-more" data-row-more="${a.id}" draggable="false" title="更多操作（修改 / 删除）"><i class="fa-solid fa-ellipsis"></i></button>
+                <button class="mw-more" data-row-more="${a.id}" data-row-cur="${cur}" draggable="false" title="更多操作（修改 / 删除）"><i class="fa-solid fa-ellipsis"></i></button>
             </div>
             ${assetCats.map(c => balInput(a, cur, c.key)).join('')}
             ${liabCats.map(c => balInput(a, cur, c.key, ' mw-liab')).join('')}
@@ -10596,11 +10673,21 @@ function bindMonthlyRowOps(list) {
             const a = accountById(id);
             if (!a) return;
             const r = btn.getBoundingClientRect();
-            openMwMenu(r.left, r.bottom + 4, [
+            // v1.39.92：多币种账户的每一行都是「这个账户的这个币种」，
+            // 菜单里要能只删掉这一行 —— 以前只有一个「删除」，点一下把整个账户都删了，
+            // 用户想删的其实只是那个空着的「人民币」行。
+            const cur = btn.dataset.rowCur || 'CNY';
+            const items = [
                 { label: (a.multiCur ? '✓ ' : '') + '多币种账户', icon: 'fa-layer-group', onClick: () => toggleAccountMultiCur(id) },
                 { label: '修改', icon: 'fa-pen', onClick: () => openAccountEdit(id) },
-                { label: '删除', icon: 'fa-trash', danger: true, onClick: () => deleteAccountFromList(id) },
-            ]);
+            ];
+            if (a.multiCur) {
+                items.push({ label: '删掉这一行（' + currencyLabel(cur) + '）', icon: 'fa-minus', onClick: () => removeAccountCurrencyRow(id, cur) });
+                items.push({ label: '删除这个账户', icon: 'fa-trash', danger: true, onClick: () => deleteAccountFromList(id) });
+            } else {
+                items.push({ label: '删除', icon: 'fa-trash', danger: true, onClick: () => deleteAccountFromList(id) });
+            }
+            openMwMenu(r.left, r.bottom + 4, items);
         });
     });
 
