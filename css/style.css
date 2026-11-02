@@ -4041,14 +4041,17 @@ table.bill-stats {
 .bal-entry-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 4px; flex-wrap: wrap; }
 /* v1.39.90：这几个控件不许缩成 0 宽 —— 以前 min-width:0 会让它们一路压扁，
    最后把右边的「增加账户 / 增加列」挤出弹窗、按钮直接看不见了。
-   给了最小宽度以后，放不下就整块换行，按钮始终看得见。 */
+   给了最小宽度以后，放不下就整块换行，按钮始终看得见。
+   v1.39.96：家庭成员下拉缩小一点，成员 + 日期靠左排，别的按钮靠右排，
+   中间那块留给币种和汇率 —— 不然「加币种」的时候没地方放。 */
 .bal-entry-head .form-group { flex: 1 1 0; min-width: 96px; margin-bottom: 0; }
+.bal-entry-head .mw-member-group { flex: 0 0 128px; min-width: 0; }
 /* 控件自身 min-width:auto 会让两栏分不匀；高度也要显式统一，
    否则成员下拉和月份下拉在不同内核下会一高一低 */
 .bal-entry-head .form-group select,
 .bal-entry-head .form-group input { width: 100%; min-width: 0; height: 32px; font-size: 13px; padding: 0 8px; box-sizing: border-box; }
 /* 归属月份 = 「年（手输）+ 月（下拉）」，等分等高的规则要同时覆盖两种控件 */
-.bal-entry-head .form-group.be-ym-group { flex: 1.5 1 0; min-width: 150px; }
+.bal-entry-head .form-group.be-ym-group { flex: 0 0 auto; min-width: 150px; }
 /* v1.39.74：加行 / 加列挪到这一行；按钮按内容宽、不参与等分，窄屏放不下就整块换行 */
 .bal-entry-head .mw-addbtns { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
 /* v1.39.75：加行 / 加列常驻显示（查看模式也不藏）；字号跟「本人」下拉一致（13px）。
@@ -4083,24 +4086,26 @@ table.bill-stats {
    长按/拖动可排序；填过数据的币种是预览模式（框只读），点一下数字才进编辑态。
    框下面那行小字是实时换算（100 美元 = 715 元），一眼看出汇率填对没有。 */
 .bal-entry-head .mw-fxstrip {
-    flex: 0 0 auto; display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;
+    flex: 1 1 auto; display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;
+    justify-content: center;          /* v1.39.96：币种区占中间，左右各让一块 */
     padding: 0 2px;
 }
 .bal-entry-head .mw-fxstrip.hidden { display: none; }
 .mw-fx-grp { display: inline-flex; align-items: flex-end; gap: 1px; }
 .mw-fx-item { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
-.mw-fx-inrow { display: inline-flex; align-items: center; gap: 2px; }
-.mw-fx-cur { font-size: 11px; line-height: 1.2; color: var(--text-secondary); white-space: nowrap; padding-left: 2px; }
+/* 币种名字和「⋯」同一行（v1.39.96：⋯ 移回名字这一行，跟输入框分开） */
+.mw-fx-currow { display: flex; align-items: center; gap: 2px; height: 16px; }
+.mw-fx-cur { font-size: 11px; line-height: 1.2; color: var(--text-secondary); white-space: nowrap; }
 .mw-fx-in {
-    width: 46px; min-width: 40px; height: 28px; font-size: 13px; font-family: var(--font);
+    width: 52px; min-width: 44px; height: 32px; font-size: 13px; font-family: var(--font);
     text-align: center; padding: 0 4px;
 }
 .mw-fx-in[readonly] { background: var(--bg-content); color: var(--text-secondary); }
 .mw-fx-more {
-    width: 18px; height: 18px; flex: 0 0 auto; padding: 0;
+    width: 14px; height: 14px; flex: 0 0 auto; padding: 0;
     border: none; border-radius: 50%; cursor: pointer; opacity: 0;
     background: var(--bg-card-hover); color: var(--text-secondary);
-    font-size: 11px; line-height: 1; font-family: var(--font);
+    font-size: 9px; line-height: 1; font-family: var(--font);
     transition: opacity .12s;
 }
 .mw-fx-grp:hover .mw-fx-more { opacity: 1; }
@@ -4108,9 +4113,9 @@ table.bill-stats {
 .mw-fx-grp.dragging { opacity: .5; }
 .mw-fx-grp.drag-over { outline: 1px dashed var(--accent); outline-offset: 2px; }
 .bal-entry-head .mw-fxstrip .btn-mini {
-    white-space: nowrap; height: 28px; font-size: 12px; font-family: var(--font);
-    margin-top: 15px;                 /* 和下面那排汇率框对齐（上面是币种名字那一行） */
-    padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+    white-space: nowrap; height: 32px; font-size: 13px; font-family: var(--font);
+    margin-top: 18px;                 /* 和下面那排汇率框对齐（上面是币种名字那一行） */
+    padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
     background: var(--bg-input); color: var(--text-primary); cursor: pointer;
 }
 .bal-entry-head .mw-fxstrip .btn-mini:hover { background: var(--bg-card-hover); }
