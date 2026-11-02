@@ -4080,7 +4080,16 @@ table.bill-stats {
 .bal-entry-head .mw-fxstrip.hidden { display: none; }
 .mw-fx-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
 .mw-fx-item { display: inline-flex; align-items: center; gap: 3px; }
+.mw-fx-grp { display: inline-flex; align-items: center; gap: 2px; }
 .mw-fx-cur { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+/* v1.39.91：删掉这个币种的小 × */
+.mw-fx-del {
+    width: 18px; height: 18px; flex: 0 0 auto; padding: 0;
+    border: none; border-radius: 50%; cursor: pointer;
+    background: var(--bg-card-hover); color: var(--text-secondary);
+    font-size: 13px; line-height: 1; font-family: var(--font);
+}
+.mw-fx-del:hover { background: var(--expense, #ff3b30); color: #fff; }
 .mw-fx-in {
     width: 46px; min-width: 40px; height: 32px; font-size: 13px; font-family: var(--font);
     text-align: center; padding: 0 4px;

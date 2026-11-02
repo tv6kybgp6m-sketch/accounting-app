@@ -1066,15 +1066,6 @@
                         <div class="form-group">
                             <select class="text-input" id="monthlyMemberSelect"></select>
                         </div>
-                        <!-- v1.39.89：币种口径。默认「人民币」= 一个账户一行、记人民币；
-                             切成「其他币种」= 一个账户按币种展开成多行（人民币 / 美元 / 港币…），
-                             格子只记真实原币数，人民币换算统一在右侧合计里做。 -->
-                        <div class="form-group">
-                            <select class="text-input" id="monthlyCurrencyMode" title="记账币种：人民币 = 一个账户一行；其他币种 = 一个账户按币种分成几行">
-                                <option value="CNY">人民币</option>
-                                <option value="MULTI">其他币种</option>
-                            </select>
-                        </div>
                         <div class="form-group be-ym-group">
                             <div class="ym-pair">
                                 <div class="ym-nav">
@@ -1456,7 +1447,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.39.90').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.39.91').catch(() => {});
             });
         }
     </script>
