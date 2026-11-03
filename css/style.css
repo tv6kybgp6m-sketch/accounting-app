@@ -4046,6 +4046,8 @@ table.bill-stats {
    中间那块留给币种和汇率 —— 不然「加币种」的时候没地方放。 */
 .bal-entry-head .form-group { flex: 1 1 0; min-width: 96px; margin-bottom: 0; }
 .bal-entry-head .mw-member-group { flex: 0 0 auto; min-width: 0; }
+/* v1.39.98：家庭成员下拉里的文字居中（框窄了，文字居中才好看） */
+.bal-entry-head .mw-member-group select { text-align: center; }
 /* 控件自身 min-width:auto 会让两栏分不匀；高度也要显式统一，
    否则成员下拉和月份下拉在不同内核下会一高一低 */
 .bal-entry-head .form-group select,
@@ -4092,16 +4094,25 @@ table.bill-stats {
 }
 .bal-entry-head .mw-fxstrip.hidden { display: none; }
 .mw-fx-grp { display: inline-flex; align-items: flex-end; gap: 1px; }
-.mw-fx-item { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+/* v1.39.98：名字和下面的框一样宽 → 名字在框里居中（人民币 / 美元 / 港币 对着自己的框） */
+.mw-fx-item { position: relative; display: inline-flex; flex-direction: column; align-items: stretch; gap: 2px; }
 /* 币种名字和「⋯」同一行（v1.39.96：⋯ 移回名字这一行，跟输入框分开） */
-.mw-fx-currow { display: flex; align-items: center; gap: 2px; height: 16px; }
-.mw-fx-cur { font-size: 11px; line-height: 1.2; color: var(--text-secondary); white-space: nowrap; }
+.mw-fx-currow { display: flex; align-items: center; justify-content: center; height: 16px; }
+.mw-fx-cur { font-size: 11px; line-height: 1.2; color: var(--text-secondary); white-space: nowrap; text-align: center; }
 .mw-fx-in {
     width: 52px; min-width: 44px; height: 32px; font-size: 13px; font-family: var(--font);
     text-align: center; padding: 0 4px;
 }
 .mw-fx-in[readonly] { background: var(--bg-content); color: var(--text-secondary); }
+/* v1.39.98：填了外币但没填汇率 → 这个框标红（没填外币的不标） */
+.mw-fx-in.mw-fx-missing {
+    border-color: var(--expense, #ff3b30);
+    background: rgba(255, 59, 48, .08);
+    color: var(--expense, #ff3b30);
+}
+.mw-fx-in.mw-fx-missing[readonly] { background: rgba(255, 59, 48, .08); }
 .mw-fx-more {
+    position: absolute; top: -1px; right: -3px;      /* v1.39.98：⋯ 挂在名字那一行的右上角，不挤占名字的宽度 */
     width: 14px; height: 14px; flex: 0 0 auto; padding: 0;
     border: none; border-radius: 50%; cursor: pointer; opacity: 0;
     background: var(--bg-card-hover); color: var(--text-secondary);
@@ -4854,11 +4865,40 @@ table.bill-stats {
 .mw-tr { display: contents; }
 .mw-h {
     font-size: 13px; font-weight: 600; color: var(--text-primary);
-    text-align: center; padding: 0 2px 2px;
+    text-align: center; padding: 4px 2px 5px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    position: sticky; top: 0; z-index: 6; background: var(--bg-modal);
+    position: sticky; top: 0; z-index: 6;
+    /* v1.39.98：表头给一点渐变 + 一条明确的下边线，列名区一眼就和数字区分开 */
+    background: linear-gradient(180deg, var(--bg-card-hover), var(--bg-modal));
+    border-bottom: 1px solid var(--border-strong);
 }
 .mw-corner { text-align: left; padding-left: 2px; font-size: 13px; font-weight: 600; }
+
+/* ============================================================
+   v1.39.98：月度账单的观感打磨
+   只调颜色和层次，不动结构和功能 —— 让它看着像一张整理过的表，
+   而不是一堆并排的方框。
+   ============================================================ */
+/* 第一列（账户 / 类型）：整列一点点底色，行与行之间一条极淡的分隔线 */
+.mw-rowname {
+    background: var(--bg-content);
+    border-bottom: 1px solid var(--divider);
+}
+.mw-tr[data-mw-account]:hover .mw-rowname { background: var(--bg-card-hover); }
+/* 账户名后面那个小圆点，加一圈淡描边，不再是孤零零的一个点 */
+.mw-acct-dot { box-shadow: 0 0 0 2px var(--bg-content); border-radius: 50%; }
+/* 小计 / 对账那一列单独一层底 + 一条竖线，跟左边的录入区分开 */
+.mw-c.mw-sumcol {
+    background: rgba(10, 122, 255, .04);
+    border-left: 1px solid var(--divider);
+}
+.mw-tr[data-mw-account]:hover .mw-c.mw-sumcol { background: rgba(10, 122, 255, .07); }
+/* 合计行：中性一点的底（占比行本来就是淡蓝的，两行才分得开） */
+.mw-total-row .mw-rowname, .mw-total-row .mw-c {
+    background: var(--bg-card-hover);
+    border-bottom: 1px solid var(--border);
+}
+.mw-total-row .mw-name { color: var(--text-primary); }
 
 /* ---- v1.39.31：「已核对」勾 ----
    只在点过「沿用上期」（进入核对模式）之后才出现；没点沿用上期就是现在这个样子，
