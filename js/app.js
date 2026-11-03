@@ -4579,7 +4579,10 @@ function initAmountInput() {
 // 关键：金额常从别处复制「1e5」「¥1,234.56」「1.5e3」这类；其中科学计数法（1e5）
 // 若走逐字符清洗，'e' 会被当杂质吃掉、1e5 变成 15 —— 这是静默错值（账面实亏）。
 // 所以：整体是合法数字（含科学计数法）就先 Number 展开；含加减号的表达式才走老路径。
-function pasteToCalcExpr(text) {
+// keepSign = true 时保留负号（收益可以是负数）；默认 false —— 记账页的金额只存正数，
+// 收支方向由「收/支」类型决定（v1.39.98：以前这里无条件取绝对值，
+// 导致月度账单的收益填「-100」被存成 +100，亏了钱反而记成赚了）。
+function pasteToCalcExpr(text, keepSign) {
     if (text == null) return '';
     const sci = String(text)
         .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))   // 全角数字→半角
@@ -4587,15 +4590,16 @@ function pasteToCalcExpr(text) {
         .replace(/[。．]/g, '.').replace(/[，,]/g, '')
         .replace(/[^\d.eE+-]/g, '');   // 去掉 ¥ 元 空格 等杂质（保留 e 以便识别科学计数法）
     if (/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(sci) && Number.isFinite(Number(sci))) {
-        // 金额只存正数（收支方向由类型决定），最多保留 6 位小数
-        return String(Math.abs(Math.round(Number(sci) * 1e6) / 1e6));
+        // 最多保留 6 位小数；keepSign 时负号留着
+        const n = Math.round(Number(sci) * 1e6) / 1e6;
+        return String(keepSign ? n : Math.abs(n));
     }
-    return sanitizeCalcExpr(text);   // 形如「100+50」的加减表达式走原有逐字符规整
+    return sanitizeCalcExpr(text, keepSign);   // 形如「100+50」的加减表达式走原有逐字符规整
 }
 
 // 把任意文本规整成计算器认识的表达式：只保留 数字/小数点/加减号。
 // 容忍 "¥1,234.56元"、全角数字、"12.5 " 这类杂质；规整不出内容返回 ''。
-function sanitizeCalcExpr(text) {
+function sanitizeCalcExpr(text, keepSign) {
     if (text == null) return '';
     let s = String(text)
         .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))  // 全角数字→半角
@@ -4603,7 +4607,8 @@ function sanitizeCalcExpr(text) {
         .replace(/[。．]/g, '.').replace(/[，,]/g, '');
     s = s.replace(/[^\d.+-]/g, '');              // 去掉货币符号、单位、空格等一切杂质
     if (!s) return '';
-    s = s.replace(/^[+-]+/, '');                 // 开头多余的运算符丢掉
+    // 开头多余的运算符丢掉 —— 但 keepSign 时不能丢，否则「-100」变成「100」（v1.39.98）
+    if (!keepSign) s = s.replace(/^[+-]+/, '');
     s = s.replace(/[+-]{2,}/g, m => m.slice(-1)); // 连续运算符只保留最后一个
     // 一段数字里只留第一个小数点（"1.2.3" → "1.23"）
     let out = '', seg = '';
@@ -4621,7 +4626,8 @@ function sanitizeCalcExpr(text) {
 // 旧代码直接 parseFloat("1,234,567") → 1（parseFloat 在第一个逗号处截断）。
 function parseMonthlyAmount(raw) {
     if (raw == null) return null;
-    const s = pasteToCalcExpr(String(raw).trim());   // 去杂质（含千分位逗号），返回数字串或规整后的表达式
+    // v1.39.98：保留负号 —— 收益可以是负的（亏钱），净入金也可以（从账户里取钱出来）
+    const s = pasteToCalcExpr(String(raw).trim(), true);   // 去杂质（含千分位逗号），返回数字串或规整后的表达式
     if (s === '') return null;
     if (/[+\-]/.test(s)) {                            // 含加减号 → 当表达式求值
         const v = evalAddSub(s);
