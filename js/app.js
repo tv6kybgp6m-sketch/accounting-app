@@ -337,6 +337,30 @@ let state = {
     selectedColor: '#ff6b6b',
 };
 
+// ---- 数组字段兜底（v1.39.99）----
+// state 里这些字段永远是数组：写进去的时候统一过一道，调用处就可以直接用
+// state.balances.map(...) / state.accounts.filter(...)，不用每处再写 `|| []`
+// （以前 175 处直接用、50 处带 || []、19 处写成 (state.X || [])，三种写法混着，
+//   漏一处就是 undefined.map 抛错、整页渲染中断 —— 这里收成一处。）
+const ARRAY_STATE_FIELDS = ['transactions', 'categories', 'budgets', 'paymentMethods', 'accounts', 'balances', 'returns', 'recurring', 'pendingRecurring', 'insuranceMembers', 'insurancePolicies', 'balanceMembers', 'sheetCols', 'currencies'];
+function ensureArrayFields() {
+    ARRAY_STATE_FIELDS.forEach(k => {
+        if (!Array.isArray(state[k])) state[k] = [];
+    });
+    // deleted 里那十三个墓碑列表同理（老数据可能缺键）
+    if (!state.deleted || typeof state.deleted !== 'object') state.deleted = {};
+    Object.keys(state.deleted).forEach(k => {
+        if (Array.isArray(state.deleted[k])) return;
+        if (k === 'cols' || k === 'currencies' || Array.isArray(state.deleted[k])) {
+            state.deleted[k] = Array.isArray(state.deleted[k]) ? state.deleted[k] : [];
+        }
+    });
+    ['transactions','categories','budgets','paymentMethods','accounts','balances','returns','recurring',
+     'members','insuranceMembers','insurance','cols','currencies'].forEach(k => {
+        if (!Array.isArray(state.deleted[k])) state.deleted[k] = [];
+    });
+}
+
 let charts = {};
 
 // ---- Storage ----
@@ -402,14 +426,14 @@ function shortCodeFor(name, codeMap, plainNames, prefix) {
 
 // 存前编码：只动 data 里的浅拷贝，绝不碰 state（云端同步读的是内存里的明文）。
 function encodeStorageState(data) {
-    const memberNames = [...new Set([...(state.balanceMembers || []), ...(state.insuranceMembers || [])])];
-    const pmNames = [...new Set(state.paymentMethods || [])];
-    (state.transactions || []).forEach(t => {
+    const memberNames = [...new Set([...state.balanceMembers, ...state.insuranceMembers])];
+    const pmNames = [...new Set(state.paymentMethods)];
+    state.transactions.forEach(t => {
         if (!t) return;
         if (t.member) memberNames.push(t.member);
         if (t.paymentMethod) pmNames.push(t.paymentMethod);
     });
-    data.transactions = (state.transactions || []).map(t => {
+    data.transactions = state.transactions.map(t => {
         if (!t) return t;
         const c = Object.assign({}, t);
         if (TXN_TYPE_ENC[c.type]) c.type = TXN_TYPE_ENC[c.type];
@@ -507,7 +531,7 @@ function saveStateNow() {
         recurring: state.recurring,
         // 待确认队列和"这期我跳过了"的标记必须落盘：
         // 不存的话刷新一次，被跳过的那期又会冒出来，等于跳过没生效。
-        pendingRecurring: state.pendingRecurring || [],
+        pendingRecurring: state.pendingRecurring,
         recurringSkipped: state.recurringSkipped || {},
         monthlyOpen: state.monthlyOpen || {},  // 月度账单「账户×渠道」开关状态（本地 UI，不进 iCloud 同步）
         hiddenItems: state.hiddenItems || {},  // v1.39.95：收起来的行/列（本地 UI，不进 iCloud 同步）
@@ -860,7 +884,7 @@ function runRecurringRules(silent) {
 
 // ---- 待确认队列：入账 / 跳过 / 全部入账 ----
 function pendingRecurringSorted() {
-    return (state.pendingRecurring || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    return state.pendingRecurring.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
 
 function confirmPendingRecurring(id, amount) {
@@ -938,7 +962,7 @@ function renderPendingRecurring() {
             : '都处理完了';
         const allBtn = document.getElementById('recurQueueAllBtn');
         if (allBtn) { allBtn.disabled = !list.length; allBtn.textContent = list.length ? `全部入账（${list.length}）` : '全部入账'; }
-        const cats = state.categories || [];
+        const cats = state.categories;
         body.innerHTML = list.length ? list.map(p => {
             const cat = cats.find(c => c.id === p.categoryId);
             return `<div class="rq-row" data-rq="${p.id}">
@@ -1015,7 +1039,7 @@ function renderRecurringSection() {
     const box = document.getElementById('recurringSection');
     if (!box) return;
     if (!Array.isArray(state.recurring)) state.recurring = [];
-    const cats = state.categories || [];
+    const cats = state.categories;
     const rows = state.recurring.map(rule => {
         const cat = cats.find(c => c.id === rule.categoryId);
         const name = `${rule.type === 'income' ? '收入' : '支出'} · ${cat ? cat.name : '分类已删除'} ${formatCurrency(rule.amount)}`;
@@ -1256,7 +1280,7 @@ function repairNameLists() {
         // 保持「微信」在第一位（它是默认方式）
         state.paymentMethods.sort((a, b) => (a === '微信' ? -1 : b === '微信' ? 1 : 0));
         let touched = false;
-        (state.transactions || []).forEach(t => {
+        state.transactions.forEach(t => {
             if (t && t.paymentMethod === '微信支付') { t.paymentMethod = '微信'; touched = true; }
         });
         if (touched) changed = true;
@@ -1338,14 +1362,14 @@ function applyTombstones() {
     state.accounts = drop(state.accounts, state.deleted.accounts);
     state.balances = drop(state.balances, state.deleted.balances);
     state.returns = drop(state.returns, state.deleted.returns);
-    state.recurring = drop(state.recurring || [], state.deleted.recurring);
+    state.recurring = drop(state.recurring, state.deleted.recurring);
     state.insurancePolicies = drop(state.insurancePolicies, state.deleted.insurance);
 
     // v1.39.92：删掉的币种（墓碑记着的）从清单里去掉 ——
     // 不然「本机删了、云端还留着」时，这个币种又会冒出来。
     if (Array.isArray(state.deleted.currencies) && state.deleted.currencies.length) {
         const marks = new Set(state.deleted.currencies.map(m => m.id));
-        state.currencies = (state.currencies || []).filter(c => c && c.code && !marks.has(c.code));
+        state.currencies = state.currencies.filter(c => c && c.code && !marks.has(c.code));
     }
 
     // 成员名单也是「名字即身份」的纯字符串，所以「什么时候加的」记在 memberAddedAt，
@@ -1633,6 +1657,7 @@ function syncFingerprint() {
 }
 
 function mergeRemoteData(remoteData) {
+    ensureArrayFields();     // v1.39.99：合并前先把数组字段兜成数组
     const remote = remoteData.data;
     if (!remote) return false;
     // Token 到期日随同步载荷传播：没填的设备自动 adopt，已填的不会被没填的设备覆盖，
@@ -1730,10 +1755,10 @@ function mergeRemoteData(remoteData) {
     // 按 key 取并集——本地已有的列顺序不动，远端独有、且未被墓碑删除的列补到末尾；
     // 任一台删过的列（deleted.cols 墓碑）在这里剔除，保证"删除列"也跨设备生效。
     {
-        const localKeys = new Set((state.sheetCols || []).map(c => c.key));
+        const localKeys = new Set(state.sheetCols.map(c => c.key));
         const colMarks = new Map((state.deleted.cols || []).map(m => [m.id, m.deletedAt]).filter(([k]) => k));
         const merged = [];
-        (state.sheetCols || []).forEach(c => { if (c && c.key && !colMarks.has(c.key)) merged.push(c); });
+        state.sheetCols.forEach(c => { if (c && c.key && !colMarks.has(c.key)) merged.push(c); });
         (remote.sheetCols || []).forEach(c => {
             if (!c || !c.key || colMarks.has(c.key)) return;
             if (!localKeys.has(c.key) && !merged.find(m => m.key === c.key)) merged.push(Object.assign({}, c));
@@ -1746,7 +1771,7 @@ function mergeRemoteData(remoteData) {
         // 删掉的币种有墓碑：本地有墓碑的，从清单里去掉；云端那份里的同名币种也别再搬回来。
         // （以前这里是纯并集，删掉日元后下一次同步就会把日元带回来 —— v1.39.92 修）
         const curMarks = new Set((state.deleted.currencies || []).map(m => m.id));
-        state.currencies = (state.currencies || []).filter(c => c && c.code && !curMarks.has(c.code));
+        state.currencies = state.currencies.filter(c => c && c.code && !curMarks.has(c.code));
         const seenCur = new Set(state.currencies.map(c => c.code));
         (remote.currencies || []).forEach(c => {
             if (!c || !c.code || c.code === 'CNY' || seenCur.has(c.code)) return;
@@ -1774,14 +1799,14 @@ function mergeRemoteData(remoteData) {
         if (!cur || (p.updatedAt || 0) > (cur.updatedAt || 0)) polMap.set(p.id, p);
     });
     state.insurancePolicies = Array.from(polMap.values());
-    state.insuranceMembers = [...new Set([...(state.insuranceMembers || []), ...(remote.insuranceMembers || [])])];
+    state.insuranceMembers = [...new Set([...state.insuranceMembers, ...(remote.insuranceMembers || [])])];
     const remoteInsAdded = normalizeAddedAtMap(remote.insuranceMemberAddedAt);
     Object.keys(remoteInsAdded).forEach(k => {
         if (!state.insuranceMemberAddedAt[k] || remoteInsAdded[k] > state.insuranceMemberAddedAt[k]) state.insuranceMemberAddedAt[k] = remoteInsAdded[k];
     });
     // 周期规则：按 id 并集、较新的一份赢；删除靠上面的墓碑生效
     const ruleMap = new Map();
-    (state.recurring || []).forEach(r => ruleMap.set(r.id, r));
+    state.recurring.forEach(r => ruleMap.set(r.id, r));
     (remote.recurring || []).forEach(r => {
         const cur = ruleMap.get(r.id);
         if (!cur || (r.updatedAt || 0) > (cur.updatedAt || 0)) ruleMap.set(r.id, r);
@@ -1789,7 +1814,7 @@ function mergeRemoteData(remoteData) {
     state.recurring = Array.from(ruleMap.values());
 
     // 家庭成员名单：并集（余额/收益记录的 id 编码了成员名，名单丢了记录就悬空）
-    state.balanceMembers = [...new Set([...(state.balanceMembers || []), ...(remote.balanceMembers || [])])];
+    state.balanceMembers = [...new Set([...state.balanceMembers, ...(remote.balanceMembers || [])])];
     const remoteMemAdded = normalizeAddedAtMap(remote.memberAddedAt);
     Object.keys(remoteMemAdded).forEach(k => {
         if (!state.memberAddedAt[k] || remoteMemAdded[k] > state.memberAddedAt[k]) state.memberAddedAt[k] = remoteMemAdded[k];
@@ -2000,7 +2025,7 @@ function dataHealthCheck() {
         dupIds(state.transactions), dupIds(state.balances), dupIds(state.returns),
         dupIds(state.categories), dupIds(state.accounts), dupIds(state.insurancePolicies));
     // 预算是按 categoryId 存的，同一个分类出现两条就是脏数据
-    const dupBud = dupIds((state.budgets || []).map(b => ({ id: b.categoryId })));
+    const dupBud = dupIds(state.budgets.map(b => ({ id: b.categoryId })));
     if (dupBud.length) add('warn', `${dupBud.length} 个分类有重复的预算条目`, shorten(dupBud), { label: '去重', kind: 'dups' });
     if (dups.length) add('warn', `${dups.length} 个重复的记录 id（多设备合并可能撞车）`, shorten(dups.slice(0, 8)), { label: '去重', kind: 'dups' });
 
@@ -2162,7 +2187,7 @@ function applyDataFix(kind) {
             take(coll, r.keep);
         });
         const seenB = new Set();
-        const buds = (state.budgets || []).filter(b => {
+        const buds = state.budgets.filter(b => {
             if (b && b.categoryId && seenB.has(b.categoryId)) { removed++; return false; }
             if (b && b.categoryId) seenB.add(b.categoryId);
             return true;
@@ -2690,6 +2715,7 @@ function recoverMissingFromBackup(data) {
 }
 
 async function applyImportedJSON(text, opts) {
+    ensureArrayFields();     // v1.39.99：导入前先兜底，避免导入的脏数据把数组字段变成非数组
     // 明文备份走同步快路：先就地解析，只有加密的才 await 解锁。
     // （改成"进函数先 await"会让不 await 调用方的老代码看到"什么都没发生"）
     let parsed = null;
@@ -3431,6 +3457,10 @@ function loadState() {
                 : DEFAULT_CURRENCY_LIST.map(c => ({ ...CURRENCY_DEFS[c] }));
             // 汇率（按月×币种）：没存就是空对象，取值时沿用最近一个月填过的
             state.fxRates = (data.fxRates && typeof data.fxRates === 'object') ? data.fxRates : {};
+            // v1.39.99：所有数组字段先兜成数组，再往下走 —— 后面的迁移函数
+            // （normalizeBalanceIds / normalizeReturnIds / applyTombstones …）都要遍历它们，
+            // 字段缺了就是 undefined.map 抛错、整页打不开。
+            ensureArrayFields();
             // v1.39.94：汇率口径从「1 外币 = ? 人民币」（乘法）改成「1 人民币 = ? 外币」（除法），
             // 老汇率取倒数迁过来（只在本机做一次）
             migrateFxRatesToDiv();
@@ -3517,7 +3547,7 @@ function loadState() {
             ['transactions', 'accounts', 'categories', 'balances', 'returns', 'insurancePolicies'].forEach(coll => {
                 (state[coll] || []).forEach(r => { if (r && r.id) __usedIds.add(r.id); });
             });
-            (state.budgets || []).forEach(b => { if (b && b.id) __usedIds.add(b.id); });
+            state.budgets.forEach(b => { if (b && b.id) __usedIds.add(b.id); });
         } catch (e) { /* 灌表失败不致命，uid 仍有随机兜底 */ }
         }
     }
@@ -7213,6 +7243,7 @@ function importData(event) {
             try {
                 const wb = await readWorkbookFromBytes(new Uint8Array(e.target.result));
                 const res = applyWorkbook(wb) || {};
+                ensureArrayFields();     // v1.39.99：导入完再兜一次，脏数据不能把数组字段弄成非数组
                 const _bits = [];
                 if (res.txnInvalid) _bits.push(`${res.txnInvalid} 行金额/日期非法已跳过`);
                 if (res.unmatched) _bits.push(`${res.unmatched} 行账户名没对上已跳过`);
@@ -7752,7 +7783,7 @@ function balanceCandidateAccounts() {
 function closeChecklist(month) {
     const member = state.balanceOwner;
     // 周期账改成待确认后，"这个月有几笔还没入账"也是每月要做的一步
-    const pend = (state.pendingRecurring || []).filter(p => p.date && p.date.slice(0, 7) === month);
+    const pend = state.pendingRecurring.filter(p => p.date && p.date.slice(0, 7) === month);
     const map = balancesAtMonth(month, member);
     const cands = balanceCandidateAccounts();
     const excl = state.closedExclude || {};
@@ -8655,7 +8686,7 @@ function openAccountEdit(accountId, prefillName) {
 function renderAcctEditMembers(a, defaultMembers) {
     const box = document.getElementById('acctEditMembers');
     if (!box) return;
-    const members = state.balanceMembers || [];
+    const members = state.balanceMembers;
     if (!members.length) { box.innerHTML = '<span class="acct-member-pick">（还没有家庭成员）</span>'; return; }
     const sel = new Set(a ? accountMembers(a) : (defaultMembers && defaultMembers.length ? defaultMembers : members));
     box.innerHTML = members.map(m =>
@@ -8759,7 +8790,7 @@ function saveAccountEdit() {
 // 没设过 members 的老账户 = 所有成员都能看到（升级后行为不变）。
 function accountMembers(a) {
     if (!a) return [];
-    if (!Array.isArray(a.members) || !a.members.length) return (state.balanceMembers || []).slice();
+    if (!Array.isArray(a.members) || !a.members.length) return state.balanceMembers.slice();
     return a.members;
 }
 // 这个账户在当前成员名下要不要显示
@@ -8805,8 +8836,8 @@ function sheetColsFor(member) {
 function setAccountMultiCur(a, on) {
     if (!a) return false;
     if (!on && a.multiCur) {
-        const foreign = (state.balances || []).filter(b => b.accountId === a.id && (b.cur || 'CNY') !== 'CNY').length
-            + (state.returns || []).filter(r => r.accountId === a.id && (r.cur || 'CNY') !== 'CNY').length;
+        const foreign = state.balances.filter(b => b.accountId === a.id && (b.cur || 'CNY') !== 'CNY').length
+            + state.returns.filter(r => r.accountId === a.id && (r.cur || 'CNY') !== 'CNY').length;
         if (foreign > 0) {
             const ok = confirm(`「${a.name}」还有 ${foreign} 条美元 / 港币的记录。\n`
                 + `取消多币种以后，这些记录就不在月度账单里显示了（数还留着，资产负债里照算）。\n`
@@ -9958,8 +9989,8 @@ let fxEditContext = '';
 // 这个币种有没有记过数（余额 / 收益）
 function fxHasRecords(code) {
     if (!code || code === 'CNY') return false;
-    return (state.balances || []).some(b => (b.cur || 'CNY') === code)
-        || (state.returns || []).some(r => (r.cur || 'CNY') === code);
+    return state.balances.some(b => (b.cur || 'CNY') === code)
+        || state.returns.some(r => (r.cur || 'CNY') === code);
 }
 
 // 汇率输入条：每个币种竖着一块 —— 名字在上、汇率框在下、下面一行实时换算。
@@ -10106,11 +10137,11 @@ function openFxMenu(code, anchor) {
 
 // 给币种改个名字
 function renameCurrency(code) {
-    const target = (state.currencies || []).find(x => x && x.code === code);
+    const target = state.currencies.find(x => x && x.code === code);
     if (!target) return;
     const name = (window.prompt(`给这个币种改个名字（现在是「${target.label}」）`, target.label) || '').trim();
     if (!name || name === target.label) return;
-    if ((state.currencies || []).some(x => x && x.code !== code && x.label === name)) {
+    if (state.currencies.some(x => x && x.code !== code && x.label === name)) {
         showToast('已经有同名币种了', 'error'); return;
     }
     target.label = name;
@@ -10121,7 +10152,7 @@ function renameCurrency(code) {
 
 // 币种排序（拖动 / 长按）
 function reorderCurrency(from, to) {
-    const list = state.currencies || [];
+    const list = state.currencies;
     const fi = list.findIndex(c => c && c.code === from);
     const ti = list.findIndex(c => c && c.code === to);
     if (fi < 0 || ti < 0 || fi === ti) return;
@@ -10165,8 +10196,8 @@ function addCurrency() {
 function removeCurrency(code) {
     if (!code || code === 'CNY') return;
     const def = currencyDef(code);
-    const bals = (state.balances || []).filter(b => (b.cur || 'CNY') === code);
-    const rets = (state.returns || []).filter(r => (r.cur || 'CNY') === code);
+    const bals = state.balances.filter(b => (b.cur || 'CNY') === code);
+    const rets = state.returns.filter(r => (r.cur || 'CNY') === code);
     if (bals.length || rets.length) {
         const msg = `删掉「${def.label}」这个币种？\n`
             + `这个币种记过的 ${bals.length} 条余额、${rets.length} 条收益会一起删掉（所有月份、所有成员）。\n`
@@ -10175,21 +10206,21 @@ function removeCurrency(code) {
     }
     const canUndo = pushUndo('币种「' + def.label + '」', {
         arraySnapshot: [
-            { rows: (state.balances || []).slice(), snapColl: 'balances' },
-            { rows: (state.returns || []).slice(), snapColl: 'returns' },
-            { rows: (state.currencies || []).slice(), snapColl: 'currencies' },
+            { rows: state.balances.slice(), snapColl: 'balances' },
+            { rows: state.returns.slice(), snapColl: 'returns' },
+            { rows: state.currencies.slice(), snapColl: 'currencies' },
             { rows: JSON.parse(JSON.stringify(state.deleted || {})), snapColl: 'deleted' },
             // 汇率也要一起撤回来 —— 否则撤销后那个币种变成「缺汇率」，合计会莫名其妙少一块
             { rows: JSON.parse(JSON.stringify(state.fxRates || {})), snapColl: 'fxRates' },
         ]
     });
-    (state.balances || []).forEach(b => { if ((b.cur || 'CNY') === code) addTombstone('balances', b.id); });
-    (state.returns || []).forEach(r => { if ((r.cur || 'CNY') === code) addTombstone('returns', r.id); });
+    state.balances.forEach(b => { if ((b.cur || 'CNY') === code) addTombstone('balances', b.id); });
+    state.returns.forEach(r => { if ((r.cur || 'CNY') === code) addTombstone('returns', r.id); });
     // v1.39.92：币种本身也打墓碑 —— 少了这一步，云端那份「币种并集」会把删掉的币种搬回来
     addTombstone('currencies', code);
-    state.balances = (state.balances || []).filter(b => (b.cur || 'CNY') !== code);
-    state.returns = (state.returns || []).filter(r => (r.cur || 'CNY') !== code);
-    state.currencies = (state.currencies || []).filter(c => c && c.code !== code);
+    state.balances = state.balances.filter(b => (b.cur || 'CNY') !== code);
+    state.returns = state.returns.filter(r => (r.cur || 'CNY') !== code);
+    state.currencies = state.currencies.filter(c => c && c.code !== code);
     // 这个币种的汇率也一起清掉（不然以后再加回来会带着一条旧汇率，看着像还在用）
     if (state.fxRates) Object.keys(state.fxRates).forEach(m => { if (state.fxRates[m]) delete state.fxRates[m][code]; });
     saveState();
@@ -11441,8 +11472,8 @@ function snapshotMonthlyForUndo(memberOverride) {
 function monthlySnapDiffers(snap) {
     if (!snap) return false;
     const { month, member } = snap;
-    const curB = (state.balances || []).filter(b => b.month === month && b.member === member);
-    const curR = (state.returns || []).filter(r => r.month === month && r.member === member);
+    const curB = state.balances.filter(b => b.month === month && b.member === member);
+    const curR = state.returns.filter(r => r.month === month && r.member === member);
     if (snap.balances.length !== curB.length) return true;
     if (snap.returns.length !== curR.length) return true;
     const mapB = new Map(curB.map(b => [b.id, b]));
@@ -11488,10 +11519,10 @@ function undoLastMonthlySave() {
     const wantBal = new Set(balances.map(b => b.id));
     const wantRet = new Set(returns.map(r => r.id));
     // 快照里没有、现在还躺着的：先打墓碑再删，别的设备同步时才不会又把旧账并回来
-    (state.balances || []).forEach(b => { if (b.month === month && b.member === member && !wantBal.has(b.id)) addTombstone('balances', b.id); });
-    (state.returns || []).forEach(r => { if (r.month === month && r.member === member && !wantRet.has(r.id)) addTombstone('returns', r.id); });
-    state.balances = (state.balances || []).filter(b => !(b.month === month && b.member === member));
-    state.returns = (state.returns || []).filter(r => !(r.month === month && r.member === member));
+    state.balances.forEach(b => { if (b.month === month && b.member === member && !wantBal.has(b.id)) addTombstone('balances', b.id); });
+    state.returns.forEach(r => { if (r.month === month && r.member === member && !wantRet.has(r.id)) addTombstone('returns', r.id); });
+    state.balances = state.balances.filter(b => !(b.month === month && b.member === member));
+    state.returns = state.returns.filter(r => !(r.month === month && r.member === member));
     balances.forEach(b => state.balances.push(Object.assign({}, b)));
     returns.forEach(r => state.returns.push(Object.assign({}, r)));
     saveState();
@@ -11741,7 +11772,7 @@ function bindReturnRatePreview() { return updateMonthlyDerived(); }
 let accountsViewMode = false;
 let accountsHasData = false;
 function refreshAccountsViewMode() {
-    accountsHasData = (state.accounts || []).length > 0;
+    accountsHasData = state.accounts.length > 0;
     accountsViewMode = accountsHasData;   // 有账户默认查看（只读防误触）；一个都没有就直接编辑（要加）
 }
 function applyAccountsViewMode() {
@@ -12451,7 +12482,7 @@ function renderFundAsOf() {
 // 保险成员拖拽排序：把 from 移到 to 的位置（成员名即身份，只改显示次序）
 function reorderInsuranceMember(from, to) {
     if (!from || !to || from === to) return;
-    const arr = (state.insuranceMembers || []).slice();
+    const arr = state.insuranceMembers.slice();
     const fi = arr.indexOf(from);
     if (fi < 0) return;
     arr.splice(fi, 1);
@@ -12956,9 +12987,9 @@ function normalizeReturnIds() {
 // 跑过一次就写 state.purgeSampleDone = true，以后再也不会误删新记的账。
 function purgeSampleData() {
     try {
-        const hit = (state.transactions || []).filter(t => t && t.createdAt >= 1790728170000 && t.createdAt <= 1790728250000).length;
+        const hit = state.transactions.filter(t => t && t.createdAt >= 1790728170000 && t.createdAt <= 1790728250000).length;
         localStorage.setItem('bookkeeping_app_diag',
-            'done=' + state.purgeSampleDone + ',tx=' + (state.transactions || []).length + ',hit=' + hit + '|' + Date.now());
+            'done=' + state.purgeSampleDone + ',tx=' + state.transactions.length + ',hit=' + hit + '|' + Date.now());
     } catch (e) { /* 诊断标记，失败无所谓 */ }
     if (state.purgeSampleDone) return 0;
     const SAMPLE_TX_WINDOW = [1790728170000, 1790728250000];   // 上面那 6 秒
