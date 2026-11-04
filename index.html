@@ -98,7 +98,7 @@
                         <div class="view-header-right">
                             <div class="search-box">
                                 <i class="fa-solid fa-magnifying-glass"></i>
-                                <input type="text" id="searchInput" placeholder="搜索备注/分类/支付方式/金额...">
+                                <input type="text" id="searchInput" placeholder="搜索备注/分类/支付方式/金额..." title="搜索（⌘K / Ctrl+K 直接跳到这里）">
                             </div>
                             <button class="primary-btn" onclick="openTransactionModal()">
                                 <i class="fa-solid fa-plus"></i> 记一笔
@@ -1446,7 +1446,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.40.0').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.0').catch(() => {});
             });
         }
     </script>

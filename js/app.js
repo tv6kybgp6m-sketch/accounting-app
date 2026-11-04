@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.40.0';
+const APP_VERSION = '1.41.0';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -362,6 +362,60 @@ function ensureArrayFields() {
      'members','insuranceMembers','insurance','cols','currencies'].forEach(k => {
         if (!Array.isArray(state.deleted[k])) state.deleted[k] = [];
     });
+}
+
+// ============================================================
+//  复合键层（v1.41.0）
+// ============================================================
+//  state 里凡是「几个维度拼起来当键」的地方，都在这里拼、在这里拆，
+//  别处不再手写 '__'。现在收着这几套（存储形状各不相同，但键的拼法统一了）：
+//
+//    锁       monthlyOpen[成员][账户][币种][类别] = true/false
+//    隐藏     hiddenItems[成员][月份] = { cols:[], accounts:[], rows:[] }
+//    列序     sheetColOrder[成员] = [列key…]
+//    账户序   账户.orders[成员] = n
+//    草稿     monthlyDrafts[成员] = { bal:{}, ret:{}, flow:{}, wt:{} }
+//    归属     账户.members = [成员名…]
+//
+//  键的形状（改了会影响存量数据，必须配套迁移，迁移函数见 normalizeBalanceIds /
+//  normalizeReturnIds）：
+//    格子键      账户__币种__类别      草稿用；__ret / __flow / __wt 是特殊类别
+//    账户币种键  账户__币种            隐藏的「行」用
+//    余额记录键  成员__账户__币种__类别__月份
+//    收益记录键  成员__账户__币种__月份
+const KEY_SEP = '__';
+
+// 格子键：账户 × 币种 × 类别
+function cellKey(accountId, cur, cat) {
+    return accountId + KEY_SEP + (cur || 'CNY') + KEY_SEP + (cat || '');
+}
+// 账户 × 币种
+function acctCurKey(accountId, cur) {
+    return accountId + KEY_SEP + (cur || 'CNY');
+}
+// 余额记录 id：成员 × 账户 × 币种 × 类别 × 月份
+function balanceRecordId(member, accountId, cur, cat, month) {
+    return member + KEY_SEP + accountId + KEY_SEP + (cur || 'CNY') + KEY_SEP + cat + KEY_SEP + month;
+}
+// 收益记录 id：成员 × 账户 × 币种 × 月份
+function returnRecordId(member, accountId, cur, month) {
+    return member + KEY_SEP + accountId + KEY_SEP + (cur || 'CNY') + KEY_SEP + month;
+}
+// 保险：类型__序号（保险单的 id）
+function insurancePolicyId(type, n) { return type + KEY_SEP + n; }
+// 保险：成员__账户__月份
+function insuranceAccountKey(member, accountId, month) {
+    return member + KEY_SEP + accountId + KEY_SEP + month;
+}
+// 拆格子键
+function parseCellKey(key) {
+    const p = String(key || '').split(KEY_SEP);
+    return { accountId: p[0] || '', cur: p[1] || 'CNY', cat: p[2] || '' };
+}
+// 拆账户币种键
+function parseAcctCurKey(key) {
+    const p = String(key || '').split(KEY_SEP);
+    return { accountId: p[0] || '', cur: p[1] || 'CNY' };
 }
 
 let charts = {};
@@ -9396,11 +9450,11 @@ function unhideMonthlyAccount(accountId) {
 function hideMonthlyAccountRow(accountId, cur) {
     const a = accountById(accountId);
     if (!a || !cur) return;
-    setHiddenItem('rows', accountId + '__' + cur, monthlyMember(), getModalMonth('monthly'), true);
+    setHiddenItem('rows', acctCurKey(accountId, cur), monthlyMember(), getModalMonth('monthly'), true);
     showToast(`已收起「${a.name}」的${currencyLabel(cur)}这一行（数据还留着，随时能打开）`, 'info');
 }
 function unhideMonthlyAccountRow(accountId, cur) {
-    setHiddenItem('rows', accountId + '__' + cur, monthlyMember(), getModalMonth('monthly'), false);
+    setHiddenItem('rows', acctCurKey(accountId, cur), monthlyMember(), getModalMonth('monthly'), false);
 }
 // 「隐藏的」按钮的菜单：列出当前成员、当前月份收起来的列 / 账户 / 行，点一下就展开
 function openHiddenItemsMenu(anchor) {
@@ -10093,14 +10147,14 @@ function renderMonthlyEntry() {
     };
     const num = (v) => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
     // 一格 = 账户 × 币种 × 类别（草稿 key 也带币种：两种币的同一格不会互相覆盖）
-    const cellVal = (a, cur, cat) => val('bal', a.id + '__' + cur + '__' + cat, ((cellsByCur[a.id] || {})[cur] || {})[cat]);
+    const cellVal = (a, cur, cat) => val('bal', cellKey(a.id, cur, cat), ((cellsByCur[a.id] || {})[cur] || {})[cat]);
     const retCell = (a, cur) => {
         const c = (retByCur[a.id] || {})[cur];
-        return val('ret', a.id + '__' + cur + '__ret', c ? c.foreign : undefined);
+        return val('ret', cellKey(a.id, cur, 'ret'), c ? c.foreign : undefined);
     };
     const flowCell = (a, cur) => {
         const c = (retByCur[a.id] || {})[cur];
-        return val('flow', a.id + '__' + cur + '__flow', c ? c.flowForeign : undefined);
+        return val('flow', cellKey(a.id, cur, 'flow'), c ? c.flowForeign : undefined);
     };
 
     // 单格 = 账户 × 渠道。开了（默认有历史数据的组合已开）是普通输入框；
@@ -10110,7 +10164,7 @@ function renderMonthlyEntry() {
         const lockBtn = `<button class="mw-lockbtn" type="button" data-lock-acct="${a.id}" data-lock-cat="${cat}" data-lock-cur="${cur}"
             title="${open ? '点一下锁定这一格（不再填写）' : '点开才能填写这一格'}" aria-label="${open ? '锁定' : '点开'}">${open ? '<i class="fa-solid fa-lock-open"></i>' : '<i class="fa-solid fa-lock"></i>'}</button>`;
         const inp = `<input type="text" inputmode="decimal" class="text-input be-field${cls || ''}${open ? '' : ' mw-locked'}"
-             data-bal="${a.id}" data-cat="${cat}" data-cur="${cur}" data-cell="${a.id}__${cur}__${cat}"
+             data-bal="${a.id}" data-cat="${cat}" data-cur="${cur}" data-cell="${cellKey(a.id, cur, cat)}"
              value="${_esc(cellVal(a, cur, cat))}" placeholder="—"
              title="${_esc(a.name)} · ${balanceCatName(cat)} · ${_esc(currencyLabel(cur))}"${open ? '' : ' disabled'}>`;
         // ⚠️ v1.39.89：格子只记原币真实数额，人民币换算不在格子里做（换算统一在右侧合计）。
@@ -10125,7 +10179,7 @@ function renderMonthlyEntry() {
         const lockBtn = `<button class="mw-lockbtn" type="button" data-lock-acct="${a.id}" data-lock-cat="__ret__" data-lock-cur="${cur}"
             title="${open ? '点一下锁定收益这一格（不再填写）' : '点开才能填写收益'}" aria-label="${open ? '锁定' : '点开'}">${open ? '<i class="fa-solid fa-lock-open"></i>' : '<i class="fa-solid fa-lock"></i>'}</button>`;
         const inp = `<input type="text" inputmode="decimal" class="text-input be-field${open ? '' : ' mw-locked'}"
-             data-ret="${a.id}" data-cur="${cur}" data-cell="${a.id}__${cur}__ret"
+             data-ret="${a.id}" data-cur="${cur}" data-cell="${cellKey(a.id, cur, 'ret')}"
              value="${_esc(retCell(a, cur))}" placeholder="—"
              title="${_esc(a.name)} · ${_esc(retCol.label)} · ${_esc(currencyLabel(cur))}"${open ? '' : ' disabled'}>`;
         // 收益率角标：多币种账户不显示 —— 它的「期初本金」是按币种分开的，
@@ -10139,7 +10193,7 @@ function renderMonthlyEntry() {
         const lockBtn = `<button class="mw-lockbtn" type="button" data-lock-acct="${a.id}" data-lock-cat="__flow__" data-lock-cur="${cur}"
             title="${open ? '点一下锁定净入金这一格（不再填写）' : '点开才能填写净入金'}" aria-label="${open ? '锁定' : '点开'}">${open ? '<i class="fa-solid fa-lock-open"></i>' : '<i class="fa-solid fa-lock"></i>'}</button>`;
         const inp = `<input type="text" inputmode="decimal" class="text-input be-flow${open ? '' : ' mw-locked'}"
-             data-flow-in="${a.id}" data-cur="${cur}" data-cell="${a.id}__${cur}__flow"
+             data-flow-in="${a.id}" data-cur="${cur}" data-cell="${cellKey(a.id, cur, 'flow')}"
              value="${_esc(flowCell(a, cur))}" placeholder="—"
              title="${_esc(a.name)} · 本月净入金（买进的钱）· ${_esc(currencyLabel(cur))}"${open ? '' : ' disabled'}>`;
         return `<div class="mw-c${open ? '' : ' mw-cell-locked'}">${lockBtn}${inp}</div>`;
@@ -10150,7 +10204,7 @@ function renderMonthlyEntry() {
     // 没勾的还是原来的一行（人民币）。
     // v1.39.98：多资产账户里被收起的某一行（某个币种）不显示
     const hiddenRows = hiddenNow('rows', member, month);
-    const rows = rowsOf.map(a => curRowsOf(a).filter(cur => hiddenRows.indexOf(a.id + '__' + cur) < 0).map(cur => {
+    const rows = rowsOf.map(a => curRowsOf(a).filter(cur => hiddenRows.indexOf(acctCurKey(a.id, cur)) < 0).map(cur => {
         const rate = fxRate(month, cur);
         const known = fxRateKnown(month, cur);
         const raw = (cat) => num(cellVal(a, cur, cat));
@@ -10177,8 +10231,8 @@ function renderMonthlyEntry() {
             ${flowInput(a, cur)}
             <div class="mw-c mw-sumcol"><span class="mw-rownet">小计 <b data-wsum>${known ? formatCurrency(Math.round(net * 100) / 100) : '—'}</b></span>
                 <input type="text" inputmode="decimal" class="text-input mw-total" placeholder="对账单总额"
-                    data-wallet-total="${a.id}" data-cur="${cur}" data-cell="${a.id}__${cur}__wt"
-                    value="${_esc(monthlyInput.wt[a.id + '__' + cur + '__wt'] || '')}">
+                    data-wallet-total="${a.id}" data-cur="${cur}" data-cell="${cellKey(a.id, cur, 'wt')}"
+                    value="${_esc(monthlyInput.wt[cellKey(a.id, cur, 'wt')] || '')}">
                 <span class="mw-diff" data-wdiff></span></div>
         </div>`;
     }).join('')).join('');
@@ -10659,6 +10713,25 @@ function mwAddAccount(raw) {
 function bindMonthlyEntry() {
     const list = document.getElementById('monthlyEntryList');
     if (!list) return;
+    // v1.41.0：Tab / Shift+Tab 在月度账单里只跳「能填的格子」——
+    // 锁住的、只读的全跳过，不然按几十次 Tab 才到下一格能填的。
+    if (!list.dataset.tabBound) {
+        list.dataset.tabBound = '1';
+        list.addEventListener('keydown', e => {
+            if (e.key !== 'Tab') return;
+            const cells = Array.prototype.filter.call(
+                list.querySelectorAll('input[data-bal],input[data-ret],input[data-flow-in]'),
+                i => !i.disabled && !i.readOnly
+            );
+            if (!cells.length) return;
+            const idx = cells.indexOf(document.activeElement);
+            if (idx < 0) return;                 // 焦点不在这些格子上 → 走浏览器默认
+            e.preventDefault();
+            const next = cells[(idx + (e.shiftKey ? -1 : 1) + cells.length) % cells.length];
+            next.focus();
+            if (typeof next.select === 'function') next.select();
+        });
+    }
     list.querySelectorAll('[data-bal],[data-ret],[data-flow-in]').forEach(inp => {
         inp.addEventListener('input', () => { monthlyDirty = true; updateMonthlyDerived(); });
         // v1.39.33：勾的来路和去路都挂在这两个事件上 ——
@@ -11297,7 +11370,7 @@ function saveMonthlyFor(member, opts) {
         const accountId = inp.dataset.bal;
         const cur = inp.dataset.cur || 'CNY';
         const cat = inp.dataset.cat || 'other';
-        touched.add(accountId + '__' + cur);
+        touched.add(acctCurKey(accountId, cur));
         const raw = String(inp.value).trim();
         if (raw === '') return;
         const foreign = parseMonthlyAmount(raw);
@@ -11306,7 +11379,7 @@ function saveMonthlyFor(member, opts) {
         if (!known) { missingRate++; return; }
         const rate = fxRate(month, cur);
         const amount = Math.round(fxToCNY(foreign, rate) * 100) / 100;
-        entries.push({ id: `${member}__${accountId}__${cur}__${cat}__${month}`, accountId, cur, cat, amount, foreign, rate });
+        entries.push({ id: balanceRecordId(member, accountId, cur, cat, month), accountId, cur, cat, amount, foreign, rate });
     });
     // 没填汇率的格子不能替用户猜（1:1 换算等于把 1000 美元当成 1000 人民币）。
     // 直接拦下来让人先填汇率 —— 草稿还在弹窗里，填完再保存就行。
@@ -11320,7 +11393,7 @@ function saveMonthlyFor(member, opts) {
     const willWrite = new Set(entries.map(e => e.id));
     state.balances = state.balances.filter(b => {
         if (b.month !== month || b.member !== member) return true;
-        if (!touched.has(b.accountId + '__' + (b.cur || 'CNY'))) return true;
+        if (!touched.has(acctCurKey(b.accountId, b.cur))) return true;
         if (willWrite.has(b.id)) return true;      // 这条马上就被覆盖，先留着
         addTombstone('balances', b.id);            // 留个删除标记，别处同步时这条才不会再被并回来
         removed++;
@@ -11356,7 +11429,7 @@ function saveMonthlyFor(member, opts) {
     let removedRet = 0;
     state.returns = state.returns.filter(r => {
         if (r.month !== month || r.member !== member) return true;
-        if (!touched.has(r.accountId + '__' + (r.cur || 'CNY'))) return true;
+        if (!touched.has(acctCurKey(r.accountId, r.cur))) return true;
         if (willWriteRet.has(r.id)) return true;
         addTombstone('returns', r.id);
         removedRet++;
@@ -11443,7 +11516,7 @@ function normalizeBalanceCats() {
         if (!b) return;
         if (b.cat) { out.push(b); return; }
         const cat = balanceCatOf(b);
-        const id = `${b.member}__${b.accountId}__${b.cur || 'CNY'}__${cat}__${b.month}`;
+        const id = balanceRecordId(b.member, b.accountId, b.cur, cat, b.month);
         if (seen[id]) { addTombstone('balances', b.id); return; }
         seen[id] = true;
         b.id = id; b.cat = cat;
@@ -12347,7 +12420,7 @@ function renameInsuranceMember(old) {
     state.insurancePolicies.forEach(p => {
         if (p.member !== old) return;
         p.member = n;
-        p.id = `${p.type}__${n}`;
+        p.id = insurancePolicyId(p.type, n);
         p.updatedAt = Date.now();
     });
     if (fundEditMember === old) fundEditMember = n;
@@ -12397,7 +12470,7 @@ function upsertIns(type, patch) {
     const member = fundEditMember;
     let p = insPolicy(type, member);
     if (!p) {
-        p = { id: `${type}__${member}`, type, member, covered: false, amount: 0, premium: 0, createdAt: Date.now(), updatedAt: Date.now() };
+        p = { id: insurancePolicyId(type, member), type, member, covered: false, amount: 0, premium: 0, createdAt: Date.now(), updatedAt: Date.now() };
         state.insurancePolicies.push(p);
     }
     Object.assign(p, patch, { updatedAt: Date.now() });
@@ -12507,8 +12580,9 @@ function addBalanceMember() {
 // 少了这一段，三种币会撞成同一个 id、互相覆盖成一个数。
 // 老数据（没有币种段）一律当人民币，迁移在 normalizeBalanceIds / normalizeReturnIds 里做。
 function _rebalanceId(member, accountId, month, cat, cur) {
-    const c = cur || 'CNY';
-    return cat ? `${member}__${accountId}__${c}__${cat}__${month}` : `${member}__${accountId}__${c}__${month}`;
+    // 键的形状见「复合键层」注释；带 cat 的五段是余额口径，不带的是收益口径
+    return cat ? balanceRecordId(member, accountId, cur, cat, month)
+               : returnRecordId(member, accountId, cur, month);
 }
 
 // 把 state.balances 收一遍口：补 member / cat、把 id 统一成四段、同格只留一条。
@@ -12543,7 +12617,7 @@ function normalizeBalanceIds() {
         //   宁可留着这条格式奇怪的记录，也不能自己制造撞车。
         const segs = String(b.id == null ? '' : b.id).split('__');
         if (cat && segs.length < 5) {
-            const newId = `${b.member}__${b.accountId}__${b.cur}__${cat}__${b.month}`;
+            const newId = balanceRecordId(b.member, b.accountId, b.cur, cat, b.month);
             if (b.id !== newId) { b.id = newId; changed = true; }
         }
         if (cat && seen.has(b.id)) b.__dup = true; else seen.add(b.id);
@@ -12596,7 +12670,7 @@ function normalizeReturnIds() {
         if (!r.rate) { r.rate = 1; changed = true; }
         const segs = String(r.id == null ? '' : r.id).split('__');
         if (segs.length === 3) {
-            const newId = `${r.member}__${r.accountId}__${r.cur}__${r.month}`;
+            const newId = returnRecordId(r.member, r.accountId, r.cur, r.month);
             if (r.id !== newId) { r.id = newId; changed = true; }
         }
     });
@@ -12775,7 +12849,7 @@ function mergeMemberAndDelete(name) {
     });
     transferMemberRecords(name, fallback);
     move.forEach(mv => {
-        const mine = new Set(before[mv.coll].map(r => `${fallback}__${r.accountId}__${r.month}`));
+        const mine = new Set(before[mv.coll].map(r => insuranceAccountKey(fallback, r.accountId, r.month)));
         mv.ids = state[mv.coll].filter(r => mine.has(r.id)).map(r => r.id);
     });
     removeEmptyMember(name, { memberMove: move });
@@ -14508,11 +14582,27 @@ function initEventListeners() {
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
+        const mod = e.metaKey || e.ctrlKey;
         // Cmd+N / Ctrl+N: Quick add (jumps to transactions view)
-        if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        if (mod && e.key === 'n') {
             e.preventDefault();
             switchView('transactions');
             openTransactionModal();
+        }
+        // Cmd+S / Ctrl+S: 保存月度账单（弹窗开着才管用；别让浏览器弹"保存网页"）
+        if (mod && e.key === 's') {
+            e.preventDefault();
+            const mm = document.getElementById('monthlyModal');
+            if (mm && !mm.classList.contains('hidden')) saveMonthly();
+            return;
+        }
+        // Cmd+K / Ctrl+K: 跳到搜索框
+        if (mod && e.key === 'k') {
+            e.preventDefault();
+            switchView('transactions');
+            const si = document.getElementById('searchInput');
+            if (si) { si.focus(); si.select(); }
+            return;
         }
         // Escape: close only the overlay on top, so a drill-down list stays open behind it
         if (e.key === 'Escape') {
