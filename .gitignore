@@ -12,3 +12,6 @@ version.json[0-9a-zA-Z]??
 native/build.sh[0-9a-zA-Z]??
 native/Info.plist[0-9a-zA-Z]??
 native/Bookkeeping.swift[0-9a-zA-Z]??
+
+# 测试脚本临时改写版 index.html（测完会自动删）
+__test_index.html
