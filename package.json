@@ -1,6 +1,6 @@
 {
   "name": "accounting-app",
-  "version": "1.39.99",
+  "version": "1.40.0",
   "private": true,
   "description": "记账本 Bookkeeping —— 网页版 + macOS 原生壳",
   "scripts": {
