@@ -3,7 +3,10 @@
    ============================================ */
 
 // 发布时要和 sw.js 的 CACHE_NAME、index.html 里的 sw.js?v= 一起改
-const APP_VERSION = '1.39.98';  // v1.39.98：①汇率不再自动沿用上个月的值（这个月没填就是没填），填了外币没填汇率 → 那个汇率框变红且存不了 ②币种名字跟下面的框居中对齐，家庭成员下拉文字居中 ③多资产账户可以只隐藏某一行（数据不动），「隐藏的」里能再打开 ④月度账单页面观感打磨（表头渐变、汇总行分层、小计列独立、悬停高亮）。v1.39.97：①汇率框跟页面其它格子一样有只读态：页面在查看模式时只读（点右上角「编辑」才改得了），这个币种自己记过数的也要点一下数字才进编辑态；换月份/换成员后编辑态作废 ②家庭成员下拉宽度按最长成员名自适应（2 个字 76px、3 个字 77px…），不再留一大片空。v1.39.96：①账户行和类型列的顺序按【家庭成员】各排各的（本人拖动不影响家人）②表头「账户 / 渠道」改成「账户 / 类型」③「＋币种」改成「加币种」，币种的「⋯」移回名字那一行 ④家庭成员下拉缩小、成员和日期靠左、其它按钮靠右，中间腾给币种 ⑤这一行控件高度统一成 32px。v1.39.95：①删掉汇率框下面的换算说明文字，「⋯」按钮跟输入框排一行对齐 ②收起来的行/列改成按【家庭成员 × 月份】分别记：9 月有数的账户到 10 月收起，历史月份照旧显示；本人收起的行不影响家人那边。v1.39.94：①汇率改成【除法】——口径改为「1 人民币 = ? 外币」（外币金额 ÷ 汇率 = 人民币），老汇率自动取倒数迁移，框下面加实时换算预览 ②币种条目改成账户同款：hover 出现 ⋯（改名/删除）、可拖动排序、填过数据的先看预览、点汇率数字才进编辑态 ③月度账单的锁按币种单独设置 ④表格的行和列都能收起（「隐藏的」按钮里再展开）⑤录入时切家庭成员自动存上一份，不用每换一个成员就点保存 ⑥每个家庭成员可以有自己的一套账户。v1.39.93：①删掉月度账单行上的「类别名」提醒牌子（账户叫「现金」是实体现金的意思，其它账户的钱记在「现金」那一列，不是同一回事，不用再提醒分类）②账户编辑窗口里的「所属钱包」输入框删掉（钱包分组是从账户名自动认的，不用手填）③月度账单点「增加账户」直接打开完整的账户编辑窗口（新建模式），不再弹那个只问名字的简陋输入框 ④汇率条去掉「汇率」两个字，改成币种名字在上、汇率框在下的竖排。v1.39.92：修两个 bug —— ①删掉的币种会被云端那份「并集」搬回来（现在币种删除也打墓碑，合并时跳过；再添加同名内置币种会自动复活墓碑）②多币种账户的「⋯」菜单原来只有「删除」，一点把整个账户都删了；现在多币种账户的菜单里「删掉这一行（某币种）」只删那一行（记录一起删，8 秒内可撤销），「删除这个账户」才是删整个账户。v1.39.91：①删掉月度账单的「币种」下拉 —— 页面固定就是多币种那套，哪些账户展开成几行由账户自己的「多币种账户」开关决定 ②汇率条上每个币种后面加「×」，可以删掉这个币种（连它记过的余额/收益一起删，8 秒内可撤销）③账户行的「⋯」菜单里能直接勾/取消「多币种账户」。v1.39.90：①汇率输入框改小（跟币种名一样宽，字多了自动变宽），抬头不再把「增加账户/增加列」挤出可视区 ②账户管理加「多币种账户」开关，只有勾了的账户在「其他币种」口径下才按币种展开成几行 ③所有弹窗右下角加缩放手柄，可拉大拉小（大小记在本地，排版不会散）④原生窗口放开 1200×780 上限、跟着窗口走，并记住上次的大小。v1.39.89：月度账单支持多币种 —— ①「本人」旁边加「币种」下拉（人民币 / 其他币种，默认人民币）②选「其他币种」后每个账户按币种展开成多行（人民币+美元+港币，币种可自己加）③「增加账户」前加汇率输入条，填一次下面同币种的行全按它换算 ④格子只记真实原币数，人民币换算统一在右侧小计/合计里做 ⑤没填汇率不许保存（不猜）⑥删掉格子里的旧「汇率」按钮（v1.39.87 那套会把人民币盖掉真实原币数）⑦余额 id 升到五段（含币种）、收益 id 升到四段，老数据自动迁移成 CNY。v1.39.88：自定义列（月度账单+资产负债）跨设备同步——buildSyncPayload 补 sheetCols、fingerprintOfPayload 与 mergeRemoteData 同步处理，Mac 增/删/移列后手机会收到。v1.39.87：外币账户支持——①账户可设币种（人民币/美元/港币）②月度账单外币账户格子点「汇率」填外币数额+自己输的汇率→自动算成人民币 ③汇率记在该账户上、下次自动带上。v1.39.86：月度账单①粘贴带千分位逗号的金额现在能完整识别（不再只认逗号前）②输入框失焦即把「1,234+50」之类规整成算好的数字 ③合计/占比/自检面板同样支持逗号与加减表达式。v1.39.85：四个饼图中心文字（金额+小标题）全部清空，只留扇区占比。v1.39.84：①云同步（GitHub Token）已开启时，手机/PWA 不再弹"已 N 天没备份"导出提醒 ②报表/资产负债/四笔钱/投资收益四个饼图中心删除金额、只留占比。v1.39.83：月度结账改造（排除异常/无异常隐藏/同步状态重写）+ 四笔钱精简（删冗余块+设置目标）。v1.39.82：①【电脑端记一笔恢复 v1.39.80 原样】v1.39.81 为了改手机端顺序，直接动了 index.html 的 DOM 顺序 —— 但 HTML 是两端共用的，电脑端顺序被一起改掉了（用户发现）。改法：HTML 顺序恢复成「日期/时间/归属成员/支付方式/备注」，手机端要的另一套顺序改用 CSS order 重排 —— 两端互不影响。②【手机端输入框底色去掉】v1.39.81 加的浅灰底不要了：输入框、日期显示层、整行 form-row 三处 background 全部改回 transparent；高度 46px、字号 14px 保留（v1.39.81 的加大值用户没要求撤）。层次只靠上下两条横线 + 格子之间的竖线表达。v1.39.81：①【手机端记一笔：顺序改为 微信/备注/日期/时间/本人】五个格子一行（v1.39.80 的顺序是 日期/时间/成员/支付方式/备注）。②【日期只显示「月.日」】如 10.22，不显示年，更简洁。做法：dateDisplay 是一层只读的 text 显示框（显示 10.22），底下压着透明的原生 <input type=date> —— 点它照样唤起 iOS 原生日期选择器，真值仍在 dateInput.value 里，保存逻辑一行没改（saveTransaction 读的还是完整日期）。新增 syncDateDisplay()：2026-10-22 → 10.22（单数字月/日不补零）；打开弹窗时同步，dateInput 的 change/input 事件也同步。⚠️ 桌面端仍直接用原生日期框（显示完整日期），那层显示框在桌面端藏掉。③【手机端数字键盘】按键 42→45px、键间隙 5→1px，但整个键盘模块占的高度分毫不变（4×45 + 3×1 = 183 = 原来的 4×42 + 3×5）。（试过用负 margin 补偿，会让行距 46.25px < 键高、上下两行的键重叠，不可用。）④【手机端分类图标】34→38px、字号 14.5→16px，文字 11.5→12.5px，每行仍是 5 个不变。⑤【手机端输入框】加浅灰底色（--bg-content）、高度 40→46px、字号 12.5→14px、圆角 6px。⚠️ 全部锁在 @media (max-width: 640px) 内，电脑端一字未动。v1.39.80：①【记账弹窗改成「一整行 5 格 + 两条线」排版】用户反馈：之前用「输入框 + 边框」区分格子，但 iOS 上原生 <input type=date>/<input type=time> 有自己的内部渲染（::-webkit-date-and-time-value），强制 height 也压不住，所以日期/时间两个框总比别的框高一截 —— 排版反复出问题就卡在这。新做法：不再给输入框画边框，改用「整行上下两条横线 + 格子之间一条竖线」分隔，所有控件在同一条基线上，高度由行高统一，不管它是原生日期控件还是 select，视觉上都是齐的。5 个格子一行：日期 / 时间 / 归属成员 / 支付方式 / 备注；单成员家庭藏掉成员格后其余四格自动均分。顺带压掉 iOS 日期控件自带的日历图标（占宽会把分隔线挤歪）。②【删掉「微信支付」支付方式】用户账本里「微信」716 笔、「微信支付」0 笔，下拉框里重复且「微信支付」三个字太长。默认列表改成 ['微信','支付宝','现金','银行卡','信用卡','其他']，所有 `|| '微信支付'` 兜底与图标映射同步改掉；加一次性迁移把已有账本里的「微信支付」并进「微信」（含历史交易的 paymentMethod、默认支付方式、墓碑标记、pmAddedAt）—— 不丢任何数据。③【删掉成员和支付方式右边的下拉小三角】select 改成 background-image:none + padding-right:0，靠分隔线区分格子即可。v1.39.79：①【记账弹窗排布按用户要求重排】手机端改成 3 列网格：第一行「日期 / 时间 / 归属成员」，第二行「支付方式 / 备注(跨两列)」—— 3 列正好填满两行，一个空缺都没有。（上一版做成了 2×2 两列，方向错了，用户指出后重做。）桌面端维持 4 个一行 + 备注独占整行（460px 弹窗塞不下 3 列）。②【数字键盘浅灰底与按压反馈在手机端真正生效】根因：手机端有 #transactionModal .numpad 规则（#id 选择器，特异性 100），把基础样式的浅灰底又盖回 var(--bg-modal) 白色，按压反馈的 :active 也被同样压住 —— 表现就是「加了却没反应」。已在该规则内改掉（background → var(--bg-content)、margin 负边距 -14px 与父级 padding 对冲、border 1px），并补上同优先级的 #transactionModal .numpad-btn:active / .is-pressed 规则（含 numpad-num/op/back/quick 各自覆盖，OK 键用 filter: brightness 压暗以保留渐变）。③【按压反馈加 JS 兜底】iOS Safari 光靠 :active 常看不到变化（手指抬起才触发 click，颜色来不及被看到）—— 新增 bindNumpadPressFeedback()：touchstart/touchend/touchcancel 显式切 .is-pressed 类，手指一碰就变灰、抬起就还原（与系统键盘手感一致）；桌面端走 mousedown/mouseup；幂等（dataset.pressBound 守卫），滑出按钮外也会还原。v1.39.78：①【记账弹窗布局（手机端）】支付方式与归属成员对调位置，备注从独立一行挪进 form-row 与支付方式同排（grid-column: span 2），四个框改 2×2 网格 —— 原来 3 列放 4 个框，归属成员掉到第二行、右侧空两格，看着像漏了东西。②【分类图标文字放大】手机端图标 30→34px、文字 10→11.5px，桌面端同步放大，但一排几个的结构不变（手机仍 5 个、桌面仍 6 个）。③【数字键盘】整块垫浅灰底（--bg-content）并与弹窗左右 padding 对冲，键与底色分得开；按键边框 0.5px→1px；按下时背景明显变灰 + 轻微下沉 + 内阴影（原来只有 scale(0.95) 和一个跟白底几乎同色的背景，手指按下去像没反应）；深色模式另配一套按下配色。④【收益率双口径 TWR + IRR】新增严格 IRR（资金加权）：现有的是时间加权（逐月连乘），剔掉加钱时点的影响；IRR 回答「你的钱实际赚了多少」，中途加钱越多两者差得越远。现金流构造三个坑：t=0 投 -(期初市值)、中途每期 -(净入金)（投入是负现金流）、期末 +(期末市值)；⚠️中途绝不能再加 profit，期末市值已含全部累计收益，加了就是重复计算（我第一版就错在这，算出来差一倍）。二分法求根，不引第三方库。算不出就给 null 并说明原因（没录净入金 / 缺期初余额 / 至少要 2 个月），绝不编数。行业里（Portfolio Performance / Wealthfolio / justETF）都是两个口径并列给。⑤【净资产变动归因拆解】把「投入 / 收益 / 其他」从 6 个瓦片里拎出来并排成三列，各带占比条 —— 一眼看清总资产涨的 10 万里多少是自己存的、多少是市场涨的（口径同 Wealthfolio / nett.money）。只读展示：这三项本来就算好的（other = delta − flow − profit），软件不替用户写任何数。v1.39.77：①【交易记录「已排除 N 笔·恢复」去掉】那个链接一直常驻在顶部提示条上，手一抖点上去就把排除全部撤销（白筛一遍）。删掉链接与 restoreAllAnomalies()，改成排除后弹 8 秒的临时「撤销」提示条（与删记录同一个时间窗）；单笔长期反悔仍点该行上的「已排除」按钮。②【折线/柱状图：竖线 + 左右移动读数】鼠标进入折线图/柱状图即出现一条竖线，左右移动就显示那一期的数值，不必把指针精确停在那个 3px 小圆点上（点多时圆点半径甚至是 0）。做法是 Chart.js 的两套判定分开设：interaction={mode:'index',intersect:false} 让提示框按「横向最近一期」取值（v3 起 tooltip.mode/intersect 已并入 interaction），同时把 hover 显式写回 nearest/true —— 不写回的话 hover 会跟着 fallback 变 index，「点某个点看明细」就会误触发。竖线用内联插件 chartCrosshairPlugin 在 afterDatasetsDraw 里自绘（Chart.js 4 无内置准星插件），数据源是 chart.tooltip.getActiveElements()（index 模式那一份），不是 chart.getActiveElements()（hover 模式，必须精确命中，用它竖线就不出现）。③【手机端手指左右拖动读数】四张图（报表走势 drillChart / 资产负债走势 balanceChart / 投资收益走势 returnChart / 总资产变化 tacChart）加 touch-action:pan-y —— 纵向滚动照常交给页面，横向手势留给图表，否则一横着划整页跟着动、图表收不到 touchmove。拖动读数后浏览器补发的 click 会被 bindChartTouchGuard/chartClickWasDrag（8px 阈值 + WeakMap 标记）拦掉，读着数不会误弹明细面板；「点一下某个点看详细数据」的老行为完全保留。v1.39.76：①【报表轮盘只列账本里真有的年月】新增 reportWheelYears / reportWheelMonths，年份 = 有交易的年份（+当年），某年下的月份 = 那年真正记过的月份（+当月）；空年份（如账本最早 2017 才有交易、轮盘却冒出 2015）不再出现。轮盘新增 opts.years / opts.monthsFor(year) / opts.withMonth 三个可选参数，ymWheelPick 换年份时按新年份重建月份列。②【按年看时不出现月份】报表/资产负债/投资收益在「年报」口径下 withMonth:false，月份整列不显示（月份本就没参与统计）。③【手机轮盘「2026年」折行】.ym-wheel-col > div 加 white-space:nowrap，并在 ≤640px 再收一档字号/内边距（桌面端本来就一行，无副作用）。④「＋ 增加账户 / ＋ 增加列」去掉文字里的加号。v1.39.75：①【轮盘永远停在第一格 → 默认不是当月】根因：openYmWheel / toggleMonthWheel 都是「先建列（里面设 scrollTop）再 hidden=false」，而 display:none 的元素没有滚动区域、此时设 scrollTop 会被忽略（一直是 0）→ 打开就停在年/月的第一格（月份第一格是「1月」）。改成「先显示、再建列」，两套轮盘都改。②【交易记录「所有月份」】点开默认停留当月。③【报表分析】月报右边的日期默认当月、点开也停当月。④【资产负债 / 投资收益】日期默认「上个月」——当月还没记、要下个月才记；并且选中「当月及以后」时也退回上个月。⑤【记月度账单】统一走新增的 prevMonthYM()，默认 = 上个月。⑥【加行 / 加列常驻显示】查看模式不再隐藏这两个按钮；并补齐 .btn-mini 的基础样式（此前全项目根本没有 .btn-mini 样式、一直靠浏览器默认按钮外观），字号 / 高度与「本人」下拉一致（13px / 32px）。⑦删掉底部常用渠道 chip（+支付宝…）与「一行 = 一个放钱的地方…」说明文字，连同它们的 CSS 一起清掉。v1.39.74：①【记一笔的日期改回原生控件】v1.39.73 给桌面端换的那套 ‹‹ ‹ [日期] › ›› 步进器实测下来更不好用，按用户要求撤掉，恢复系统原生 date 框（读 dateInput.value 的老逻辑本就零改动、手机端也从没动过）；顺手清掉步进器相关的 initDateStepper / refreshDateStepper / IS_TOUCH_PHONE 与 .date-stepper / .ds-group / .mw-new 样式。②【记月度账单：加行 / 加列挪到顶部】两个按钮从表格最底下挪到「本人 + 年月」那一行（.mw-addbtns，flex:0 0 auto、窄屏自动换行）；删掉前面那个输入框（对「增加列」本来就没用），改成点按钮直接弹窗填名字——「增加列」本来就是弹窗问，现在「增加账户」也一致（快捷键 chip 仍直接传名字、不再多问）；按钮变成静态 DOM 后必须加 dataset.bound 防重复绑定，否则每重绘一次就叠一层监听 → 点一下连着加出好几行 / 好几列；查看模式照旧隐藏这两个按钮。v1.39.73：四处日期控件按用户要求改造——①【月度账单弹窗默认「上个月」】以前没数据时退到 2015-01，现在一律默认今天的上个月（月初填上月账单最顺手）。②【记一笔的日期】桌面端（Mac 原生 App / 桌面浏览器）把原生日期框换成 ‹‹ ‹ [2026年10月19日] › ›› 步进器：‹‹›› 翻年、‹› 翻月，中间标签点开「年+月+日」三列轮盘；手机端不动，继续用系统原生日期控件（用户明确要求）。③【交易记录「所有月份」】年份折叠面板换成 iOS 风格双列轮盘，底部保留「所有月份」清除行。④【报表/资产负债/投资收益顶部】两个原生下拉（年+月）合并成一个「2026年10月」锚点按钮，点开同一个轮盘。通用轮盘挂 body 用 fixed 定位——普通页面容器有 overflow 会裁掉弹窗里那套 absolute 轮盘；支持 withDay（带日列）/ allowClear（清除行）。v1.39.72：修轮盘两个显示问题——①背景透出后面数字：.ym-wheel 误用未定义的 --bg-pop（无兜底 → 背景声明无效变透明），改成已定义的 --bg-card（不透明）；②偏右：原 right:0 锚在右侧栏右缘，改为 left:50%+translateX(-50%) 以其正中的「2026年10月」按钮为基准居中，整块落在弹窗内。v1.39.71：月度账单弹窗年月选择重做——【左右箭头】‹ › 逐月翻（跨年自动进位，2015-01 和当年当月处自动禁用）；【点中间「2026年10月」调出双列轮盘】iOS 风格，中条为选中、上下渐隐、scroll-snap 滚动停稳即选中；年份 2015 起到当年（v1.39.70 年份条从 1976 起被否：起点不对且不够优雅）。月份仍存在隐藏 select 里，沿用上期/清空/保存等老逻辑零改动。v1.39.70：①【粘贴静默错值】金额框粘贴科学计数法（1e5）被原清洗逻辑把"e"当杂质吃掉变成15——新增 pasteToCalcExpr：整段若是合法数字（含 1e5/1.5e3）先走 Number 展开，加减表达式才走老路径。②【月份选择器】月度账单弹窗年份从"手敲输入框"改为年份条（chip 横滑点选，覆盖 nowYear-50~nowYear 共约50年，远超旧下拉约10年上限；每个 chip ≥42px 触控友好）。v1.39.69：交易记录页四项修复——①【搜索彻底瘫痪】Excel 导入把数字单元格写进备注列（真实数据里有 note=2080 一笔），getFilteredTransactions 的 t.note.toLowerCase() 在这笔上抛 TypeError，任何搜索词都让整个筛选链崩掉、列表原样不动（用户体感"搜索框无效"）。修法三路：过滤时一律 String() 转型后再匹配（并顺带把搜索范围从"备注+分类"扩到"备注/分类/支付方式/金额"，和界面看得见的字段对齐）；loadState 加载时把非字符串备注统一规整成字符串（治存量）；Excel 导入时备注/时间/支付方式一律 String() 化（治增量）。②【金额不能粘贴】金额显示屏原是 readonly 且无 paste 监听，粘贴毫无反应。现允许直接键入/粘贴：paste 事件解析剪贴板文本（容忍 ¥ 、逗号、"元"等杂质）整体替换表达式；beforeinput 把键入的每个字符导进和数字键盘完全相同的 numpadPress 规则；input 事件兜底规整。inputmode=none 保留，手机不弹系统键盘。③【月份选择器】原生 select 平铺 100+ 个月份（真实数据 118 个月）难找难点。改成年份折叠面板：年份行从新到旧、默认全折叠（沿用报表"全部"视图同款交互），点年份展开该年月份、点月份即筛选，面板外点击自动收起。④【弹窗误触】编辑弹窗里删除按钮和关闭 X 原来只隔 6px，改 18px。v1.39.68：修复 v1.39.67 引入的两个真 bug——①【保存被误禁】loadState 把"解析"和"历史数据迁移"合在一个 try 里，迁移函数（normalizeBalanceIds 等）一抛错就被 catch 按"格式读不出"误判 → __loadFailed=true → 界面看得见全部数据但记一笔存一笔、Cmd+Q 都不落盘。现拆成两段 try：只有"字节→对象"解析失败才停保存；迁移失败只 toast 警告、照常保存。②【uid 撞车】v1.39.67 把 uid 缩成"时间 8 位+随机 4 位"后，批量导入几千行空 ID 同时现场发号，同一毫秒随机撞车，两笔不同交易共用一个 id（体检报"多设备合并可能撞车"）。uid 改为发号前查 __usedIds、撞了重发；loadState 成功即把现有 id 灌入该表。v1.39.67：本机存储瘦身（1193KB→约130KB，占比23%→3%）——①localStorage 改存 deflate+base64 压缩串（新增 js/fflate.min.js 同步压缩库；选同步 API 是因保存链路 saveStateNow/flushState 是同步的且每次切后台都触发）；②交易的 type/member/paymentMethod 重复值编码成短码、不再存 createdAt（存前编码/读后解码，只动本机副本；内存永远是明文，云同步/备份/Excel/界面零改动，从根上避免新旧格式在云端打架）；③uid 14→12 字符；④修复 v1.39.65 漏存：异常排除列表没进本机存储，关网刷新即丢；⑤本机数据解不开时（__loadFailed）停保存停同步，绝不用空状态覆盖真数据。v1.39.66：异常订单「排除」列表改为跨设备同步（Gist 云同步 payload 加 excludedAnomalies、mergeRemoteData 按 txnId 取并集——任一台排除过 = 全部排除；用户确认「本来就是同一个账本，没必要各设备独立」）。v1.39.65：①修复 Excel 导入去重误杀真实相同交易——删除自然键(byKey)匹配，导入只按 ID 匹配（命中更新、否则新增），防翻倍依赖导出每行带唯一 ID；补齐「账户」「保险清单」「四笔钱」三表的导入回读，使导出/导入完全对称（此前这三表只导出不回读）；导入提示增加账户数/保险份数。②异常订单新增「排除」功能——每笔被标异常的订单可一键「排除」（不在徽标/顶部提示/只看异常里出现），也能单笔或一键「恢复」；排除记录随账本持久化，属只读核对的一部分（软件不自动改任何数）。v1.39.64：交易记录顶部「异常」提示逻辑重做——删除"未归类"规则（"其他"是正常分类，不算异常）；金额异常改为"整 100 倍指纹"（某笔金额是其同分类常用金额的整 100 倍、且本笔非常用值，对应多按零/忘小数点）；新增"重复记账"检测（同分类+同金额+同日出现≥2笔）。v1.39.63：交易记录顶部「异常/未归类」提示增强——点击提示直达异常订单列表（只读，不写数据）、每笔异常订单标注原因徽标（未归类 / 金额异常：超平时中位数5倍）；v1.39.62：报表"全部"视图账单统计按年分组折叠（默认折叠、点年份展开各月）；交易记录顶部"异常/未归类"只读提示；月度账单"录入自检"只读面板（总资产/总负债/净资产+收益自洽+漏填提醒）；顺带修复 portfolioMonthStats 漏返回 hasProfit 的既有 bug。v1.39.60：新增 ?action=add 深链（iOS 快捷指令"打开 URL"打开网站自动弹记一笔）；v1.39.59：资产负债/四笔钱/投资收益三页加隐私眼睛图标（默认闭眼，金额藏成 ****，占比照常显示）；v1.39.58：月度账单「锁」改为按家庭成员分别记录(本人上个月记过某账户某渠道，该成员下月才自动开；别的成员不继承)；v1.39.57：原生 Mac 壳里隐藏网页假标题栏(含红绿灯)，只留系统真标题栏——去掉 Mac 上两套红绿灯并存；浏览器/PWA 版保留 Mac 风格
+// 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
+// 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
+// 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
+const APP_VERSION = '1.39.99';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -2798,16 +2801,6 @@ function restoreBackupMissing() {
     return importJsonFile({ mode: 'recover' });
 }
 
-// PWA: Import from iCloud (file input)
-// 旧入口：隐藏 input 的 onchange 仍可用
-function importFromICloud(event) {
-    const file = event.target.files && event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => { applyImportedJSON(String(e.target.result)); event.target.value = ''; };
-    reader.onerror = () => { showToast('读取文件失败', 'error'); event.target.value = ''; };
-    reader.readAsText(file);
-}
 
 function updateICloudSyncUI() {
     const container = document.getElementById('icloudSyncSection');
@@ -3613,37 +3606,6 @@ function updateMoneyEyeIcons() {
     });
 }
 
-function formatDate(dateStr) {
-    const d = parseLocalDate(dateStr);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    const dOnly = new Date(d);
-    dOnly.setHours(0, 0, 0, 0);
-
-    if (dOnly.getTime() === today.getTime()) return '今天';
-    if (dOnly.getTime() === yesterday.getTime()) return '昨天';
-
-    const year = d.getFullYear();
-    const month = d.getMonth() + 1;
-    const day = d.getDate();
-    return `${year}年${month}月${day}日`;
-}
-
-// Short form used on narrow screens where the full date squeezes the row
-function formatDateShort(dateStr) {
-    const d = parseLocalDate(dateStr);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dOnly = new Date(d); dOnly.setHours(0, 0, 0, 0);
-    if (dOnly.getTime() === today.getTime()) return '今天';
-    const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
-    if (dOnly.getTime() === yesterday.getTime()) return '昨天';
-    if (d.getFullYear() !== today.getFullYear()) return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
-    return `${d.getMonth() + 1}月${d.getDate()}日`;
-}
 
 function formatDateFull(dateStr) {
     const d = parseLocalDate(dateStr);
@@ -3757,141 +3719,6 @@ function updateSidebarSummary() {
     document.getElementById('sidebarMonth').textContent = getMonthLabel(monthKey);
 }
 
-function renderTrendChart() {
-    const ctx = document.getElementById('trendChart');
-    if (!ctx) return;
-
-    const labels = [];
-    const incomeData = [];
-    const expenseData = [];
-    const now = new Date();
-
-    for (let i = 5; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        labels.push(`${d.getMonth() + 1}月`);
-        const txns = state.transactions.filter(t => getMonthKey(t.date) === mk);
-        incomeData.push(txns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0));
-        expenseData.push(txns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0));
-    }
-
-    if (charts.trend) charts.trend.destroy();
-
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const textColor = isDark ? '#98989d' : '#6e6e73';
-    const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)';
-
-    charts.trend = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels,
-            datasets: [
-                {
-                    label: '收入',
-                    data: incomeData,
-                    backgroundColor: '#34c759',
-                    borderRadius: 6,
-                    barPercentage: 0.6,
-                    categoryPercentage: 0.7,
-                },
-                {
-                    label: '支出',
-                    data: expenseData,
-                    backgroundColor: '#ff3b30',
-                    borderRadius: 6,
-                    barPercentage: 0.6,
-                    categoryPercentage: 0.7,
-                },
-            ],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: { color: textColor, font: { size: 12, family: '-apple-system' }, usePointStyle: true, pointStyle: 'circle', padding: 12 },
-                },
-                tooltip: {
-                    callbacks: {
-                        label: (ctx) => `${ctx.dataset.label}: ${formatCurrency(ctx.raw)}`,
-                    },
-                },
-            },
-            scales: {
-                x: { grid: { display: false }, ticks: { color: textColor, font: { size: 11 } } },
-                y: {
-                    grid: { color: gridColor },
-                    ticks: { color: textColor, font: { size: 11 }, callback: (v) => state.settings.currency + v },
-                },
-            },
-        },
-    });
-}
-
-function renderCategoryChart() {
-    const ctx = document.getElementById('categoryChart');
-    if (!ctx) return;
-
-    const monthKey = getCurrentMonthKey();
-    const monthExpenses = state.transactions.filter(t => t.type === 'expense' && getMonthKey(t.date) === monthKey);
-
-    const catTotals = {};
-    monthExpenses.forEach(t => {
-        catTotals[t.categoryId] = (catTotals[t.categoryId] || 0) + t.amount;
-    });
-
-    const entries = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
-    const labels = entries.map(([id]) => getCategoryById(id)?.name || '未知');
-    const data = entries.map(([, v]) => v);
-    const colors = entries.map(([id]) => getCategoryById(id)?.color || '#636e72');
-
-    if (charts.category) charts.category.destroy();
-
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const textColor = isDark ? '#98989d' : '#6e6e73';
-
-    if (data.length === 0) {
-        charts.category = new Chart(ctx, {
-            type: 'doughnut',
-            data: { labels: ['暂无数据'], datasets: [{ data: [1], backgroundColor: ['#e0e0e0'], borderWidth: 0 }] },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false }, tooltip: { enabled: false } },
-            },
-        });
-        return;
-    }
-
-    charts.category = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels,
-            datasets: [{ data, backgroundColor: colors, borderWidth: 0, hoverOffset: 6 }],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            cutout: '62%',
-            plugins: {
-                legend: {
-                    position: 'right',
-                    labels: { color: textColor, font: { size: 11, family: '-apple-system' }, usePointStyle: true, pointStyle: 'circle', padding: 8, boxWidth: 8 },
-                },
-                tooltip: {
-                    callbacks: {
-                        label: (ctx) => {
-                            const total = data.reduce((s, v) => s + v, 0);
-                            const pct = ((ctx.raw / total) * 100).toFixed(1);
-                            return `${ctx.label}: ${formatCurrency(ctx.raw)} (${pct}%)`;
-                        },
-                    },
-                },
-            },
-        },
-    });
-}
 
 // ---- Transactions ----
 function transactionItemHTML(t, anomalyMap) {
@@ -4559,9 +4386,6 @@ function numpadBack() {
     renderCalc();
 }
 
-function numpadClear() {
-    resetCalc();
-}
 
 // v1.39.69：金额显示屏支持直接键入和粘贴。
 // 原来 #amountInput 是 readonly 且没有任何输入监听，往里粘一整段金额毫无反应。
@@ -5569,15 +5393,6 @@ function chartCrosshairPlugin(format) {
     };
 }
 
-// 折线/柱状趋势图共用的选项：提示框跟着"横向最近的一期"走，悬停/点击判定保持原样。
-function chartReadOptions() {
-    return {
-        // 提示框：取横向最近的一期，不要求指针压在数据点上
-        interaction: { mode: 'index', intersect: false },
-        // 图表自己的悬停/点击：仍然要精确命中（"点某个点看明细"的老行为不变）
-        hover: { mode: 'nearest', intersect: true },
-    };
-}
 
 // 手机上：手指横向拖着看数，抬手后浏览器还会补一个 click，
 // 那个 click 不能当成"点某个点看明细"，否则读着数就把明细弹出来了。
@@ -6880,15 +6695,6 @@ function base64ToUint8(b64) {
     return bytes;
 }
 
-// 反向：Uint8Array → base64（导出加密 Excel 时把 xlsx 字节包进密文封套用）
-function uint8ToBase64(bytes) {
-    let bin = '';
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-    }
-    return btoa(bin);
-}
 
 // 从原始文件字节解出工作簿：自动识别 app 专属加密文件 (.xlsx.enc)。
 // 加密文件本质是一段 JSON 封套（含 enc:"BKE1"），解开后里面是 xlsx 的 base64；
@@ -7451,32 +7257,6 @@ function monthHasRecords(month) {
     return !!month && state.balances.some(b => b.month === month);
 }
 
-// 仅用于「沿用上期」按钮的预填，属于用户主动操作，不参与统计
-function carriedBalances(month, member = state.balanceOwner) {
-    const map = {};
-    const members = member === 'all' ? [...new Set(state.balances.map(b => b.member))] : [member];
-    members.forEach(mem => {
-        state.accounts.forEach(a => {
-            const hist = state.balances
-                .filter(b => b.accountId === a.id && b.member === mem && b.month <= month)
-                .sort((x, y) => x.month.localeCompare(y.month));
-            if (hist.length) map[a.id] = (map[a.id] || 0) + (Number(hist[hist.length - 1].amount) || 0);
-        });
-    });
-    return map;
-}
-
-// 一个账户可能同时有资产和负债（支付宝里有余额也有花呗），所以不再靠账户的
-// 「资产 / 负债」标签去加减 —— 直接看这个账户的净额是正还是负：正的算资产，负的算负债
-function totalsFromMap(map) {
-    let asset = 0, liability = 0;
-    balAccounts().forEach(a => {
-        const v = map[a.id];
-        if (v === undefined || v === null) return;
-        if (v >= 0) asset += v; else liability += -v;
-    });
-    return { asset, liability, net: asset - liability, ratio: asset > 0 ? liability / asset : 0 };
-}
 
 // 解析当前期间：返回要展示的余额月份
 function balancePeriodInfo() {
@@ -8363,35 +8143,7 @@ function saveClassTagModal() {
 
 // 展开状态只活在本次会话里：折叠是为了"看一眼总数"，不值得存到账本里
 const balOpenWallets = new Set();
-function toggleBalWallet(name) {
-    if (balOpenWallets.has(name)) balOpenWallets.delete(name); else balOpenWallets.add(name);
-    renderBalanceBreakdown();
-}
 
-function breakdownRowHTML(r, total, top, metric) {
-    {
-        const a = r.a;
-        const color = a.color || '#8e8e8e';
-        const has = r.amount !== null;
-        const pct = has && total ? (r.signed / total) * 100 : 0;
-        const sign = (metric === 'net' && r.amount < 0 && moneyVisible) ? '-' : '';
-        return `
-            <div class="breakdown-item${has ? '' : ' bd-empty-row'}" onclick="openAccountHistoryForAccount('${a.id}')">
-                <div class="breakdown-icon" style="background:${color}22;color:${color}">
-                    <i class="fa-solid ${a.icon || 'fa-ellipsis'}"></i>
-                </div>
-                <div class="breakdown-main">
-                    <div class="breakdown-head">
-                        <span class="breakdown-name">${a.name}${has ? `<span class="breakdown-rank">${r.rank}</span>` : ''}</span>
-                        <span class="breakdown-amount">${has ? `${sign}${maskMoney(Math.abs(r.amount))}<em>${pct.toFixed(1)}%</em>` : '<span class="bd-no">未记录</span>'}</span>
-                    </div>
-                    <div class="breakdown-bar"><div class="breakdown-fill" style="width:${has ? Math.max(3, (r.signed / top) * 100) : 0}%;background:${color}"></div></div>
-                </div>
-                <span class="bal-group-tag">${a.group || ''}</span>
-                <i class="fa-solid fa-chevron-right breakdown-arrow"></i>
-            </div>`;
-    }
-}
 
 // ---------------- 账户历史弹窗 ----------------
 let historyAccountId = null;
@@ -9523,10 +9275,6 @@ function nextMonthOf(month) {
 // 「钱包」只是录入和显示时的分组，不是记账实体 —— 余额、收益仍然一条一个账户，
 // 所以收益率、四笔钱、净资产桥的计算完全不变，也不可能重复计算。
 
-const WALLET_BRANDS = ['支付宝', '微信', '云闪付', '京东', '美团', '抖音', '数字人民币'];
-const WALLET_BANKS = ['招商', '工商', '建设', '农业', '交通', '民生', '兴业', '浦发', '中信', '平安',
-    '光大', '华夏', '邮储', '邮政', '农村商业', '农商', '农村信用', '宁波', '杭州', '江苏', '北京',
-    '上海', '广发', '浙商', '恒丰', '渤海', '汇丰', '花旗', '东亚', '微众', '网商'];
 
 // ---- 横轴的资产类别 ----
 // 录账单时横着看的是"这个钱包里有哪些种类的钱"，不是"我开了几个账户"。
@@ -9700,11 +9448,7 @@ function catColor(k) {
     if (c && c.color) return c.color;
     return BAL_CAT_COLORS[k] || '#8e8e93';
 }
-function catIcon(k) {
-    const c = sheetColByKey(k);
-    if (c && c.icon) return c.icon;
-    return BAL_CAT_ICONS[k] || 'fa-chart-pie';
-}
+
 // 资产列里「其他」这一类平时没有就隐藏，免得白占一列宽度
 // 判断某个 cat key 是否「负债」——自定义负债列的 key 不是 'liab'，必须按 sheetCols 的 kind 判
 function isLiabCat(k) {
@@ -9814,42 +9558,6 @@ function migrateMonthlyOpen() {
     if (looksOld) state.monthlyOpen = {};
 }
 
-// 没设过钱包的账户按名字猜一个初始值，省得几十个点要一个个填
-function guessWalletFromName(name) {
-    const n = String(name || '');
-    for (const b of WALLET_BRANDS) if (n.indexOf(b) >= 0) return b;
-    if (/花呗|借呗|余额宝/.test(n)) return '支付宝';
-    if (/白条|金条/.test(n)) return '京东';
-    for (const k of WALLET_BANKS) {
-        if (n.indexOf(k) >= 0 && /银行|储蓄卡|借记卡|信用卡/.test(n)) return k + '银行';
-    }
-    if (/储蓄卡|借记卡/.test(n)) return '银行';
-    if (/信用卡/.test(n)) return '信用卡';
-    return '';
-}
-
-// 用户明确设过的（含设成空串 = 不分组）优先；没设过才猜
-function accountWallet(a) {
-    if (!a) return '';
-    if (typeof a.wallet === 'string') return a.wallet.trim();
-    return guessWalletFromName(a.name);
-}
-
-// 按钱包把账户分节：先资产后负债，同一钱包的两类放一节里（负债在行上标出来）
-function walletGroups() {
-    const order = [], map = {};
-    const put = (a) => {
-        const name = accountWallet(a) || '未分组';
-        if (!map[name]) { map[name] = { name, rows: [] }; order.push(name); }
-        map[name].rows.push(a);
-    };
-    accountsSortedByKind('asset').forEach(put);
-    accountsSortedByKind('liability').forEach(put);
-    // 「未分组」永远排最后，别把真正有钱包的挤到后面
-    const at = order.indexOf('未分组');
-    if (at >= 0 && at !== order.length - 1) { order.splice(at, 1); order.push('未分组'); }
-    return order.map(n => map[n]);
-}
 
 let monthlyFocus = '';                       // 'bal' | 'ret'：从哪个入口进来，决定滚到哪
 const monthlyFlowOpen = new Set();           // 本次打开里展开过「净入金」的账户
@@ -9919,11 +9627,6 @@ function captureMonthlyInputs() {
     list.querySelectorAll('[data-wallet-total]').forEach(el => { monthlyInput.wt[el.dataset.cell] = el.value; });
 }
 
-function monthlyVal(key, accountId, saved) {
-    const typed = monthlyInput[key][accountId];
-    if (typed === undefined) return saved === undefined ? '' : saved;
-    return String(typed).trim() === '' ? '' : typed;
-}
 
 // 月度账单弹窗「默认打开的月份」= 今天的上个月。
 // 日常节奏是月初填上月账单，打开就停在上一月最顺手；
@@ -11753,16 +11456,10 @@ function normalizeBalanceCats() {
 
 // ---- 老入口全部指向同一个弹窗（结账清单、账户历史里的「修改」都还在调它们）----
 function openBalanceModal(month) { return openMonthlyModal(month || balanceViewMonth(), 'bal'); }
-function closeBalanceModal() { return closeMonthlyModal(); }
-function renderBalanceEntry() { return renderMonthlyEntry(); }
-function saveBalances() { return saveMonthly(); }
-function clearBalanceInputs() { return clearMonthlyInputs(); }
+
+
 function openReturnModal(month) { return openMonthlyModal(month || returnViewMonth(), 'ret'); }
-function closeReturnModal() { return closeMonthlyModal(); }
-function renderReturnEntry() { return renderMonthlyEntry(); }
-function saveReturns() { return saveMonthly(); }
-function clearReturnInputs() { return clearMonthlyInputs(); }
-function bindReturnRatePreview() { return updateMonthlyDerived(); }
+
 
 // ---------------- 账户管理弹窗 ----------------
 // v1.39.39：账户管理「查看 / 编辑」模式
@@ -12067,12 +11764,6 @@ function refreshAccountsModalIfOpen() {
     if (m && !m.classList.contains('hidden')) renderAccountManageList();
 }
 
-// 按当前排序取出同类型的账户列表
-function accountsSortedByKind(kind) {
-    return state.accounts
-        .filter(a => a.kind === kind)
-        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
-}
 
 // 上移 / 下移：账户管理里所有账户是扁平混排的（不再按资产 / 负债分堆），
 // 所以要在「全局顺序」里和相邻的那一行交换，而不是只在同类型里换 —— 否则
@@ -12099,23 +11790,6 @@ function moveAccount(id, dir) {
     showToast('已调整顺序', 'success');
 }
 
-// 月度账单里整行（= 一整个账户）上移 / 下移：按全局 order 和相邻账户交换，不限于同类型
-function moveMonthlyAccountRow(id, dir) {
-    ensureAccountOrder();
-    const ordered = state.accounts.slice().sort((a, b) =>
-        (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
-    const idx = ordered.findIndex(a => a.id === id);
-    const other = ordered[idx + dir];
-    if (!other) return;
-    const a = accountById(id), b = other;
-    const tmp = a.order; a.order = b.order; b.order = tmp;
-    a.updatedAt = b.updatedAt = Date.now();
-    saveState();
-    renderMonthlyEntry();
-    renderAccountManageList();
-    if (state.currentView === 'balance') renderBalance();
-    showToast(dir < 0 ? '已上移一行' : '已下移一行', 'success');
-}
 
 // 月度账单：拖拽整行（账户）重排——把 from 插到 to 之前（按全局 order）
 function reorderMonthlyAccount(fromId, toId) {
@@ -12323,56 +11997,6 @@ function renderFundQuadrant() {
     box.innerHTML = cells.join('');
 }
 
-// ---- 三张资产桶卡片（实际/目标/进度 + 目标编辑）----
-function renderFundCards() {
-    const box = document.getElementById('fundCards');
-    if (!box) return;
-    const actual = fundActualByBucket();
-    const total = fundTotalAssets();
-    box.innerHTML = FUND_BUCKETS.map(bk => {
-        const act = actual[bk.key] || 0;
-        const tgt = state.fundTargets[bk.key] || 0;
-        const pct = tgt > 0 ? (act / tgt * 100) : 0;
-        const gap = act - tgt;
-        const share = total > 0 ? (act / total * 100) : 0;
-        const sharePct = total > 0 ? (act / total * 100).toFixed(1) : '0.0';
-        return `
-        <div class="fund-card">
-            <div class="fc-head">
-                <span class="fc-title"><i class="fa-solid ${bk.icon}" style="color:${bk.color}"></i> ${bk.name}</span>
-                <span class="fc-hint">${bk.hint}</span>
-            </div>
-            <div class="fc-nums">
-                <div class="fc-act" style="color:${bk.color}">${maskMoney(act)}</div>
-                <div class="fc-share">占资产 ${sharePct}%</div>
-            </div>
-            <div class="fc-bar"><div class="fc-bar-fill" style="width:${Math.min(pct, 100).toFixed(0)}%;background:${bk.color}"></div></div>
-            <div class="fc-target">
-                <span>目标</span>
-                <span class="fc-cur">${state.settings.currency}</span>
-                <input type="number" class="fc-amt" data-bucket="${bk.key}" value="${tgt || ''}" placeholder="0" inputmode="decimal">
-                <span class="fc-pctsep">或</span>
-                <input type="number" class="fc-pct" data-bucket="${bk.key}" value="${total > 0 ? (tgt / total * 100).toFixed(0) : ''}" placeholder="%" inputmode="numeric">
-                <span>%</span>
-            </div>
-            <div class="fc-gap ${gap < 0 ? 'under' : 'ok'}">${tgt > 0 ? (gap < 0 ? `还差 ${maskMoney(-gap)}` : `已达标，超出 ${maskMoney(gap)}`) : '未设目标'}</div>
-        </div>`;
-    }).join('');
-    box.querySelectorAll('.fc-amt').forEach(inp => inp.addEventListener('change', () => setFundTarget(inp.dataset.bucket, parseFloat(inp.value) || 0, 'amount')));
-    box.querySelectorAll('.fc-pct').forEach(inp => inp.addEventListener('change', () => setFundTargetPct(inp.dataset.bucket, parseFloat(inp.value) || 0)));
-}
-
-function setFundTarget(key, amount) {
-    state.fundTargets[key] = Math.max(0, amount || 0);
-    saveState();
-    renderFourFunds();
-}
-function setFundTargetPct(key, pct) {
-    const total = fundTotalAssets();
-    state.fundTargets[key] = Math.max(0, Math.round(total * (pct || 0) / 100 * 100) / 100);
-    saveState();
-    renderFourFunds();
-}
 
 // 四笔钱「设置目标」：打开弹窗填三个桶的目标金额（保险保障是按"配置了几个"算的，不在这里设金额）
 function openFundTargetModal() {
@@ -13573,14 +13197,6 @@ function setAccountEarnsReturn(a, on) {
     a.updatedAt = Date.now();
 }
 
-// 记收益弹窗该列哪些账户：会生收益的 + 这个月已经录过的
-// （已经录过的必须能改，哪怕后来把开关关了，否则历史就锁死了）
-function returnEntryAccounts(month, member) {
-    const all = returnCandidateAccounts();
-    if (state.returnEntryShowAll) return all;
-    const recorded = new Set(Object.keys(returnsAtMonth(month, member) || {}));
-    return all.filter(a => accountEarnsReturn(a) || recorded.has(a.id));
-}
 
 function returnCandidateAccounts() {
     const defaultIds = new Set(DEFAULT_ACCOUNTS.map(a => a.id));
