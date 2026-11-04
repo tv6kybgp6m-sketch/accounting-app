@@ -1,10 +1,10 @@
 {
   "name": "accounting-app",
-  "version": "1.41.0",
+  "version": "1.41.1",
   "private": true,
   "description": "记账本 Bookkeeping —— 网页版 + macOS 原生壳",
   "scripts": {
-    "test": "node test/smoke.js",
+    "test": "node test/lint-undefined.js && node test/smoke.js",
     "minify": "bash ./minify.sh",
     "build": "bash ./native/build.sh"
   },

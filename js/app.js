@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.0';
+const APP_VERSION = '1.41.1';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7934,6 +7934,15 @@ function balanceSeriesValue(cat, metric) {
     return metric === 'asset' ? t.asset : (metric === 'liability' ? t.liability : t.net);
 }
 
+// 折线/柱状趋势图共用的选项：提示框跟着"横向最近的一期"走，悬停/点击判定保持原样。
+function chartReadOptions() {
+    return {
+        // 提示框：取横向最近的一期，不要求指针压在数据点上
+        interaction: { mode: 'index', intersect: false },
+        // 图表自己的悬停/点击：仍然要精确命中（"点某个点看明细"的老行为不变）
+        hover: { mode: 'nearest', intersect: true },
+    };
+}
 // 某个月的净资产/总资产/总负债；该月没记录就返回 null（图表上留空，不走平线）
 function balanceValueAt(month, metric) {
     if (!monthHasRecords(month)) return null;
