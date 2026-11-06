@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.1';
+const APP_VERSION = '1.41.2';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -3262,7 +3262,7 @@ function remoteSaveExpiry(value) {
 function renderTokenExpiryHint() {
     const exp = remoteSyncCfg.tokenExpiresAt;
     if (!exp) {
-        return '<div class="settings-sublabel" style="color:#8a8a8a">未填到期日：Token 过期后同步会悄悄停止，建议填上以便提醒</div>';
+        return '<div class="settings-sublabel" style="color:var(--text-muted)">未填到期日：Token 过期后同步会悄悄停止，建议填上以便提醒</div>';
     }
     const diffDays = Math.ceil((exp - Date.now()) / 86400000);
     if (diffDays <= 0) {
@@ -6011,7 +6011,7 @@ function renderBudget() {
                     </div>
                 </div>
                 <div class="budget-item-actions">
-                    <span class="budget-item-percent" style="color:${overflow ? '#ff3b30' : 'var(--text-primary)'}">${pct}%</span>
+                    <span class="budget-item-percent" style="color:${overflow ? 'var(--expense-text)' : 'var(--text-primary)'}">${pct}%</span>
                     <button class="budget-delete" onclick="deleteBudget('${b.id}')"><i class="fa-solid fa-trash"></i></button>
                 </div>
             </div>
@@ -12170,16 +12170,16 @@ function renderFundAsOf() {
     const month = fundLatestMonth();
     const member = state.balanceOwner;
     const memberLabel = member === 'all' ? '全家' : member;
-    let html = `截至 <b style="color:#1c1c1e">${month || '—'}</b> · 统计口径：<b style="color:#1c1c1e">${memberLabel}</b>`;
+    let html = `截至 <b style="color:var(--text-primary)">${month || '—'}</b> · 统计口径：<b style="color:var(--text-primary)">${memberLabel}</b>`;
     if (month) {
         const own = balanceCellsAtMonth(month, member);
         const fam = balanceCellsAtMonth(month, 'all');
         const ownHas = Object.keys(own).some(k => own[k] && Object.values(own[k]).some(v => v));
         const famHas = Object.keys(fam).some(k => fam[k] && Object.values(fam[k]).some(v => v));
         if (!ownHas && famHas && member !== 'all') {
-            html += ` <span style="color:#ff9500">（「${memberLabel}」在 ${month} 无资产快照，下方 0 不是真的没钱；切到「全家」查看）</span>`;
+            html += ` <span style="color:var(--warning-text)">（「${memberLabel}」在 ${month} 无资产快照，下方 0 不是真的没钱；切到「全家」查看）</span>`;
         } else if (!ownHas && !famHas) {
-            html += ` <span style="color:#ff9500">（该月暂无资产记录）</span>`;
+            html += ` <span style="color:var(--warning-text)">（该月暂无资产记录）</span>`;
         }
     }
     el.innerHTML = html;
