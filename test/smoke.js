@@ -491,6 +491,30 @@ function run() {
                 return c ? c.textContent : '';
             })()`));
 
+        // ---------- 15) 交易记录：同一天按时刻晚→早 ----------
+        stage = '15';
+        ev("state.monthFilter=''; state.searchQuery=''; state.transactionFilter='all'; txnAnomalyOnly=false; state.excludedAnomalies={};" +
+           "state.transactions = [" +
+           "{id:'a',date:'2026-09-10',time:'09:05',type:'expense',amount:10,categoryId:'c1',paymentMethod:'现金'}," +
+           "{id:'b',date:'2026-09-10',time:'12:30',type:'expense',amount:20,categoryId:'c1',paymentMethod:'现金'}," +
+           "{id:'c',date:'2026-09-10',time:'19:40',type:'expense',amount:30,categoryId:'c1',paymentMethod:'现金'}," +
+           "{id:'d',date:'2026-09-10',time:'',type:'expense',amount:40,categoryId:'c1',paymentMethod:'现金'}," +
+           "{id:'e',date:'2026-09-11',time:'08:00',type:'expense',amount:50,categoryId:'c1',paymentMethod:'现金'}," +
+           "{id:'f',date:'2026-09-09',time:'23:00',type:'expense',amount:60,categoryId:'c1',paymentMethod:'现金'}" +
+           "]; renderTransactions();");
+        const txnOrder = JSON.parse(ev("JSON.stringify(Array.from(document.querySelectorAll('#allTransactions .transaction-item')).map(function(el){ return el.getAttribute('onclick'); }))") || '[]');
+        ok('同一天按时刻晚→早（19:40 → 12:30 → 09:05 → 未填时刻）',
+            JSON.stringify(txnOrder) === JSON.stringify([
+                "editTransaction('e')", "editTransaction('c')", "editTransaction('b')",
+                "editTransaction('a')", "editTransaction('d')", "editTransaction('f')"
+            ]), txnOrder);
+        ok('日期分组仍然新→旧（9/11 在最上、9/9 在最下）',
+            txnOrder[0] === "editTransaction('e')" && txnOrder[txnOrder.length - 1] === "editTransaction('f')");
+        ok('排序不动 state.transactions 的存储顺序', ev("state.transactions[0].id") === 'a');
+        ok('时刻解析兼容 H:m / HH:mm / HH:mm:ss / 空值',
+            ev("JSON.stringify([txnTimeMinutes({time:'9:5'}),txnTimeMinutes({time:'09:05'}),txnTimeMinutes({time:'19:40:30'}),txnTimeMinutes({time:''})])")
+                === JSON.stringify([545, 545, 1180, -1]));
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

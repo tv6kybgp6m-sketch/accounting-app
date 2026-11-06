@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.2';
+const APP_VERSION = '1.41.3';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -3840,6 +3840,16 @@ function formatDayHeader(dateStr) {
 
 const txnDayKey = t => String(t.date).slice(0, 10);
 
+// 同一天内的排序键：把「时:分」换成当天分钟数；空值 / 异常值记 -1（排到当天最下面）。
+// 记一笔默认写 nowTimeStr()，Excel 导入也带「时间」列；兼容 H:m / HH:mm / HH:mm:ss 三种写法。
+function txnTimeMinutes(t) {
+    const s = String((t && t.time) || '').trim();
+    const m = /^(\d{1,2}):(\d{1,2})(?::\d{2})?$/.exec(s);
+    if (!m) return -1;
+    const h = Number(m[1]), min = Number(m[2]);
+    return (h > 23 || min > 59) ? -1 : h * 60 + min;
+}
+
 // 按天分组的时间线：同一天只显示一个日期表头 + 当日小计
 function transactionGroupsHTML(txns, anomalyMap) {
     const groups = [];
@@ -3881,8 +3891,14 @@ function renderTransactions() {
         updateTransactionMonthSummary();
     }
 
-    // Sort by date desc（同日次的次级键：v1.39.67 起存储不存 createdAt，改认 updatedAt，老数据回退 createdAt）
-    filtered.sort((a, b) => parseLocalDate(b.date) - parseLocalDate(a.date) || (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+    // 日期分组仍然新→旧；同一天改成按「这笔的时刻」晚→早（v1.41.3）。
+    // 同一时刻用录入先后（updatedAt / 老数据 createdAt）倒序兜底；没填时刻的排当天最下面。
+    // filtered 是 getFilteredTransactions() 产出的副本，排序不动 state.transactions 的存储顺序。
+    filtered.sort((a, b) =>
+        parseLocalDate(b.date) - parseLocalDate(a.date)
+        || txnTimeMinutes(b) - txnTimeMinutes(a)
+        || (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
+    );
 
     const container = document.getElementById('allTransactions');
     const empty = document.getElementById('emptyTransactions');
