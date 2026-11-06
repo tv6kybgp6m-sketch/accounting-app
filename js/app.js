@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.4';
+const APP_VERSION = '1.41.5';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -300,7 +300,7 @@ let state = {
     searchQuery: '',
     monthFilter: '',
     excludedAnomalies: {},       // txnId -> true：用户手动"排除"的异常订单，不再在徽标/提示/只看异常里出现；可单笔或一键恢复
-    closedExclude: {},           // accountId -> true：月度结账里用户确认过"真的没有余额"的账户，排除后不再当待办；随账本同步（并集）
+    closedExclude: {},           // accountId -> true=排除 / false=点过「恢复」的墓碑；月结里"真的没有余额"的账户，不当待办；随账本同步（并集 + 本地优先）
     // v1.39.67：本机存储层的"重复值编码"字典（短码 -> 明文名）。只服务 localStorage 这一份
     // 本机副本，不进云同步/备份/Excel——那些通道一律明文，旧版本 App 也读得懂。
     memberCodes: {},             // 如 m1 -> 本人
@@ -596,6 +596,9 @@ function saveStateNow() {
         // v1.39.67 修复 v1.39.65 漏存：异常订单「排除」列表此前没进本机存储，
         // 关网刷新即丢（有网时靠从云端合并回来"看起来"没丢）。
         excludedAnomalies: state.excludedAnomalies,
+        // v1.41.5：月结「排除的无余额账户」以前只进了同步载荷、没进本机存储，
+        // loadState 一直在读，刷新一次就丢。这里补上落盘。
+        closedExclude: state.closedExclude || {},
         // 存储层短码字典：没有它，存成的短码就解不回来了
         memberCodes: state.memberCodes || {},
         pmCodes: state.pmCodes || {},
@@ -1696,6 +1699,11 @@ function fingerprintOfPayload(p) {
         // 指纹不变、remotePush 误判"远端已是这份"而跳过上传（v1.39.66 修复，
         // 与 v1.39.43 的 tokenExpiresAt 漏字段同类）。排序保证与设备无关。
         Object.keys(d.excludedAnomalies || {}).sort().join(','),
+        // v1.41.5：月结「排除」名单也要进指纹，否则只排除/恢复一个账户时，
+        // 其它字段全没变 → 指纹不变 → 推送被误判「远端已是这份」而跳过。
+        // 值也要算进去：点「恢复」是把 true 改成 false，key 没变，只比 key 会漏掉。
+        Object.keys(d.closedExclude || {}).sort()
+            .map(k => k + ':' + (d.closedExclude[k] ? 1 : 0)).join(','),
         // 自定义列（月度账单 + 资产负债）必须进指纹：否则在某台设备「增加/删除/移动列」后，
         // 指纹不变、remotePush 误判"远端已是这份"而跳过上传，手机就永远收不到新列（v1.39.88 修复）。
         (d.sheetCols || []).map(c => [c.key, c.kind, c.label, c.color || '', c.icon || ''].join(':')).sort().join(','),
@@ -1909,7 +1917,9 @@ function mergeRemoteData(remoteData) {
         state.excludedAnomalies = Object.assign({}, remote.excludedAnomalies, state.excludedAnomalies || {});
     }
 
-    // 月度结账"排除的无余额账户"：同样按 accountId 并集（任一台排除过 = 全部排除）。
+    // 月度结账"排除的无余额账户"：按 accountId 并集，本地优先（v1.41.5）。
+    // 值可能是 true（排除）或 false（点过「恢复」的墓碑）；false 会压住另一台设备的旧 true，
+    // 这样「恢复」也能同步出去，不会被云端搬回来。
     if (remote.closedExclude && typeof remote.closedExclude === 'object') {
         state.closedExclude = Object.assign({}, remote.closedExclude, state.closedExclude || {});
     }
@@ -3530,7 +3540,9 @@ function loadState() {
             state.balanceMembers = Array.isArray(data.balanceMembers) && data.balanceMembers.length ? data.balanceMembers : ['本人'];
             state.memberAddedAt = normalizeAddedAtMap(data.memberAddedAt);
             state.settings = { ...{ currency: '¥', theme: 'light', defaultPaymentMethod: '微信', defaultView: 'transactions', autoOpenAdd: false }, ...data.settings };
-            state.moneyVisibleByPage = (data.moneyVisibleByPage && typeof data.moneyVisibleByPage === 'object') ? Object.assign({ balance: false, funds: false, returns: false }, data.moneyVisibleByPage) : { balance: false, funds: false, returns: false };
+            // v1.41.5：金额眼睛一律默认闭着，不再沿用上次「开着」的状态。
+            // 存档里仍留着这个字段（saveStateNow 会写），但打开 App 一律按闭眼处理。
+            state.moneyVisibleByPage = { balance: false, funds: false, returns: false };
             state.deleted = normalizeTombstones(data.deleted);
             state.pmAddedAt = normalizeAddedAtMap(data.pmAddedAt);
             state.lastExportAt = Number(data.lastExportAt) || 0;
@@ -3743,6 +3755,15 @@ function resetReportEntryDefaults() {
 
 function switchView(viewName) {
     if (viewName === 'reports') resetReportEntryDefaults();
+    // v1.41.5：这三个页面的金额眼睛，每次「点进来」都回到闭着（隐私默认）。
+    // 只在切视图时重置；页面内部刷新（存完一笔、同步回来、翻月份）不重置，
+    // 所以用户当次点开眼睛后仍能一直看到金额，退出再进来才重新遮上。
+    if (viewName === 'balance' || viewName === 'funds' || viewName === 'returns') {
+        if (!state.moneyVisibleByPage || typeof state.moneyVisibleByPage !== 'object') {
+            state.moneyVisibleByPage = { balance: false, funds: false, returns: false };
+        }
+        state.moneyVisibleByPage[viewName] = false;
+    }
     state.currentView = viewName;
     document.body.classList.toggle('show-txn-fab', viewName === 'transactions');
     document.querySelectorAll('.nav-item').forEach(item => {
@@ -7898,7 +7919,12 @@ function closeExcludeBalanceSheet() {
     if (sheet) sheet.classList.add('hidden');
 }
 function clearAllClosedExclude() {
-    state.closedExclude = {};
+    // v1.41.5：不删 key，改成显式「已恢复」标记 false。
+    // 云端合并是「并集 + 本地优先」，如果直接清空成 {}，另一台设备上的 true 会被搬回来，
+    // 「恢复」就白点了；留下 false 才能把「我不要排除它」这个决定同步出去。
+    const excl = state.closedExclude || {};
+    Object.keys(excl).forEach(id => { excl[id] = false; });
+    state.closedExclude = excl;
     saveState();
     renderCloseCard();
     updateNavBadges();

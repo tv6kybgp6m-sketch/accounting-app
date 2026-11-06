@@ -530,6 +530,36 @@ function run() {
             ev("state.reportMonth===9 && state.reportChartType==='bar'"),
             ev("JSON.stringify([state.reportMonth,state.reportChartType])"));
 
+        // ---------- 17) 金额眼睛默认闭着 + 月结排除可同步 ----------
+        stage = '17';
+        ev("state.moneyVisibleByPage = {balance:true,funds:true,returns:true}; switchView('balance');");
+        ok('点进资产负债表，金额眼睛默认闭着', ev("state.moneyVisibleByPage.balance") === false);
+        ev("switchView('funds'); switchView('returns');");
+        ok('点进四笔钱 / 投资收益，眼睛也闭着',
+            ev("state.moneyVisibleByPage.funds===false && state.moneyVisibleByPage.returns===false"));
+        ev("toggleMoneyEye('returns'); renderView('returns');");
+        ok('页面内点开眼睛后，页内刷新不会把它按回去', ev("state.moneyVisibleByPage.returns") === true);
+        ev("switchView('returns');");
+        ok('退出再进来又闭着', ev("state.moneyVisibleByPage.returns") === false);
+
+        // 月结「排除」：载荷 / 指纹 / 落盘 / 恢复墓碑
+        ev("state.closedExclude = {a_x:true};");
+        ok('月结排除名单进了同步载荷',
+            ev("(function(){var d=buildSyncPayload().data;return !!d.closedExclude && d.closedExclude.a_x===true;})()"));
+        const fpEx1 = ev("fingerprintOfPayload(buildSyncPayload())");
+        ev("state.closedExclude.a_y = true;");
+        const fpEx2 = ev("fingerprintOfPayload(buildSyncPayload())");
+        ok('新排除一个账户会改变指纹（才会触发上传）', fpEx1 !== fpEx2);
+        ev("clearAllClosedExclude();");
+        ok('点「恢复」留下 false 墓碑，不是清空名单',
+            ev("state.closedExclude.a_x===false && state.closedExclude.a_y===false"));
+        ok('「恢复」也改变指纹（能同步出去）', fpEx2 !== ev("fingerprintOfPayload(buildSyncPayload())"));
+        ev("saveStateNow();");
+        ok('排除名单写进本机存储（刷新不会丢）',
+            ev("(function(){var raw=localStorage.getItem(STORAGE_KEY);if(!raw)return false;var d=JSON.parse(unpackFromStorage(raw));return !!d.closedExclude && d.closedExclude.a_x===false;})()"));
+        ok('另一台设备的旧 true 不会把「恢复」搬回来',
+            ev("(function(){try{state.closedExclude={a_x:false};mergeRemoteData({data:{closedExclude:{a_x:true}}});return state.closedExclude.a_x===false;}catch(e){return false;}})()"));
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));
