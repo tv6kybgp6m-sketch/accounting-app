@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.3';
+const APP_VERSION = '1.41.4';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -329,7 +329,7 @@ let state = {
     moneyVisibleByPage: { balance: false, funds: false, returns: false },  // 每页独立的金额眼睛状态（默认全闭眼）
     reportMetric: 'expense',
     breakdownExpanded: false,
-    reportChartType: 'line',
+    reportChartType: 'pie',
     reportGranularity: null,
     editingTransactionId: null,
     editingCategoryId: null,
@@ -3724,7 +3724,25 @@ function showToast(message, type = 'success') {
 }
 
 // ---- Navigation ----
+// 每次「点进」报表分析页，都回到「这个月 + 月报 + 饼图」（v1.41.4）。
+// 刻意放在 switchView 而不是 renderView：页面内部的刷新（改月份、存完一笔流水、
+// 云端同步回来、重新检查结账清单）都会走 renderView / renderReports，那些一律不重置，
+// 否则用户刚选好的月份会被冲掉。启动时的 switchView(defaultView) 也会经过这里。
+function resetReportEntryDefaults() {
+    const now = new Date();
+    state.reportPeriod = 'month';
+    state.reportYear = now.getFullYear();
+    state.reportMonth = now.getMonth() + 1;
+    state.reportChartType = 'pie';
+    state.reportGranularity = null;   // 回到该期间自带的粒度，别把上次的「按年」带到饼图切回折线时
+    // 顶部「月报/年报/全部」的高亮是静态 HTML 写死的，state 改回来后要跟着刷一遍
+    document.querySelectorAll('#view-reports .period-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.period === state.reportPeriod);
+    });
+}
+
 function switchView(viewName) {
+    if (viewName === 'reports') resetReportEntryDefaults();
     state.currentView = viewName;
     document.body.classList.toggle('show-txn-fab', viewName === 'transactions');
     document.querySelectorAll('.nav-item').forEach(item => {

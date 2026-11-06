@@ -217,7 +217,7 @@
                     <div class="chart-card drill-card">
                         <div class="chart-header">
                             <div class="drill-title-wrap">
-                                <h3 id="drillChartTitle">支出走势</h3>
+                                <h3 id="drillChartTitle">支出构成占比</h3>
                                 <span class="chart-subtitle" id="drillChartSubtitle"></span>
                             </div>
                             <div class="drill-controls">
@@ -229,7 +229,7 @@
                                 <div class="drill-toggle chart-type-toggle">
                                     <button class="type-ico-btn" data-chart="line" title="折线图"><i class="fa-solid fa-chart-simple"></i></button>
                                     <button class="type-ico-btn" data-chart="bar" title="柱状图"><i class="fa-solid fa-chart-column"></i></button>
-                                    <button class="type-ico-btn" data-chart="pie" title="饼图"><i class="fa-solid fa-chart-pie"></i></button>
+                                    <button class="type-ico-btn active" data-chart="pie" title="饼图"><i class="fa-solid fa-chart-pie"></i></button>
                                 </div>
                             </div>
                         </div>
@@ -1446,7 +1446,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.3').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.4').catch(() => {});
             });
         }
     </script>

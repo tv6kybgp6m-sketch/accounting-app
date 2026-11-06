@@ -515,6 +515,21 @@ function run() {
             ev("JSON.stringify([txnTimeMinutes({time:'9:5'}),txnTimeMinutes({time:'09:05'}),txnTimeMinutes({time:'19:40:30'}),txnTimeMinutes({time:''})])")
                 === JSON.stringify([545, 545, 1180, -1]));
 
+        // ---------- 16) 每次进入报表页：当月 + 月报 + 饼图 ----------
+        stage = '16';
+        ev("state.reportPeriod='year'; state.reportYear=2020; state.reportMonth=3; state.reportChartType='line'; state.reportGranularity='year'; switchView('reports');");
+        ok('点进报表页自动回到「月报 + 今年 + 本月」',
+            ev("(function(){var d=new Date();return state.reportPeriod==='month' && state.reportYear===d.getFullYear() && state.reportMonth===(d.getMonth()+1);})()"),
+            ev("JSON.stringify([state.reportPeriod,state.reportYear,state.reportMonth])"));
+        ok('点进报表页默认是饼图', ev("state.reportChartType") === 'pie', ev("state.reportChartType"));
+        ok('顶部「月报」按钮跟着高亮',
+            ev("(function(){var b=document.querySelector('#view-reports .period-btn.active');return b?b.dataset.period:'';})()") === 'month');
+        // 页面内部的刷新不该把用户刚选的月份冲掉
+        ev("state.reportMonth=9; state.reportChartType='bar'; renderReports();");
+        ok('在报表页里改月份/图表后，页面内部刷新不会重置',
+            ev("state.reportMonth===9 && state.reportChartType==='bar'"),
+            ev("JSON.stringify([state.reportMonth,state.reportChartType])"));
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));
