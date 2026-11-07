@@ -93,7 +93,7 @@ const HKD_RATE = 1.09;   // 1 元 = 1.09 港币 → 200 港币 = 183.49 元
 w.addEventListener('load', () => { setTimeout(run, 300); });
 setTimeout(() => { if (!global.__ran) { console.log('[timeout] load 未触发'); process.exit(2); } }, 15000);
 
-function run() {
+async function run() {
     global.__ran = true;
     try {
         console.log('\n=== v1.39.94 冒烟测试（除法汇率 / 按币种锁 / 隐藏 / 按成员）===\n');
@@ -632,6 +632,67 @@ function run() {
         ok('跨期时行标签改成「本期储蓄」，标题写明回退原因',
             ev("(function(){var r=document.getElementById('bridgeRows').innerHTML;var t=document.getElementById('bridgeNote').innerHTML;return r.indexOf('本期储蓄')>=0 && t.indexOf('去年没有余额记录')>=0;})()"));
         ev("closeMwMenu(); closeInsDatePop();");
+
+        // ---------- 21) v1.41.10：Mac 侧栏层次 + 启动锁屏 + 一次口令全会话复用 ----------
+        stage = '21';
+        const cssText = fs.readFileSync(path.join(REPO, 'css/style.css'), 'utf8');
+        ok('Mac 壳里侧栏用更深的专用色，网页 / 手机不受影响',
+            cssText.indexOf('--bg-sidebar-mac') >= 0 &&
+            cssText.indexOf('body.native-shell .sidebar') >= 0 &&
+            cssText.indexOf('background: var(--bg-sidebar-mac)') >= 0);
+        ok('锁屏层默认藏着；没开加密时启动不会把窗口锁上',
+            ev("(function(){var l=document.getElementById('startupLock');return !!l && l.classList.contains('hidden') && !document.body.classList.contains('app-locked');})()"));
+        ok('锁屏期间整窗毛玻璃 + 禁止点按，顶层遮罩自己也带模糊',
+            /body\.app-locked \.mac-window\s*\{[^}]*filter:\s*blur\(/m.test(cssText) &&
+            /body\.app-locked \.mac-window\s*\{[^}]*pointer-events:\s*none/m.test(cssText) &&
+            /#startupLock\s*\{[^}]*backdrop-filter:\s*blur\(/m.test(cssText));
+        ev("(function(){var old=LedgerCrypto.isEnabled; LedgerCrypto.isEnabled=function(){return true;}; window.__gateP=startupUnlockGate(); LedgerCrypto.isEnabled=old; return true;})()");
+        ok('开了加密：启动门禁先盖锁屏再加 app-locked（底下的账本被糊住）',
+            ev("(function(){var l=document.getElementById('startupLock');return document.body.classList.contains('app-locked') && !!l && !l.classList.contains('hidden');})()"));
+
+        const lockFlow = await ev(`(async function(){
+            var oldUnlock = LedgerCrypto.unlock;
+            LedgerCrypto.unlock = function(s){ return s === 'test-pass' ? Promise.resolve(true) : Promise.reject(new Error('bad')); };
+            document.getElementById('startupLockInput').value = 'test-pass';
+            await submitStartupLock();
+            var out = [__sessionSecret, document.body.classList.contains('app-locked'), document.getElementById('startupLock').classList.contains('hidden')];
+            LedgerCrypto.unlock = oldUnlock;
+            return JSON.stringify(out);
+        })()`);
+        ok('输一次正确口令就放行，并把口令记在本次会话里', lockFlow === '["test-pass",false,true]', lockFlow);
+
+        const noSecondAsk = await ev(`(async function(){
+            var oldAsk = window.askSecret, oldHas = LedgerCrypto.hasLocalKey, oldUnlock = LedgerCrypto.unlock;
+            var asks = 0, unlocks = 0;
+            window.askSecret = function(){ asks++; return Promise.resolve(null); };
+            LedgerCrypto.hasLocalKey = function(){ return Promise.resolve(false); };
+            LedgerCrypto.unlock = function(){ unlocks++; return Promise.resolve(true); };
+            var saved = __sessionSecret; __sessionSecret = 'test-pass';
+            var r = false;
+            try { r = await ensureUnlocked(null, '测试', false); } catch (e) {}
+            __sessionSecret = saved;
+            window.askSecret = oldAsk; LedgerCrypto.hasLocalKey = oldHas; LedgerCrypto.unlock = oldUnlock;
+            return JSON.stringify([r, asks, unlocks]);
+        })()`);
+        ok('后续同步链路再要钥匙时静默复用本次口令，不弹第二次', noSecondAsk === '[true,0,1]', noSecondAsk);
+
+        const cloudSecret = await ev(`(async function(){
+            var oldLooks = LedgerCrypto.looksEncrypted, oldDec = LedgerCrypto.decryptEnvelope,
+                oldHas = LedgerCrypto.hasLocalKey, oldDecode = window.decodeSyncPayload;
+            var got = 'none';
+            LedgerCrypto.looksEncrypted = function(){ return true; };
+            LedgerCrypto.hasLocalKey = function(){ return Promise.resolve(true); };
+            LedgerCrypto.decryptEnvelope = function(env, sec){ got = sec === undefined ? 'undefined' : sec; return Promise.resolve('{}'); };
+            window.decodeSyncPayload = function(){ return Promise.resolve({data:{}}); };
+            var saved = __sessionSecret; __sessionSecret = 'test-pass';
+            try { await resolveCloudPayload({ enc: 'BKE1', keyring: {} }); } catch (e) {}
+            __sessionSecret = saved;
+            LedgerCrypto.looksEncrypted = oldLooks; LedgerCrypto.decryptEnvelope = oldDec;
+            LedgerCrypto.hasLocalKey = oldHas; window.decodeSyncPayload = oldDecode;
+            return got;
+        })()`);
+        ok('云端那份用别的钥匙加密时，拿本次口令静默重解', cloudSecret === 'test-pass', cloudSecret);
+        ev("__sessionSecret=''; closeStartupLock();");
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {

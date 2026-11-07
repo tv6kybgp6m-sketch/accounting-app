@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.9';
+const APP_VERSION = '1.41.10';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1651,8 +1651,10 @@ async function resolveCloudPayload(raw) {
             // 第一次用本机密钥静默解；报 WRONG_KEY 说明密钥不是这一份数据的，
             // 第二次强制弹口令，解出来的正确主密钥会覆盖本机缓存，以后就安静了
             await ensureUnlocked(raw.keyring, '读取云端数据', attempt > 0);
-            const out = await decodeSyncPayload(await LedgerCrypto.decryptEnvelope(raw));
-            if (attempt > 0) showToast('已解锁云端加密数据，之后不用再输', 'success');
+            // v1.41.10：把本次启动输过的口令一起交给 decryptEnvelope，
+            // 本机密钥开不了这份数据时它自己会重新解，不必再弹一次口令框。
+            const out = await decodeSyncPayload(await LedgerCrypto.decryptEnvelope(raw, __sessionSecret || undefined));
+            if (attempt > 0) showToast(__sessionSecret ? '云端那份已用本次口令解锁' : '已解锁云端加密数据，之后不用再输', 'success');
             return out;
         } catch (e) {
             const msg = (e && e.message) || String(e);
@@ -2073,6 +2075,106 @@ function submitSecretModal() {
     closeSecretModal(v);
 }
 
+// ---------------- v1.41.10：启动锁屏 + 一次口令全会话复用 ----------------
+// 从前口令只在「要写加密备份 / 读云端密文」时才问；启动时有好几条链路
+// （iCloud 合并、Gist 拉取、推送）各自去要钥匙，还各自重置「问一次」的配额，
+// 于是出现「刚输完又弹一次」。现在改成：首屏画完先盖一层毛玻璃，只问一次；
+// 这一次输的口令记在内存里，后面所有链路遇到别的钥匙都拿它静默解，不再弹窗。
+// ⚠️ 本机账本本身仍是明文存储，这层是「打开软件时的遮挡」，不是重新加密账本。
+let __sessionSecret = '';            // 只活在这一次页面生命周期里，关掉就没了
+let __startupLockResolve = null;
+let __startupLockBound = false;
+
+function startupLockError(msg) {
+    const el = document.getElementById('startupLockError');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.toggle('hidden', !msg);
+}
+
+function startupUnlockGate() {
+    const lock = document.getElementById('startupLock');
+    if (!lock || !LedgerCrypto.isEnabled()) return Promise.resolve(true);   // 没开加密就没有口令这回事
+    document.body.classList.add('app-locked');
+    lock.classList.remove('hidden');
+    const inp = document.getElementById('startupLockInput');
+    if (inp) { inp.value = ''; inp.type = 'password'; }
+    startupLockError('');
+    const peek = document.getElementById('startupLockPeek');
+    if (peek) peek.checked = false;
+    const forgotBox = document.getElementById('startupLockForgotBox');
+    if (forgotBox) forgotBox.classList.add('hidden');
+    if (!__startupLockBound) {
+        __startupLockBound = true;
+        if (inp) inp.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); submitStartupLock(); }
+        });
+        if (peek) peek.addEventListener('change', () => {
+            const box = document.getElementById('startupLockInput');
+            if (box) box.type = peek.checked ? 'text' : 'password';
+        });
+    }
+    // 锁屏期间底层界面一律不收键盘事件，防止 ⌘K / ⌘N 之类快捷键把弹窗叫起来
+    document.addEventListener('keydown', startupLockKeyGuard, true);
+    document.addEventListener('keyup', startupLockKeyGuard, true);
+    setTimeout(() => { try { if (inp) inp.focus(); } catch (e) { /* 拿不到焦点就算了 */ } }, 60);
+    return new Promise(resolve => { __startupLockResolve = resolve; });
+}
+
+function startupLockKeyGuard(e) {
+    if (!document.body.classList.contains('app-locked')) return;
+    const t = e.target;
+    if (t && t.closest && t.closest('#startupLock')) return;    // 锁屏自己的输入框照常打字
+    e.preventDefault();
+    e.stopImmediatePropagation();
+}
+
+function closeStartupLock() {
+    document.body.classList.remove('app-locked');
+    const lock = document.getElementById('startupLock');
+    if (lock) lock.classList.add('hidden');
+    document.removeEventListener('keydown', startupLockKeyGuard, true);
+    document.removeEventListener('keyup', startupLockKeyGuard, true);
+    const r = __startupLockResolve; __startupLockResolve = null;
+    if (r) r(true);
+}
+
+async function submitStartupLock() {
+    if (!document.body.classList.contains('app-locked')) return;
+    const inp = document.getElementById('startupLockInput');
+    const btn = document.getElementById('startupLockBtn');
+    const secret = inp ? inp.value : '';
+    if (!secret) { startupLockError('请输入口令或恢复码'); return; }
+    startupLockError('');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在解锁…'; }
+    try {
+        await LedgerCrypto.unlock(secret, LedgerCrypto.keyring());
+        __sessionSecret = secret;
+        closeStartupLock();
+    } catch (e) {
+        startupLockError('口令或恢复码不正确，再试一次');
+        if (inp) { inp.value = ''; try { inp.focus(); } catch (e2) {} }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-lock-open"></i> 解锁并进入'; }
+    }
+}
+
+function startupLockForgot() {
+    const box = document.getElementById('startupLockForgotBox');
+    if (box) box.classList.toggle('hidden');
+}
+
+// 兜底：口令和恢复码都丢了时不能把人永久锁在本机明文账本外面。
+// 这是用户明确点选的逃生口，进去以后同步 / 备份依旧按老规矩要钥匙。
+function startupLockBypass() {
+    const msg = '不解锁就直接打开？\n\n本机账本会照常显示，但这次打开期间云端同步和加密备份都读不了、也写不了。\n只有口令和恢复码都找不回来时才用这个。';
+    let yes = false;
+    try { yes = window.confirm(msg); } catch (e) { yes = false; }
+    if (!yes) return;
+    __sessionSecret = '';
+    closeStartupLock();
+}
+
 // 口令框的"配额"：一次用户操作里最多弹一轮。
 // 同步文件夹里可能躺着多份用不同主密钥加密的旧副本，批量合并时如果每份都弹一次，
 // 用户会被连环弹窗淹掉，而且点"取消"也停不下来（下一个文件继续弹）。
@@ -2081,10 +2183,16 @@ function beginAskCycle(n) { __askBudget = n === undefined ? 1 : n; }
 
 // 有本机密钥就静默通过；没有就问到口令或恢复码（最多三次）
 async function ensureUnlocked(kring, why, force) {
+    const kr = kring || LedgerCrypto.keyring();
     if (!force && await LedgerCrypto.hasLocalKey()) return true;
+    // v1.41.10：本次打开已经在锁屏输过一次口令了，后面任何链路都拿它去开这份数据
+    //（云端那份可能是另一台设备的钥匙），不再重新弹窗。
+    if (__sessionSecret) {
+        try { await LedgerCrypto.unlock(__sessionSecret, kr); return true; }
+        catch (e) { /* 这份数据用的不是同一个口令，才继续走下面的询问 */ }
+    }
     if (__askBudget <= 0) throw new Error('已取消');   // 这轮已经问过了，不再骚扰
     __askBudget -= 1;
-    const kr = kring || LedgerCrypto.keyring();
     const hint = (force ? '这台设备存的密钥开不了这份数据（可能两台设备各自开启过加密）。' : '')
         + (kr && kr.hint ? `口令以 ${kr.hint} 开头。忘记口令可用恢复码。` : '输入口令或恢复码。');
     let lastError = '';
@@ -2693,7 +2801,7 @@ async function decodeBackupText(text) {
         for (let attempt = 0; attempt < 2 && !plain; attempt++) {
             try {
                 await ensureUnlocked(parsed.keyring, '这份备份是加密的', attempt > 0);
-                plain = await LedgerCrypto.decryptEnvelope(parsed);
+                plain = await LedgerCrypto.decryptEnvelope(parsed, __sessionSecret || undefined);
             } catch (e) {
                 lastMsg = (e && e.message) || String(e);
                 if (lastMsg === 'WRONG_KEY' && attempt === 0) continue;
@@ -15104,6 +15212,11 @@ async function init() {
     // 启动骨架：第一屏渲染完立刻移除，避免白屏（B 优化）
     const _bl = document.getElementById('bootLoading'); if (_bl) _bl.remove();
 
+    // v1.41.10：加密开着就先盖锁屏、只输一次口令，再往下跑同步。
+    // 放在首屏渲染之后、任何同步链路之前：底下已经是完整的界面（会被糊掉），
+    // 而 iCloud / Gist 都还没开始要钥匙，正好堵住「启动要输两次」。
+    await startupUnlockGate();
+
     // 桌面版：先把 iCloud 上的账本拉下来合并，再决定要不要塞示例数据，
     // 否则新机器上示例数据会和真实数据混在一起。
     if (isElectron()) {
@@ -15118,7 +15231,7 @@ async function init() {
     }
 
     // 关页面 / 切到后台时把待写入的数据立刻落盘
-    window.addEventListener('pagehide', () => { if (__saveTimer) flushState(); });
+    window.addEventListener('pagehide', () => { __sessionSecret = ''; if (__saveTimer) flushState(); });
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden' && __saveTimer) flushState();
     });

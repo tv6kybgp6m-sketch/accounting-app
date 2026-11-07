@@ -1423,6 +1423,31 @@
         <i class="fa-solid fa-plus"></i>
     </button>
 
+    <!-- v1.41.10：启动锁屏。开着加密时，首屏画完立刻盖住整个窗口，
+         只输一次口令放行；底下做毛玻璃，输之前看不到里面一点数据。
+         放在 app.js 之前，会话恢复（readyState 已是 complete）时也能立刻拿到这层 DOM。 -->
+    <div id="startupLock" class="hidden">
+        <div class="startup-lock-card">
+            <div class="sl-icon"><i class="fa-solid fa-lock"></i></div>
+            <h2>账本已锁定</h2>
+            <p class="sl-sub">输入加密口令（或恢复码）后打开账本</p>
+            <input type="password" class="text-input secret-input" id="startupLockInput"
+                   autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="口令或恢复码">
+            <div class="secret-error hidden" id="startupLockError"></div>
+            <label class="secret-peek sl-peek"><input type="checkbox" id="startupLockPeek"> 显示输入内容</label>
+            <button class="primary-btn" id="startupLockBtn" onclick="submitStartupLock()"><i class="fa-solid fa-lock-open"></i> 解锁并进入</button>
+            <div class="sl-foot">
+                口令只记在本次打开期间，不会写进本机文件。<br>
+                <button type="button" class="sl-forgot" id="startupLockForgot" onclick="startupLockForgot()">忘记口令？</button>
+            </div>
+            <div class="sl-foot hidden" id="startupLockForgotBox">
+                恢复码可以直接填在上面那个框里。<br>
+                两样都找不回来时，只能<b>不解锁直接进</b>：本机账本能看，但云端同步和加密备份这次打不开。
+                <button type="button" class="sl-forgot" onclick="startupLockBypass()">仍要打开账本（不解锁）</button>
+            </div>
+        </div>
+    </div>
+
     <script src="js/ledger-crypto.js"></script>
     <script src="js/fflate.min.js"></script>
     <script src="js/app.min.js"></script>
@@ -1446,7 +1471,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.9').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.10').catch(() => {});
             });
         }
     </script>

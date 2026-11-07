@@ -7,6 +7,10 @@
     --bg-window: #ececec;
     --bg-sidebar: rgba(245, 245, 247, 0.8);
     --bg-content: #f5f5f7;
+    /* v1.41.10：Mac 原生壳里侧栏比右边内容深一档，窗口才有层次；
+       网页版 / 手机继续用上面那个浅色，不跟着改。 */
+    --bg-sidebar-mac: rgba(226, 226, 231, 0.94);
+    --bg-lock-scrim: rgba(236, 236, 240, 0.42);
     --bg-card: #ffffff;
     --bg-card-hover: #f9f9fb;
     --bg-input: #ffffff;
@@ -73,6 +77,8 @@
     --bg-window: #1a1a1c;
     --bg-sidebar: rgba(40, 40, 43, 0.8);
     --bg-content: #1c1c1e;
+    --bg-sidebar-mac: rgba(24, 24, 27, 0.94);
+    --bg-lock-scrim: rgba(16, 16, 18, 0.55);
     --bg-card: #2c2c2e;
     --bg-card-hover: #343436;
     --bg-input: #3a3a3c;
@@ -207,6 +213,15 @@ body {
 body.native-shell {
     padding: 0;
     background: var(--bg-window);
+}
+
+/* v1.41.10：只在 Mac 原生壳里把左边分类调深。
+   原来侧栏是 rgba(245,245,247,.8) 叠在 --bg-window 上 ≈ #f3f3f4，
+   和右边 --bg-content #f5f5f7 差不到 2 个灰阶，肉眼看就是一整片；
+   换到 #e2e2e7 这一档并补一条分隔线，两块才分得开。 */
+body.native-shell .sidebar {
+    background: var(--bg-sidebar-mac);
+    border-right: 0.5px solid var(--border-strong);
 }
 
 .title-text {
@@ -5415,3 +5430,52 @@ table.bill-stats {
 
 /* 鼠标点选不显示焦点框，键盘 Tab 才显示（配合上面的 :focus-visible 基线） */
 .filter-select:focus:not(:focus-visible) { outline: none; }
+
+/* ===== v1.41.10：启动锁屏（加密开启时，输口令之前整个软件都糊掉） =====
+   双层遮挡：底下 .mac-window 整块 blur + 禁止点按，上面再盖一层半透明
+   毛玻璃。只留中间那张解锁卡是清晰的，任何金额、名字都读不出来。 */
+body.app-locked .mac-window {
+    filter: blur(14px);
+    pointer-events: none;
+    user-select: none;
+}
+body.app-locked .fab-add { display: none !important; }
+
+#startupLock {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 2147483000;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-lock-scrim);
+    backdrop-filter: blur(16px) saturate(115%);
+    -webkit-backdrop-filter: blur(16px) saturate(115%);
+}
+.startup-lock-card {
+    width: 340px; max-width: calc(100vw - 32px);
+    padding: 28px 26px 22px;
+    background: var(--bg-modal);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    text-align: center;
+}
+.sl-icon {
+    width: 52px; height: 52px; margin: 0 auto 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; color: var(--accent-text);
+    background: var(--accent-light);
+    border-radius: 50%;
+}
+.startup-lock-card h2 {
+    font-size: 18px; font-weight: 600; color: var(--text-primary); margin: 0 0 6px;
+}
+.sl-sub { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0 0 18px; }
+#startupLockInput { text-align: center; }
+.sl-peek { justify-content: center; margin-bottom: 16px; }
+#startupLockBtn { width: 100%; }
+.sl-foot { margin-top: 14px; font-size: 12px; color: var(--text-muted); line-height: 1.7; }
+.sl-forgot {
+    border: 0; background: none; padding: 4px 6px;
+    color: var(--accent-text); font-size: 12px; cursor: pointer;
+    border-radius: var(--radius-sm);
+}
+.sl-forgot:hover { background: var(--accent-light); }
