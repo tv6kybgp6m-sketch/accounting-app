@@ -201,6 +201,14 @@ body {
     box-shadow: none;
 }
 
+/* v1.41.7：原生壳里页面要铺满整个窗口。网页 body 默认有 20px 内边距 + 灰色渐变底，
+   会把那圈灰边露在窗口四周，看起来和 Mac 标题栏"接不上"。原生壳下直接把内边距归零、
+   底色换成窗口色，缩放时再也不会闪出灰边，界面才像一个整体。 */
+body.native-shell {
+    padding: 0;
+    background: var(--bg-window);
+}
+
 .title-text {
     position: absolute;
     left: 50%;
@@ -3942,6 +3950,19 @@ table.bill-stats {
     background: var(--bg-input); color: var(--text-primary);
 }
 .ins-row:not(.on) .ins-amt, .ins-row:not(.on) .ins-prem { opacity: 0.5; }
+
+/* 险种行的「⋯ 更多」按钮：平时隐藏，鼠标移入整行才淡显，点开弹出 修改/删除 菜单（同月度账单那一格）。
+   作为行尾的弹性子项占位，不绝对定位，避免压住右侧的「理赔记录」按钮。 */
+.ins-type-more {
+    flex-shrink: 0; margin-left: 2px;
+    width: 22px; height: 22px; line-height: 20px; padding: 0;
+    border: none; border-radius: var(--radius-sm); cursor: pointer;
+    color: var(--text-muted); background: transparent; opacity: 0; transition: opacity .15s;
+}
+.ins-row:hover .ins-type-more { opacity: .65; }
+.ins-type-more:hover, .ins-type-more:focus { opacity: 1 !important; color: var(--accent-text); background: rgba(10, 132, 255, .12); }
+/* 触屏没有 hover，直接常显，否则改名/删除在手机上摸不到入口 */
+@media (pointer: coarse) { .ins-type-more { opacity: .65; } }
 
 /* 账户归类弹窗 */
 .facct-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 2px; border-bottom: 0.5px solid var(--divider); }

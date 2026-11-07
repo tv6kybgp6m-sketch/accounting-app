@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.6';
+const APP_VERSION = '1.41.7';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -12406,12 +12406,11 @@ function renderInsuranceSection() {
                 <span class="ins-box"><i class="fa-solid fa-check"></i></span>
             </label>
             <span class="ins-type">${type}</span>
-            <i class="fa-solid fa-pen ins-type-act" data-ins-type-act="rename" data-type="${type}" title="改名"></i>
-            <i class="fa-solid fa-xmark ins-type-act" data-ins-type-act="del" data-type="${type}" title="删除"></i>
             <span class="ins-field"><em>保额</em><input type="number" class="ins-amt" data-type="${type}" value="${p && p.amount ? p.amount : ''}" placeholder="0" inputmode="decimal"></span>
             <span class="ins-field"><em>年保费</em><input type="number" class="ins-prem" data-type="${type}" value="${p && p.premium ? p.premium : ''}" placeholder="0" inputmode="decimal"></span>
-            <span class="ins-field ins-renew"><em>下次缴费/到期</em><input type="date" class="ins-renew-at" data-type="${type}" value="${p && p.renewAt ? p.renewAt : ''}"><button type="button" class="ins-renew-clear" data-ins-clear="${type}" title="不填提醒日期">清除</button></span>
+            <span class="ins-field ins-renew"><em>下次缴费/到期</em><input type="date" class="ins-renew-at" data-type="${type}" value="${p && p.renewAt ? p.renewAt : ''}"></span>
             <button class="link-btn ins-claim-btn" type="button" data-claim="${type}">${claimSum(p)}${p && p.claims && p.claims.length ? `（${p.claims.length} 次）` : ''}</button>
+            <button class="ins-type-more" type="button" data-ins-more="${type}" title="更多操作"><i class="fa-solid fa-ellipsis"></i></button>
         </div>`;
     }).join('') + `<button class="ins-type-add" data-ins-type-add="1"><i class="fa-solid fa-plus"></i> 险种</button>`;
 
@@ -12423,19 +12422,22 @@ function renderInsuranceSection() {
         upsertIns(inp.dataset.type, { renewAt: v || null });
     }));
     listBox.querySelectorAll('[data-claim]').forEach(btn => btn.addEventListener('click', () => openInsClaims(btn.dataset.claim)));
-    // 险种改名 / 删除
-    listBox.querySelectorAll('[data-ins-type-act]').forEach(el => el.addEventListener('click', e => {
+    // 险种「⋯ 更多」浮层菜单：修改名称 / 清除缴费日期 / 删除。
+    // 平时行尾的 ⋯ 是隐藏的，鼠标移到这一行才淡显，点一下才弹出菜单（和月度账单那一格同款交互）。
+    listBox.querySelectorAll('[data-ins-more]').forEach(btn => btn.addEventListener('click', e => {
         e.stopPropagation();
-        const type = el.dataset.type;
-        if (el.dataset.insTypeAct === 'rename') renameInsuranceType(type);
-        else if (el.dataset.insTypeAct === 'del') deleteInsuranceType(type);
-    }));
-    // 缴费日期「清除」：大多数自动续费不必填提醒日期，一键清空 renewAt
-    listBox.querySelectorAll('[data-ins-clear]').forEach(btn => btn.addEventListener('click', () => {
+        const type = btn.dataset.insMore;
         const row = btn.closest('.ins-row');
-        const inp = row && row.querySelector('.ins-renew-at');
-        if (inp) inp.value = '';
-        upsertIns(btn.dataset.insClear, { renewAt: null });
+        const r = btn.getBoundingClientRect();
+        openMwMenu(r.left, r.bottom + 4, [
+            { label: '修改名称', icon: 'fa-pen', onClick: () => renameInsuranceType(type) },
+            { label: '清除缴费日期', icon: 'fa-calendar-xmark', onClick: () => {
+                const inp = row && row.querySelector('.ins-renew-at');
+                if (inp) inp.value = '';
+                upsertIns(type, { renewAt: null });
+            } },
+            { label: '删除', icon: 'fa-trash', danger: true, onClick: () => deleteInsuranceType(type) },
+        ]);
     }));
     const addTypeBtn = listBox.querySelector('[data-ins-type-add]');
     if (addTypeBtn) addTypeBtn.addEventListener('click', () => addInsType());
