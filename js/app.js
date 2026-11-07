@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.5';
+const APP_VERSION = '1.41.6';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -308,13 +308,15 @@ let state = {
     reportPeriod: 'month',
     reportYear: null,
     reportMonth: null,
-    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [], recurring: [], cols: [], currencies: [] },  // soft-delete markers  // soft-delete markers
+    deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [], insuranceTypes: [], recurring: [], cols: [], currencies: [] },  // soft-delete markers  // soft-delete markers
     pmAddedAt: {},          // payment method name -> when it was added (names are the identity)
     lastExportAt: 0,        // 最近一次导出的时间戳，用于备份提醒
     fundTargets: { cash: 0, steady: 0, growth: 0 },
     insuranceMembers: [...DEFAULT_INSURANCE_MEMBERS],
     insuranceMemberAddedAt: {},  // 保险成员名 -> 添加时间（名字即身份，同家庭成员）
     insurancePolicies: [],   // {id, type, member, covered, amount, premium, createdAt, updatedAt}
+    insuranceTypes: [...INSURANCE_TYPES],   // 险种清单（可改名 / 删除，名字即身份，同保险成员）
+    insuranceTypeAddedAt: {},  // 险种名 -> 添加时间（名字即身份，删除按墓碑裁决）
     balanceMembers: ['本人'],   // 家庭资产负债表的成员名单
     memberAddedAt: {},        // 成员名 -> 添加时间（名字就是身份，同支付方式的做法）
     balanceOwner: 'all',       // 当前筛选：'all' 或某成员
@@ -359,9 +361,11 @@ function ensureArrayFields() {
         }
     });
     ['transactions','categories','budgets','paymentMethods','accounts','balances','returns','recurring',
-     'members','insuranceMembers','insurance','cols','currencies'].forEach(k => {
+     'members','insuranceMembers','insurance','insuranceTypes','cols','currencies'].forEach(k => {
         if (!Array.isArray(state.deleted[k])) state.deleted[k] = [];
     });
+    if (!Array.isArray(state.insuranceTypes)) state.insuranceTypes = [];
+    if (!state.insuranceTypeAddedAt || typeof state.insuranceTypeAddedAt !== 'object') state.insuranceTypeAddedAt = {};
 }
 
 // ============================================================
@@ -675,6 +679,7 @@ const UNDO_BUCKET = {
     transactions: 'transactions', balances: 'balances', returns: 'returns',
     accounts: 'accounts', categories: 'categories', budgets: 'budgets',
     insurancePolicies: 'insurance', paymentMethods: 'paymentMethods',
+    insuranceMembers: 'insuranceMembers', insuranceTypes: 'insuranceTypes',
     recurring: 'recurring',
 };
 let __undoStack = [];
@@ -758,6 +763,17 @@ function undoLastDelete() {
                     state.deleted.insuranceMembers = state.deleted.insuranceMembers.filter(t => t.id !== name);
                 }
             });
+        } else if (coll === 'insuranceTypes') {
+            // 险种名是字符串身份，撤销要连「添加时间」一起复活，否则会被自己的墓碑吃掉（同保险成员）。
+            items.forEach(name => {
+                if (!state.insuranceTypes.includes(name)) {
+                    state.insuranceTypes.push(name);
+                    state.insuranceTypeAddedAt[name] = Date.now();
+                }
+                if (Array.isArray(state.deleted.insuranceTypes)) {
+                    state.deleted.insuranceTypes = state.deleted.insuranceTypes.filter(t => t.id !== name);
+                }
+            });
         } else if (coll === 'sheetCols') {
             // 把删掉的列按原位置插回去，并清掉它的墓碑
             items.forEach(s => {
@@ -804,7 +820,7 @@ function undoLastDelete() {
     saveState();
     refreshOpenSurfaces();
     if (op.rows.members) renderAccountManageList();
-    if (op.rows.insuranceMembers || op.rows.insurancePolicies) renderFourFunds();
+    if (op.rows.insuranceMembers || op.rows.insurancePolicies || op.rows.insuranceTypes) renderFourFunds();
     showToast('已撤销：' + op.label, 'success');
     return true;
 }
@@ -1254,6 +1270,7 @@ function normalizeTombstones(raw) {
         members: clean(src.members),
         insuranceMembers: clean(src.insuranceMembers),
         insurance: clean(src.insurance),
+        insuranceTypes: clean(src.insuranceTypes),
         recurring: clean(src.recurring),
         cols: clean(src.cols),
         currencies: clean(src.currencies),   // v1.39.92：删掉的币种也要有墓碑
@@ -1362,6 +1379,10 @@ function repairNameLists() {
     }
     if (!state.balanceMembers.length) { state.balanceMembers = ['本人']; changed = true; }
     if (!state.insuranceMembers.length) { state.insuranceMembers = [...DEFAULT_INSURANCE_MEMBERS]; changed = true; }
+    // v1.41.6：险种清单改为可编辑（改名 / 删除）。老账本没有这个字段，用默认 8 种补齐。
+    if (!state.insuranceTypes || !state.insuranceTypes.length) { state.insuranceTypes = [...INSURANCE_TYPES]; changed = true; }
+    state.insuranceTypeAddedAt = normalizeAddedAtMap(state.insuranceTypeAddedAt || {});
+    if (!Array.isArray(state.deleted.insuranceTypes)) state.deleted.insuranceTypes = [];
     // 垃圾墓碑：名字数组的墓碑 id 必须是真名字。
     // `addTombstone('paymentMethods', obj)` 会写出 `{id:"[object Object]"}` 这种。
     [['paymentMethods', 'pmAddedAt'], ['members', 'memberAddedAt'], ['insuranceMembers', 'insuranceMemberAddedAt']]
@@ -1453,6 +1474,17 @@ function applyTombstones() {
             return (state.insuranceMemberAddedAt[name] || 0) > at;
         });
         if (keptIns.length > 0) state.insuranceMembers = keptIns;
+    }
+
+    // 险种清单：同保险成员，按墓碑 vs 添加时间裁决
+    const itMarks = new Map(state.deleted.insuranceTypes.map(m => [m.id, m.deletedAt]));
+    if (itMarks.size) {
+        const keptTypes = state.insuranceTypes.filter(name => {
+            const at = itMarks.get(name);
+            if (at === undefined) return true;
+            return (state.insuranceTypeAddedAt[name] || 0) > at;
+        });
+        if (keptTypes.length > 0) state.insuranceTypes = keptTypes;
     }
 
     // Payment methods are plain strings with no per-row timestamp, so "when was
@@ -1558,6 +1590,8 @@ function buildSyncPayload() {
             insuranceMembers: state.insuranceMembers,
             insuranceMemberAddedAt: state.insuranceMemberAddedAt,
             insurancePolicies: state.insurancePolicies,
+            insuranceTypes: state.insuranceTypes,
+            insuranceTypeAddedAt: state.insuranceTypeAddedAt,
             settings: settingsForSync,
             deleted: state.deleted,
             pmAddedAt: state.pmAddedAt,
@@ -1712,6 +1746,11 @@ function fingerprintOfPayload(p) {
         JSON.stringify(d.fxRates || {}),
         sig(del.transactions), sig(del.balances), sig(del.returns), sig(del.accounts), sig(del.insurance),
         sig(del.recurring), sig(del.cols),
+        // v1.41.6：险种清单（改名 / 删除）也要进指纹，否则某台设备改了险种名、删除险种后，
+        // 指纹不变、remotePush 误判「远端已是这份」而跳过上传，别的设备收不到。
+        (d.insuranceTypes || []).slice().sort().join(','),
+        JSON.stringify(d.insuranceTypeAddedAt || {}),
+        sig(del.insuranceTypes),
         String((p && p.tokenExpiresAt) || 0),
         String((p && p.tokenExpiresAtAt) || 0),
     ].join('|');
@@ -1810,6 +1849,7 @@ function mergeRemoteData(remoteData) {
         members: mergeTombstoneList(state.deleted.members, remoteDeleted.members),
         insuranceMembers: mergeTombstoneList(state.deleted.insuranceMembers, remoteDeleted.insuranceMembers),
         insurance: mergeTombstoneList(state.deleted.insurance, remoteDeleted.insurance),
+        insuranceTypes: mergeTombstoneList(state.deleted.insuranceTypes, remoteDeleted.insuranceTypes),
         recurring: mergeTombstoneList(state.deleted.recurring, remoteDeleted.recurring),
         cols: mergeTombstoneList(state.deleted.cols || [], remoteDeleted.cols),
         // v1.39.92：币种删除也要随同步走 —— 不然删掉的币种会被云端那份「并集」重新搬回来
@@ -1868,6 +1908,15 @@ function mergeRemoteData(remoteData) {
     const remoteInsAdded = normalizeAddedAtMap(remote.insuranceMemberAddedAt);
     Object.keys(remoteInsAdded).forEach(k => {
         if (!state.insuranceMemberAddedAt[k] || remoteInsAdded[k] > state.insuranceMemberAddedAt[k]) state.insuranceMemberAddedAt[k] = remoteInsAdded[k];
+    });
+    // v1.41.6：险种清单（名字即身份）按并集合并；删除靠下面的墓碑生效。
+    if (Array.isArray(remote.insuranceTypes)) {
+        const seen = new Set(state.insuranceTypes);
+        remote.insuranceTypes.forEach(t => { if (!seen.has(t)) { seen.add(t); state.insuranceTypes.push(t); } });
+    }
+    const remoteTypeAdded = normalizeAddedAtMap(remote.insuranceTypeAddedAt);
+    Object.keys(remoteTypeAdded).forEach(k => {
+        if (!state.insuranceTypeAddedAt[k] || remoteTypeAdded[k] > state.insuranceTypeAddedAt[k]) state.insuranceTypeAddedAt[k] = remoteTypeAdded[k];
     });
     // 周期规则：按 id 并集、较新的一份赢；删除靠上面的墓碑生效
     const ruleMap = new Map();
@@ -3536,6 +3585,9 @@ function loadState() {
             state.fundTargets = { cash: 0, steady: 0, growth: 0, ...(data.fundTargets || {}) };
             state.insuranceMembers = Array.isArray(data.insuranceMembers) && data.insuranceMembers.length ? data.insuranceMembers : [...DEFAULT_INSURANCE_MEMBERS];
             state.insuranceMemberAddedAt = normalizeAddedAtMap(data.insuranceMemberAddedAt);
+            // v1.41.6：险种清单改为可编辑；旧账本没有就种默认 8 种。
+            state.insuranceTypes = Array.isArray(data.insuranceTypes) && data.insuranceTypes.length ? data.insuranceTypes : [...INSURANCE_TYPES];
+            state.insuranceTypeAddedAt = normalizeAddedAtMap(data.insuranceTypeAddedAt);
             state.insurancePolicies = Array.isArray(data.insurancePolicies) ? data.insurancePolicies : [];
             state.balanceMembers = Array.isArray(data.balanceMembers) && data.balanceMembers.length ? data.balanceMembers : ['本人'];
             state.memberAddedAt = normalizeAddedAtMap(data.memberAddedAt);
@@ -4209,8 +4261,10 @@ function renderTxnAnomalyHint() {
         else if (r.indexOf('重复记账') >= 0) dup++;
     }));
     if (!amountAnomaly && !dup) {
+        // v1.41.6：没有待处理异常时，不再追加「· 已排除 N 笔」——
+        // 用户要求：没异常或都已排除就直接显示「未发现异常」，别再显示多少笔。
         el.className = 'txn-anomaly-hint ok';
-        el.innerHTML = '<i class="fa-solid fa-circle-check"></i> 未发现异常金额或重复记账' + excludedInfo;
+        el.innerHTML = '<i class="fa-solid fa-circle-check"></i> 未发现异常金额或重复记账';
         el.onclick = null;
         return;
     }
@@ -7249,7 +7303,7 @@ function resetLocalData() {
     // 本机重置：连本地删除标记一起清空，确保同步时不会把任何墓碑
     //（含之前「清空全部」留下的全量墓碑、或单条删除的墓碑）传到别的设备。
     // 之后同步从云端把共享的删除标记和账本一起拉回来，本机与其它设备一致、但绝不多删。
-    state.deleted = { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [], recurring: [], cols: [] };
+    state.deleted = { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [], insuranceTypes: [], recurring: [], cols: [], currencies: [] };
     saveState();
     renderView(state.currentView);
     refreshAccountLists();
@@ -7394,12 +7448,12 @@ function renderBalanceSelectors() {
     const period = state.balancePeriod;
     if (wrap) wrap.classList.toggle('hidden', period === 'all');
     if (!label) return;
-    // v1.39.75：默认（以及「当月及以后」）一律停在「上个月」——
-    // 当月还没记，要到下个月才记，停在当月只会看到一片空白。
-    // 手动选过过去的某个月，就以他的选择为准。
+    // v1.39.75：未选过时默认停在「上个月」—— 当月通常还没记，进去会一片空白。
+    // v1.41.6：只在「从未选过」时才回退上个月；用户一旦自己选了某个月（含当前月），
+    // 就尊重他的选择，不再强制回退，这样净资产变动桥才能真正跟时间联动。
     const now = new Date();
     let cur = Number(state.balanceYear) || 0, cm = Number(state.balanceMonth) || 0;
-    if (!cur || !cm || cur > now.getFullYear() || (cur === now.getFullYear() && cm >= now.getMonth() + 1)) {
+    if (!cur || !cm) {
         const p = prevMonthYM();
         cur = p.y; cm = p.m;
     }
@@ -7536,9 +7590,9 @@ function renderBalance() {
 // ==================== 净资产变动桥 ====================
 // 流水和余额快照是两套独立记录：收入支出走流水，市值涨跌走余额。
 // 两边一减，剩下的"待核对"就是漏记、多记或者没录的收益 —— 这才是这张图的价值。
-function netWorthBridge(month) {
+function netWorthBridge(month, prevMonth) {
     const member = state.balanceOwner;
-    const prev = previousMonthOf(month);
+    const prev = prevMonth || previousMonthOf(month);
     const prevCat = prev ? balancesByCat(prev, member) : {};
     const curCat = balancesByCat(month, member);
     const openT = totalsFromCat(prevCat);
@@ -7572,17 +7626,39 @@ function netWorthBridge(month) {
     };
 }
 
+// v1.41.6：净资产变动桥跟随上方时间选择器 —— 不再永远只比「上个月」。
+// month 模式：选定月 vs 上月；year 模式：该年最后有记录月 vs 上一年最后有记录月；all：最后有记录月 vs 上月。
+function netBridgeMonths(info) {
+    const months = balanceMonths();
+    if (!months.length) return null;
+    if (info.period === 'year') {
+        const selYear = state.balanceYear || new Date().getFullYear();
+        const inYear = months.filter(m => m.slice(0, 4) === String(selYear));
+        const cur = inYear.length ? inYear[inYear.length - 1] : null;
+        if (!cur) return null;
+        const prevYearMonths = months.filter(m => m.slice(0, 4) === String(selYear - 1));
+        const prev = prevYearMonths.length ? prevYearMonths[prevYearMonths.length - 1] : previousMonthOf(cur);
+        return { cur, prev };
+    }
+    const cur = info.month;
+    if (!cur) return null;
+    return { cur, prev: previousMonthOf(cur) };
+}
+
 function renderNetBridge() {
     const card = document.getElementById('bridgeCard');
     if (!card) return;
     const info = balancePeriodInfo();
-    if (!info.month) { card.classList.add('hidden'); return; }
-    const b = netWorthBridge(info.month);
+    const mp = netBridgeMonths(info);
+    if (!mp) { card.classList.add('hidden'); return; }
+    const b = netWorthBridge(mp.cur, mp.prev);
     if (!b.closeKnown) { card.classList.add('hidden'); return; }
     card.classList.remove('hidden');
 
     document.getElementById('bridgeSubtitle').textContent =
-        `${info.month.replace('-', '年')}月 · ${state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner}`;
+        info.period === 'year'
+            ? `${state.balanceYear || new Date().getFullYear()} 全年变动 · ${state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner}`
+            : `${mp.cur.replace('-', '年')}月 · ${state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner}`;
 
     const sign = v => maskMoneySigned(v);
     const rows = [
@@ -8190,36 +8266,24 @@ function renderBalanceBreakdown() {
     const grandAsset = sheetAssetCats().reduce((s, c) => s + (cat[c.key] || 0), 0);
     const grandLiab = sheetLiabCats().reduce((s, c) => s + (cat[c.key] || 0), 0);
     const grand = metric === 'liability' ? grandLiab : (metric === 'asset' ? grandAsset : grandAsset + grandLiab);
-    const top = Math.max(grand, 1);
+
+    // v1.41.6：资产构成（按类别）按金额从多到少排列，不再按默认列顺序。
+    // 原本资产、负债各自按固定列顺序渲染；现在合并后统一按金额降序，占比最高的排最上。
+    const liabKeys = new Set(sheetLiabCats().map(c => c.key));
+    const items = sheetAssetCats().concat(sheetLiabCats())
+        .map(c => ({ c, v: cat[c.key] || 0 }))
+        .filter(x => x.v > 0)
+        .sort((a, b) => b.v - a.v);
+    const top = items.length ? items[0].v : 1;
 
     let html = '';
-    sheetAssetCats().forEach(c => {
-        const v = cat[c.key] || 0;
-        if (v <= 0) return;
+    items.forEach(({ c, v }) => {
         const pct = grand ? (v / grand) * 100 : 0;
+        const defIcon = liabKeys.has(c.key) ? 'fa-credit-card' : 'fa-chart-pie';
         html += `
         <div class="breakdown-item" onclick="openAccountHistoryForPeriod('${info.month}','${_esc(c.label)}')">
             <div class="breakdown-icon" style="background:${c.color}22;color:${c.color}">
-                <i class="fa-solid ${c.icon || 'fa-chart-pie'}"></i>
-            </div>
-            <div class="breakdown-main">
-                <div class="breakdown-head">
-                    <span class="breakdown-name">${_esc(c.label)}</span>
-                    <span class="breakdown-amount">${maskMoney(v)}<em>${pct.toFixed(1)}%</em></span>
-                </div>
-                <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (v / top) * 100)}%;background:${c.color}"></div></div>
-            </div>
-        </div>`;
-    });
-    // 负债单列一项（按用户自定义的负债列，可能不止一列）
-    sheetLiabCats().forEach(c => {
-        const v = cat[c.key] || 0;
-        if (v <= 0) return;
-        const pct = grand ? (v / grand) * 100 : 0;
-        html += `
-        <div class="breakdown-item" onclick="openAccountHistoryForPeriod('${info.month}','${_esc(c.label)}')">
-            <div class="breakdown-icon" style="background:${c.color}22;color:${c.color}">
-                <i class="fa-solid ${c.icon || 'fa-credit-card'}"></i>
+                <i class="fa-solid ${c.icon || defIcon}"></i>
             </div>
             <div class="breakdown-main">
                 <div class="breakdown-head">
@@ -12075,10 +12139,10 @@ function insTypeAmount(type) {
         .reduce((s, p) => s + (Number(p.amount) || 0), 0);
 }
 function insCoveredCount() {
-    return INSURANCE_TYPES.filter(insTypeCovered).length;
+    return state.insuranceTypes.filter(insTypeCovered).length;
 }
 function insTotalAmount() {
-    return INSURANCE_TYPES.reduce((s, t) => s + insTypeAmount(t), 0);
+    return state.insuranceTypes.reduce((s, t) => s + insTypeAmount(t), 0);
 }
 // 某个成员名下的年保费（只算已配置的；没勾上的那份不算钱）
 function memberPremium(member) {
@@ -12131,9 +12195,9 @@ function renderFundQuadrant() {
     const insDone = insCoveredCount();
     cells.push(`
         <div class="fq-cell fq-ins" style="--fq-color:#af52de">
-            <div class="fq-fill" style="width:${(insDone / INSURANCE_TYPES.length * 100).toFixed(0)}%"></div>
+            <div class="fq-fill" style="width:${(insDone / state.insuranceTypes.length * 100).toFixed(0)}%"></div>
             <div class="fq-name"><i class="fa-solid fa-umbrella"></i> 保险保障</div>
-            <div class="fq-act">${insDone}/${INSURANCE_TYPES.length} 已配</div>
+            <div class="fq-act">${insDone}/${state.insuranceTypes.length} 已配</div>
             <div class="fq-meta">总保额 ${maskMoney(insTotalAmount())}</div>
         </div>`);
     box.innerHTML = cells.join('');
@@ -12332,7 +12396,7 @@ function renderInsuranceSection() {
         });
     }
 
-    listBox.innerHTML = INSURANCE_TYPES.map(type => {
+    listBox.innerHTML = state.insuranceTypes.map(type => {
         const p = insPolicy(type, fundEditMember);
         const covered = !!(p && p.covered);
         return `
@@ -12342,12 +12406,14 @@ function renderInsuranceSection() {
                 <span class="ins-box"><i class="fa-solid fa-check"></i></span>
             </label>
             <span class="ins-type">${type}</span>
+            <i class="fa-solid fa-pen ins-type-act" data-ins-type-act="rename" data-type="${type}" title="改名"></i>
+            <i class="fa-solid fa-xmark ins-type-act" data-ins-type-act="del" data-type="${type}" title="删除"></i>
             <span class="ins-field"><em>保额</em><input type="number" class="ins-amt" data-type="${type}" value="${p && p.amount ? p.amount : ''}" placeholder="0" inputmode="decimal"></span>
             <span class="ins-field"><em>年保费</em><input type="number" class="ins-prem" data-type="${type}" value="${p && p.premium ? p.premium : ''}" placeholder="0" inputmode="decimal"></span>
-            <span class="ins-field ins-renew"><em>下次缴费/到期</em><input type="date" class="ins-renew-at" data-type="${type}" value="${p && p.renewAt ? p.renewAt : ''}"></span>
+            <span class="ins-field ins-renew"><em>下次缴费/到期</em><input type="date" class="ins-renew-at" data-type="${type}" value="${p && p.renewAt ? p.renewAt : ''}"><button type="button" class="ins-renew-clear" data-ins-clear="${type}" title="不填提醒日期">清除</button></span>
             <button class="link-btn ins-claim-btn" type="button" data-claim="${type}">${claimSum(p)}${p && p.claims && p.claims.length ? `（${p.claims.length} 次）` : ''}</button>
         </div>`;
-    }).join('');
+    }).join('') + `<button class="ins-type-add" data-ins-type-add="1"><i class="fa-solid fa-plus"></i> 险种</button>`;
 
     listBox.querySelectorAll('.ins-check input').forEach(cb => cb.addEventListener('change', () => upsertIns(cb.dataset.type, { covered: cb.checked })));
     listBox.querySelectorAll('.ins-amt').forEach(inp => inp.addEventListener('change', () => upsertIns(inp.dataset.type, { amount: parseFloat(inp.value) || 0 })));
@@ -12357,6 +12423,22 @@ function renderInsuranceSection() {
         upsertIns(inp.dataset.type, { renewAt: v || null });
     }));
     listBox.querySelectorAll('[data-claim]').forEach(btn => btn.addEventListener('click', () => openInsClaims(btn.dataset.claim)));
+    // 险种改名 / 删除
+    listBox.querySelectorAll('[data-ins-type-act]').forEach(el => el.addEventListener('click', e => {
+        e.stopPropagation();
+        const type = el.dataset.type;
+        if (el.dataset.insTypeAct === 'rename') renameInsuranceType(type);
+        else if (el.dataset.insTypeAct === 'del') deleteInsuranceType(type);
+    }));
+    // 缴费日期「清除」：大多数自动续费不必填提醒日期，一键清空 renewAt
+    listBox.querySelectorAll('[data-ins-clear]').forEach(btn => btn.addEventListener('click', () => {
+        const row = btn.closest('.ins-row');
+        const inp = row && row.querySelector('.ins-renew-at');
+        if (inp) inp.value = '';
+        upsertIns(btn.dataset.insClear, { renewAt: null });
+    }));
+    const addTypeBtn = listBox.querySelector('[data-ins-type-add]');
+    if (addTypeBtn) addTypeBtn.addEventListener('click', () => addInsType());
     const banner = document.getElementById('insRenewBanner');
     if (banner) { banner.innerHTML = insRenewSummary(); banner.classList.toggle('hidden', !insUpcomingRenewals(30).length); }
     updateInsBadges();
@@ -12531,6 +12613,57 @@ function addInsMember() {
     const oldMark = state.deleted.insuranceMembers.find(m => m.id === n);
     if (oldMark) oldMark.deletedAt = Math.min(oldMark.deletedAt, state.insuranceMemberAddedAt[n] - 1);
     fundEditMember = n;
+    saveState();
+    renderFourFunds();
+}
+
+// ---- 险种改名 / 删除 / 添加（名字即身份；删除按墓碑裁决，防云端把旧名搬回来）----
+function renameInsuranceType(oldType) {
+    const name = prompt('修改险种名称', oldType);
+    if (!name || !name.trim() || name.trim() === oldType) return;
+    const n = name.trim();
+    if (state.insuranceTypes.includes(n)) { showToast('已有同名险种', 'error'); return; }
+    state.insuranceTypes = state.insuranceTypes.map(t => t === oldType ? n : t);
+    // 保单 id 是 险种__成员，改名要连保单一起改，否则旧 id 的保单会悬空。
+    state.insurancePolicies.forEach(p => {
+        if (p.type !== oldType) return;
+        p.type = n;
+        p.id = insurancePolicyId(n, p.member);
+        p.updatedAt = Date.now();
+    });
+    state.insuranceTypeAddedAt[n] = Date.now();
+    addTombstone('insuranceTypes', oldType);   // 不留墓碑的话，并集合并会把旧名留在别的设备
+    delete state.insuranceTypeAddedAt[oldType];
+    saveState();
+    renderFourFunds();
+}
+
+function deleteInsuranceType(type) {
+    if (state.insuranceTypes.length <= 1) { showToast('至少保留一个险种', 'error'); return; }
+    const mine = state.insurancePolicies.filter(p => p.type === type);
+    if (!confirm(`删除险种「${type}」？${mine.length ? `它名下的 ${mine.length} 份保单会一起删掉（8 秒内可撤销）。` : '它名下没有保单。'}`)) return;
+    mine.forEach(pc => addTombstone('insurance', pc.id));
+    state.insurancePolicies = state.insurancePolicies.filter(pc => pc.type !== type);
+    state.insuranceTypes = state.insuranceTypes.filter(t => t !== type);
+    addTombstone('insuranceTypes', type);
+    delete state.insuranceTypeAddedAt[type];
+    const canUndo = pushUndo(`险种「${type}」`, { insuranceTypes: [type], insurancePolicies: mine });
+    saveState();
+    refreshOpenSurfaces();
+    renderFourFunds();
+    if (canUndo) showUndoToast(`险种「${type}」`);
+    else showToast('险种已删除', 'success');
+}
+
+function addInsType() {
+    const name = prompt('险种名称（如：旅行险、防癌险）');
+    if (!name || !name.trim()) return;
+    const n = name.trim();
+    if (state.insuranceTypes.includes(n)) { showToast('已有该险种', 'error'); return; }
+    state.insuranceTypes.push(n);
+    state.insuranceTypeAddedAt[n] = Date.now();
+    const oldMark = state.deleted.insuranceTypes.find(m => m.id === n);
+    if (oldMark) oldMark.deletedAt = Math.min(oldMark.deletedAt, state.insuranceTypeAddedAt[n] - 1);
     saveState();
     renderFourFunds();
 }

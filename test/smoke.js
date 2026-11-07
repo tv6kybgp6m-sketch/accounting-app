@@ -560,6 +560,31 @@ function run() {
         ok('另一台设备的旧 true 不会把「恢复」搬回来',
             ev("(function(){try{state.closedExclude={a_x:false};mergeRemoteData({data:{closedExclude:{a_x:true}}});return state.closedExclude.a_x===false;}catch(e){return false;}})()"));
 
+        // ---------- 18) v1.41.6：四项改动的回归 ----------
+        stage = '18';
+        // 18a) 交易异常提示：无异常时不显示「已排除 N 笔」
+        ev("state.transactions=[{id:'t1',type:'expense',amount:10,date:'2026-11-01',categoryId:'c1',member:'本人'}]; state.excludedAnomalies={t1:true}; renderTxnAnomalyHint();");
+        ok('无异常时只显示「未发现异常」，不显示「已排除 N 笔」',
+            ev("document.getElementById('txnAnomalyHint').innerHTML.indexOf('已排除')<0 && document.getElementById('txnAnomalyHint').innerHTML.indexOf('未发现异常')>=0"),
+            ev("document.getElementById('txnAnomalyHint').innerHTML"));
+
+        // 18b) 净资产变动桥跟随时间选择器：year 取该年最后有记录月 vs 上一年最后有记录月
+        ev("state.balances=[{id:'本人__a__CNY__asset__2025-11',member:'本人',accountId:'a',cur:'CNY',cat:'asset',amount:100,month:'2025-11',updatedAt:1},{id:'本人__a__CNY__asset__2026-03',member:'本人',accountId:'a',cur:'CNY',cat:'asset',amount:200,month:'2026-03',updatedAt:2},{id:'本人__a__CNY__asset__2026-05',member:'本人',accountId:'a',cur:'CNY',cat:'asset',amount:300,month:'2026-05',updatedAt:3}]; state.balanceOwner='本人';");
+        ev("state.balancePeriod='year'; state.balanceYear=2026;");
+        const nb = ev("(function(){var info={period:'year'};var mp=netBridgeMonths(info);return mp?mp.cur+'|'+mp.prev:'null';})()");
+        ok('净资产桥 year 模式：该年最后有记录月 vs 上一年最后有记录月', nb === '2026-05|2025-11', nb);
+        ev("state.balancePeriod='month'; state.balanceYear=2026; state.balanceMonth=3;");
+        const nb2 = ev("(function(){var info=balancePeriodInfo();var mp=netBridgeMonths(info);return mp?mp.cur+'|'+mp.prev:'null';})()");
+        ok('净资产桥 month 模式：选定月 vs 上月', nb2 === '2026-03|2026-02', nb2);
+
+        // 18c) 保险险种：远端名单并集 + 删除墓碑跨设备生效
+        ev("state.insuranceTypes=['重疾险','医疗险'];");
+        ev("mergeRemoteData({data:{insuranceTypes:['重疾险','医疗险','意外险']}});");
+        ok('合并远端险种清单（并集，不丢本地）', ev("state.insuranceTypes.indexOf('意外险')>=0 && state.insuranceTypes.length===3"), ev("JSON.stringify(state.insuranceTypes)"));
+        ev("addTombstone('insuranceTypes','意外险');");
+        const itAfter = ev("(function(){applyTombstones();return state.insuranceTypes.indexOf('意外险');})()");
+        ok('险种删除墓碑生效（applyTombstones 把它从清单剔除）', itAfter < 0, itAfter);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));
