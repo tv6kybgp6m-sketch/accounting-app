@@ -602,6 +602,37 @@ function run() {
             ev("(function(){document.querySelector('#insList .ins-type-more').click();var m=document.querySelector('.mw-ctx-menu');return !!m && m.textContent.indexOf('清除缴费日期')<0 && m.textContent.indexOf('修改名称')>=0 && m.textContent.indexOf('删除')>=0;})()"));
         ev("closeMwMenu(); closeInsDatePop();");
 
+        // ---------- 20) v1.41.9：净资产桥 年 / 全部 按整段区间累计 ----------
+        stage = '20';
+        // 自洽的假账：2025-12 净资产 100 万；2026 年每月存 1 万、投资赚 5000；
+        // 到 2026-12 是 118 万。若只算 12 月，待核对会虚增 16.5 万（这就是"假账"）。
+        ev("(function(){var k=sheetAssetCats()[0].key; state.balanceOwner='本人'; state.balances=[{id:'x1',member:'本人',accountId:'a',cur:'CNY',cat:k,amount:1000000,month:'2025-12',updatedAt:1},{id:'x2',member:'本人',accountId:'a',cur:'CNY',cat:k,amount:1180000,month:'2026-12',updatedAt:2}]; state.transactions=[]; state.returns=[]; for(var m=1;m<=12;m++){var mm=String(m).padStart(2,'0'); state.transactions.push({id:'t'+m,type:'income',amount:10000,date:'2026-'+mm+'-15',member:'本人'}); state.returns.push({id:'r'+m,month:'2026-'+mm,accountId:'a',amount:5000,member:'本人'});} state.balancePeriod='year'; state.balanceYear=2026;})()");
+        const yrRange = ev("(function(){var mp=netBridgeMonths(balancePeriodInfo());return mp?mp.cur+'|'+mp.prev+'|'+mp.range.length+'|'+mp.fallback:'null';})()");
+        ok('年报：去年最后有记录月 → 今年最后有记录月，区间 12 个月', yrRange === '2026-12|2025-12|12|null', yrRange);
+        const yrSum = ev("(function(){var mp=netBridgeMonths(balancePeriodInfo());var b=netWorthBridge(mp.cur,mp.prev,mp.range);return JSON.stringify([b.delta,b.saved,b.profit,b.unexplained,b.balanced]);})()");
+        ok('年报把中间 11 个月的储蓄/收益都累计，待核对回到 0（不再造假账）', yrSum === '[180000,120000,60000,0,true]', yrSum);
+        ok('单 month 老口径不变（只累计 1 个月）',
+            ev("(function(){state.balancePeriod='month';state.balanceMonth=12;var mp=netBridgeMonths(balancePeriodInfo());var b=netWorthBridge(mp.cur,mp.prev,mp.range);return mp.cur+'|'+mp.prev+'|'+mp.range.length+'|'+b.saved+'|'+b.profit;})()") === '2026-12|2026-11|1|10000|5000');
+
+        // 全部：从账本最早那个月累计到最新那个月（区间按自然月，不是只挑有余额的月）
+        ev("(function(){var k=sheetAssetCats()[0].key; state.balances.unshift({id:'x0',member:'本人',accountId:'a',cur:'CNY',cat:k,amount:800000,month:'2024-06',updatedAt:0}); state.balancePeriod='all';})()");
+        const allInfo = ev("(function(){var mp=netBridgeMonths(balancePeriodInfo());return mp.cur+'|'+mp.prev+'|'+mp.range.length+'|'+mp.fallback;})()");
+        ok('全部：从账本最早月累计到最新月，30 个自然月', allInfo === '2026-12|2024-06|30|fromFirst', allInfo);
+
+        // 去年空白 / 今年才开始：不悄悄退化成单月，而是从账本最早月算起并标记原因
+        ev("(function(){var k=sheetAssetCats()[0].key; state.balances=[{id:'y1',member:'本人',accountId:'a',cur:'CNY',cat:k,amount:1000000,month:'2026-01',updatedAt:1},{id:'y2',member:'本人',accountId:'a',cur:'CNY',cat:k,amount:1180000,month:'2026-12',updatedAt:2}]; state.balancePeriod='year'; state.balanceYear=2026;})()");
+        const fbInfo = ev("(function(){var mp=netBridgeMonths(balancePeriodInfo());return mp.cur+'|'+mp.prev+'|'+mp.range.length+'|'+mp.fallback;})()");
+        ok('去年没记录 → 从账本最早月算起，不退化成单月', fbInfo === '2026-12|2026-01|11|noLastYear', fbInfo);
+
+        // 数据说明真的写进了页面（标题 / 标签 / 区间文字）
+        ev("(function(){window.Chart=function(){this.destroy=function(){};}; charts.bridge=null; renderNetBridge();})()");
+        ok('页面上有数据说明：区间、共几个月、其中几个月有余额记录',
+            ev("(function(){var t=document.getElementById('bridgeNote').innerHTML;return t.indexOf('数据说明')>=0 && t.indexOf('统计区间')>=0 && t.indexOf('共 11 个月')>=0 && t.indexOf('其中 1 个月有余额记录')>=0;})()"),
+            ev("document.getElementById('bridgeNote').textContent.slice(0,120)"));
+        ok('跨期时行标签改成「本期储蓄」，标题写明回退原因',
+            ev("(function(){var r=document.getElementById('bridgeRows').innerHTML;var t=document.getElementById('bridgeNote').innerHTML;return r.indexOf('本期储蓄')>=0 && t.indexOf('去年没有余额记录')>=0;})()"));
+        ev("closeMwMenu(); closeInsDatePop();");
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.8';
+const APP_VERSION = '1.41.9';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7590,21 +7590,43 @@ function renderBalance() {
 // ==================== 净资产变动桥 ====================
 // 流水和余额快照是两套独立记录：收入支出走流水，市值涨跌走余额。
 // 两边一减，剩下的"待核对"就是漏记、多记或者没录的收益 —— 这才是这张图的价值。
-function netWorthBridge(month, prevMonth) {
+//
+// v1.41.9：年 / 全部 是「一段时期」而不是「一个月」。期初是期初月月末的快照、期末是期末月月末的快照，
+// 所以 (期初, 期末] 之间每个月的流水和收益都得累加；只算期末那一个月的话，中间月份会凭空消失、
+// 全砸进「待核对差额」，算出一张假账。
+// 区间按自然月列出（不是只挑有余额记录的月）—— 流水和收益常常记在没记余额的月份里。
+function monthsBetween(prev, cur) {
+    const out = [];
+    if (!prev || !cur || prev >= cur) return out;
+    let m = nextMonthOf(prev), guard = 0;
+    while (m && m <= cur && guard++ < 600) { out.push(m); m = nextMonthOf(m); }
+    return out;
+}
+
+function netWorthBridge(month, prevMonth, rangeMonths) {
     const member = state.balanceOwner;
     const prev = prevMonth || previousMonthOf(month);
     const prevCat = prev ? balancesByCat(prev, member) : {};
     const curCat = balancesByCat(month, member);
     const openT = totalsFromCat(prevCat);
     const closeT = totalsFromCat(curCat);
-    const txns = state.transactions.filter(t => getMonthKey(t.date) === month
+    // 不传区间 = 单月老口径（月度结账清单仍这么调），行为逐字节不变
+    let range = (rangeMonths && rangeMonths.length)
+        ? rangeMonths.slice()
+        : (prev ? monthsBetween(prev, month) : [month]);
+    if (!range.length) range.push(month);
+    const inRange = new Set(range);
+    const txns = state.transactions.filter(t => inRange.has(getMonthKey(t.date))
         && (member === 'all' || t.member === member));
     const income = txns.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const expense = txns.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0);
-    const retMap = returnsAtMonth(month, member);
-    const profit = Object.keys(retMap).reduce((s, k) => s + (Number(retMap[k]) || 0), 0);
+    let profit = 0;
+    range.forEach(m => {
+        const retMap = returnsAtMonth(m, member);
+        Object.keys(retMap).forEach(k => { profit += Number(retMap[k]) || 0; });
+    });
     // 固定资产（按用户归类：房产 / 车辆 / 长期持有物）升值没人录收益，但确实改变净资产，
-    // 单独拆出来才不会全砸进「待核对」
+    // 单独拆出来才不会全砸进「待核对」。取期末与期初的余额差，跨期天然成立。
     let fixedMove = 0, fixedTouched = false;
     sheetAssetCats().forEach(c => {
         if ((state.balClassTags[c.key] || '') !== '固定资产') return;
@@ -7615,10 +7637,10 @@ function netWorthBridge(month, prevMonth) {
     const delta = closeT.net - openT.net;
     const saved = income - expense;
     const unexplained = delta - saved - profit - fixedMove;
-    // 同一个封顶容差：按当月实际变动量算，但最多放过 500 元
+    // 同一个封顶容差：按本期实际变动量算，但最多放过 500 元
     const tol = reconTolerance(delta);
     return {
-        month, prev, open: openT.net, close: closeT.net, income, expense, saved, profit,
+        month, prev, range, open: openT.net, close: closeT.net, income, expense, saved, profit,
         fixedMove, fixedTouched, delta, unexplained, txnCount: txns.length,
         openKnown: Object.keys(prevCat).length > 0,
         closeKnown: Object.keys(curCat).length > 0,
@@ -7626,23 +7648,43 @@ function netWorthBridge(month, prevMonth) {
     };
 }
 
-// v1.41.6：净资产变动桥跟随上方时间选择器 —— 不再永远只比「上个月」。
-// month 模式：选定月 vs 上月；year 模式：该年最后有记录月 vs 上一年最后有记录月；all：最后有记录月 vs 上月。
+// v1.41.9：净资产变动桥跟随上方时间选择器，年 / 全部 改按「一段时期」累计。
+// month：选定月 vs 上月，累计 1 个月（老行为不变）。
+// year ：去年最后一个有余额记录的月 → 今年最后一个有余额记录的月；
+//        去年没记录 / 账本今年才开始 → 从账本最早那个月算起。
+// all  ：账本最早那个月 → 最新那个月，一直以来的累计。
+// 期初月本身是「月末快照」，所以累计区间是 (期初, 期末]。
 function netBridgeMonths(info) {
     const months = balanceMonths();
     if (!months.length) return null;
-    if (info.period === 'year') {
+    let cur, prev, fallback = null;
+
+    if (info.period === 'all') {
+        cur = months[months.length - 1];
+        prev = months[0];
+        if (prev === cur) { prev = previousMonthOf(cur); fallback = 'firstMonthOnly'; }
+        else fallback = 'fromFirst';
+    } else if (info.period === 'year') {
         const selYear = state.balanceYear || new Date().getFullYear();
         const inYear = months.filter(m => m.slice(0, 4) === String(selYear));
-        const cur = inYear.length ? inYear[inYear.length - 1] : null;
+        if (!inYear.length) return null;
+        cur = inYear[inYear.length - 1];
+        const prevYear = months.filter(m => m.slice(0, 4) === String(selYear - 1));
+        if (prevYear.length) {
+            prev = prevYear[prevYear.length - 1];   // 不硬凑去年 12 月，用最后一个真记过的月
+        } else {
+            prev = months[0];                       // 今年才开始 → 从账本最早那个月算起
+            fallback = 'noLastYear';
+        }
+        if (prev === cur) { prev = previousMonthOf(cur); fallback = 'firstMonthOnly'; }
+    } else {
+        cur = info.month;
         if (!cur) return null;
-        const prevYearMonths = months.filter(m => m.slice(0, 4) === String(selYear - 1));
-        const prev = prevYearMonths.length ? prevYearMonths[prevYearMonths.length - 1] : previousMonthOf(cur);
-        return { cur, prev };
+        prev = previousMonthOf(cur);
     }
-    const cur = info.month;
-    if (!cur) return null;
-    return { cur, prev: previousMonthOf(cur) };
+    const range = prev ? monthsBetween(prev, cur) : [cur];
+    if (!range.length) range.push(cur);
+    return { cur, prev, range, fallback };
 }
 
 function renderNetBridge() {
@@ -7651,23 +7693,26 @@ function renderNetBridge() {
     const info = balancePeriodInfo();
     const mp = netBridgeMonths(info);
     if (!mp) { card.classList.add('hidden'); return; }
-    const b = netWorthBridge(mp.cur, mp.prev);
+    const b = netWorthBridge(mp.cur, mp.prev, mp.range);
     if (!b.closeKnown) { card.classList.add('hidden'); return; }
     card.classList.remove('hidden');
 
-    document.getElementById('bridgeSubtitle').textContent =
-        info.period === 'year'
-            ? `${state.balanceYear || new Date().getFullYear()} 全年变动 · ${state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner}`
-            : `${mp.cur.replace('-', '年')}月 · ${state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner}`;
+    const fmtM = m => m ? `${Number(m.slice(0, 4))}年${Number(m.slice(5, 7))}月` : '';
+    const owner = state.balanceOwner === 'all' ? '全家合计' : state.balanceOwner;
+    const periodTitle = info.period === 'year'
+        ? `${state.balanceYear || new Date().getFullYear()} 全年变动`
+        : (info.period === 'all' ? '历来累计' : fmtM(mp.cur));
+    document.getElementById('bridgeSubtitle').textContent = `${periodTitle} · ${owner}`;
 
+    const isRange = b.range.length > 1;
     const sign = v => maskMoneySigned(v);
     const rows = [
         { k: '期初净资产', v: b.open, cls: 'neutral' },
-        { k: '本月储蓄（收入−支出）', v: b.saved, cls: b.saved >= 0 ? 'up' : 'down', note: `${sign(b.income)} 收 / ${maskMoney(b.expense)} 支` },
+        { k: isRange ? '本期储蓄（收入−支出）' : '本月储蓄（收入−支出）', v: b.saved, cls: b.saved >= 0 ? 'up' : 'down', note: `${sign(b.income)} 收 / ${maskMoney(b.expense)} 支` },
         { k: '投资收益', v: b.profit, cls: b.profit >= 0 ? 'up' : 'down' },
     ];
     if (b.fixedTouched && Math.abs(b.fixedMove) > 0.005) {
-        rows.push({ k: '固定资产市值变动', v: b.fixedMove, cls: b.fixedMove >= 0 ? 'up' : 'down', note: '房产 / 车辆余额的月度差值，不用另录收益' });
+        rows.push({ k: '固定资产市值变动', v: b.fixedMove, cls: b.fixedMove >= 0 ? 'up' : 'down', note: '房产 / 车辆期末与期初余额的差值，不用另录收益' });
     }
     rows.push({
         k: '待核对差额', v: b.unexplained, cls: b.balanced ? 'ok' : 'warn',
@@ -7684,10 +7729,18 @@ function renderNetBridge() {
             ${r.note ? `<span class="br-note">${_esc(r.note)}</span>` : ''}
         </div>`).join('');
 
+    // 数据说明：把「这段时间到底算了哪些月、有多少月真有余额」明写出来，
+    // 免得去年没数据时又像"选了年却没变化"，也免得中间漏填余额看不出来。
+    const recorded = b.range.filter(m => Object.keys(balancesByCat(m, state.balanceOwner)).length > 0).length;
+    const spanTxt = `${fmtM(b.range[0])} → ${fmtM(mp.cur)}，共 ${b.range.length} 个月，其中 ${recorded} 个月有余额记录`;
+    const fallbackTxt = mp.fallback === 'noLastYear'
+        ? '去年没有余额记录，本期从账本最早那个月算起。'
+        : (mp.fallback === 'fromFirst' ? '从账本最早那个月累计到现在。'
+        : (mp.fallback === 'firstMonthOnly' ? '目前只有一个月有余额记录，先按单月显示，多记几个月会自动累计。' : ''));
     const note = document.getElementById('bridgeNote');
     note.innerHTML = b.openKnown
-        ? `<i class="fa-solid fa-circle-info"></i> 环比 ${sign(b.delta)}。账户之间互转不影响净资产，所以不出现在这张图里；"待核对"通常来自漏记流水、余额记错，或有账户升值但没录收益。`
-        : `<i class="fa-solid fa-triangle-exclamation"></i> 缺少 ${b.prev ? b.prev.replace('-', '年') + '月' : '上个月'} 的余额，期初按 0 算，"待核对"这一项没有意义 —— 补上上个月余额后才有参考价值。`;
+        ? `<i class="fa-solid fa-circle-info"></i> <b>数据说明</b>：统计区间 ${spanTxt}。${fallbackTxt}<br>本期净资产变动 ${sign(b.delta)}。账户之间互转不影响净资产，所以不出现在这张图里；"待核对"通常来自漏记流水、余额记错，或有账户升值但没录收益。`
+        : `<i class="fa-solid fa-triangle-exclamation"></i> 缺少 ${b.prev ? fmtM(b.prev) : '上个月'} 的余额，期初按 0 算，"待核对"这一项没有意义 —— 补上上月余额后才有参考价值。<br><b>数据说明</b>：统计区间 ${spanTxt}。${fallbackTxt}`;
 
     if (typeof Chart === 'undefined') { loadChartLib().then(() => drawBridgeChart(b)).catch(() => {}); return; }
     drawBridgeChart(b);
