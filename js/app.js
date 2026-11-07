@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.7';
+const APP_VERSION = '1.41.8';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -12405,37 +12405,33 @@ function renderInsuranceSection() {
                 <input type="checkbox" data-type="${type}" ${covered ? 'checked' : ''}>
                 <span class="ins-box"><i class="fa-solid fa-check"></i></span>
             </label>
-            <span class="ins-type">${type}</span>
+            <span class="ins-name-wrap"><span class="ins-type">${type}</span><button class="ins-type-more" type="button" data-ins-more="${type}" title="更多操作"><i class="fa-solid fa-ellipsis"></i></button></span>
             <span class="ins-field"><em>保额</em><input type="number" class="ins-amt" data-type="${type}" value="${p && p.amount ? p.amount : ''}" placeholder="0" inputmode="decimal"></span>
             <span class="ins-field"><em>年保费</em><input type="number" class="ins-prem" data-type="${type}" value="${p && p.premium ? p.premium : ''}" placeholder="0" inputmode="decimal"></span>
-            <span class="ins-field ins-renew"><em>下次缴费/到期</em><input type="date" class="ins-renew-at" data-type="${type}" value="${p && p.renewAt ? p.renewAt : ''}"></span>
+            <span class="ins-field ins-renew"><em>下次缴费/到期</em><button type="button" class="ins-renew-at ${p && p.renewAt ? '' : 'empty'}" data-type="${type}"><i class="fa-regular fa-calendar"></i> ${p && p.renewAt ? p.renewAt : '设置日期'}</button></span>
             <button class="link-btn ins-claim-btn" type="button" data-claim="${type}">${claimSum(p)}${p && p.claims && p.claims.length ? `（${p.claims.length} 次）` : ''}</button>
-            <button class="ins-type-more" type="button" data-ins-more="${type}" title="更多操作"><i class="fa-solid fa-ellipsis"></i></button>
         </div>`;
     }).join('') + `<button class="ins-type-add" data-ins-type-add="1"><i class="fa-solid fa-plus"></i> 险种</button>`;
 
     listBox.querySelectorAll('.ins-check input').forEach(cb => cb.addEventListener('change', () => upsertIns(cb.dataset.type, { covered: cb.checked })));
     listBox.querySelectorAll('.ins-amt').forEach(inp => inp.addEventListener('change', () => upsertIns(inp.dataset.type, { amount: parseFloat(inp.value) || 0 })));
     listBox.querySelectorAll('.ins-prem').forEach(inp => inp.addEventListener('change', () => upsertIns(inp.dataset.type, { premium: parseFloat(inp.value) || 0 })));
-    listBox.querySelectorAll('.ins-renew-at').forEach(inp => inp.addEventListener('change', () => {
-        const v = (inp.value || '').trim();
-        upsertIns(inp.dataset.type, { renewAt: v || null });
+    // 缴费日期：点一下弹出自家的小日历窗口，日历下面就有「清除缴费日期」。
+    // 原来用系统原生 <input type="date">，弹出的日历是 macOS 的窗口，网页没法往里加按钮。
+    listBox.querySelectorAll('.ins-renew-at').forEach(btn => btn.addEventListener('click', e => {
+        e.stopPropagation();
+        if (_insDatePop && _insDateAnchor === btn) { closeInsDatePop(); return; }   // 再点一次收起
+        openInsDatePop(btn, btn.dataset.type);
     }));
     listBox.querySelectorAll('[data-claim]').forEach(btn => btn.addEventListener('click', () => openInsClaims(btn.dataset.claim)));
-    // 险种「⋯ 更多」浮层菜单：修改名称 / 清除缴费日期 / 删除。
-    // 平时行尾的 ⋯ 是隐藏的，鼠标移到这一行才淡显，点一下才弹出菜单（和月度账单那一格同款交互）。
+    // 险种「⋯ 更多」浮层菜单：只放 修改名称 / 删除（清除缴费日期已挪到日期窗口里）。
+    // 平时 ⋯ 是隐藏的，鼠标移到这一行才淡显，点一下才弹出菜单（和月度账单那一格同款交互）。
     listBox.querySelectorAll('[data-ins-more]').forEach(btn => btn.addEventListener('click', e => {
         e.stopPropagation();
         const type = btn.dataset.insMore;
-        const row = btn.closest('.ins-row');
         const r = btn.getBoundingClientRect();
         openMwMenu(r.left, r.bottom + 4, [
             { label: '修改名称', icon: 'fa-pen', onClick: () => renameInsuranceType(type) },
-            { label: '清除缴费日期', icon: 'fa-calendar-xmark', onClick: () => {
-                const inp = row && row.querySelector('.ins-renew-at');
-                if (inp) inp.value = '';
-                upsertIns(type, { renewAt: null });
-            } },
             { label: '删除', icon: 'fa-trash', danger: true, onClick: () => deleteInsuranceType(type) },
         ]);
     }));
@@ -12444,6 +12440,108 @@ function renderInsuranceSection() {
     const banner = document.getElementById('insRenewBanner');
     if (banner) { banner.innerHTML = insRenewSummary(); banner.classList.toggle('hidden', !insUpcomingRenewals(30).length); }
     updateInsBadges();
+}
+
+// ---- 缴费日期弹层 ----------------------------------------------------------
+// 系统原生 <input type="date"> 弹出的日历是 macOS 的窗口，网页没资格往里塞按钮；
+// 所以这里换成软件自己的小日历：点日期框 → 月历网格 → 日历下面一行「清除缴费日期」。
+// 一次点击全搞定，手机上也一样能点。
+let _insDatePop = null, _insDateAnchor = null, _insDateCtx = null;
+
+function insDateStr(y, m, d) {
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+function closeInsDatePop() {
+    if (_insDatePop) { _insDatePop.remove(); _insDatePop = null; }
+    _insDateAnchor = null;
+    _insDateCtx = null;
+    document.removeEventListener('mousedown', _insDatePopOutside, true);
+    document.removeEventListener('keydown', _insDatePopEsc, true);
+}
+function _insDatePopOutside(e) {
+    if (!_insDatePop) return;
+    // 点自己这个日期框不算「点外面」——由日期框的 click 负责收起，避免开关打架
+    if (_insDateAnchor && (e.target === _insDateAnchor || _insDateAnchor.contains(e.target))) return;
+    if (!_insDatePop.contains(e.target)) closeInsDatePop();
+}
+function _insDatePopEsc(e) { if (e.key === 'Escape') closeInsDatePop(); }
+
+function insDatePopRender() {
+    if (!_insDatePop || !_insDateCtx) return;
+    const { type, year: y, month: m, selected } = _insDateCtx;
+    const now = new Date();
+    const today = insDateStr(now.getFullYear(), now.getMonth() + 1, now.getDate());
+    const first = new Date(y, m - 1, 1).getDay();      // 0 = 周日
+    const days = ymDaysInMonth(y, m);
+    let cells = '';
+    for (let i = 0; i < first; i++) cells += '<span class="idp-blank"></span>';
+    for (let d = 1; d <= days; d++) {
+        const v = insDateStr(y, m, d);
+        const cls = ['idp-day', v === selected ? 'active' : '', v === today ? 'today' : ''].filter(Boolean).join(' ');
+        cells += `<button type="button" class="${cls}" data-idp-day="${v}">${d}</button>`;
+    }
+    _insDatePop.innerHTML = `
+        <div class="idp-head">
+            <button type="button" class="idp-nav" data-idp-nav="-1" aria-label="上个月"><i class="fa-solid fa-chevron-left"></i></button>
+            <span class="idp-title">${y}年${m}月</span>
+            <button type="button" class="idp-nav" data-idp-nav="1" aria-label="下个月"><i class="fa-solid fa-chevron-right"></i></button>
+        </div>
+        <div class="idp-week">${['日', '一', '二', '三', '四', '五', '六'].map(w => `<span>${w}</span>`).join('')}</div>
+        <div class="idp-grid">${cells}</div>
+        <div class="idp-foot"><button type="button" class="idp-clear" data-idp-clear="1"><i class="fa-solid fa-calendar-xmark"></i> 清除缴费日期</button></div>`;
+    _insDatePop.querySelectorAll('[data-idp-nav]').forEach(b => b.addEventListener('click', e => {
+        e.stopPropagation();
+        let ny = _insDateCtx.year, nm = _insDateCtx.month + Number(b.dataset.idpNav);
+        if (nm < 1) { nm = 12; ny--; }
+        if (nm > 12) { nm = 1; ny++; }
+        _insDateCtx.year = ny; _insDateCtx.month = nm;
+        insDatePopRender();
+    }));
+    _insDatePop.querySelectorAll('[data-idp-day]').forEach(b => b.addEventListener('click', e => {
+        e.stopPropagation();
+        const v = b.dataset.idpDay;
+        closeInsDatePop();
+        upsertIns(type, { renewAt: v });
+    }));
+    const clearBtn = _insDatePop.querySelector('[data-idp-clear]');
+    if (clearBtn) clearBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        closeInsDatePop();
+        upsertIns(type, { renewAt: null });
+    });
+}
+
+function openInsDatePop(anchorEl, type) {
+    closeInsDatePop();
+    const p = insPolicy(type, fundEditMember);
+    const cur = (p && p.renewAt) ? String(p.renewAt) : '';
+    const now = new Date();
+    _insDateCtx = {
+        type, selected: cur,
+        year: cur ? Number(cur.slice(0, 4)) : now.getFullYear(),
+        month: cur ? Number(cur.slice(5, 7)) : (now.getMonth() + 1),
+    };
+    const el = document.createElement('div');
+    el.className = 'ins-date-pop';
+    document.body.appendChild(el);
+    _insDatePop = el;
+    _insDateAnchor = anchorEl;
+    insDatePopRender();
+    // 定位：锚点正下方，右边溢出就左移、下面放不下就翻到上方
+    const r = anchorEl.getBoundingClientRect();
+    const w = el.offsetWidth || 252, h = el.offsetHeight || 268;
+    let left = Math.max(8, Math.min(r.left, (window.innerWidth || 1024) - w - 8));
+    let top = r.bottom + 6;
+    if (top + h > (window.innerHeight || 768) - 8) top = Math.max(8, r.top - h - 6);
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+    // 等本次 click 结束再挂关闭监听，避免立刻把自己关掉；
+    // 期间若窗口已经被关掉（清除 / 选日期），就别再挂了，免得留下空监听。
+    setTimeout(() => {
+        if (!_insDatePop) return;
+        document.addEventListener('mousedown', _insDatePopOutside, true);
+        document.addEventListener('keydown', _insDatePopEsc, true);
+    }, 0);
 }
 
 // 理赔金额小计

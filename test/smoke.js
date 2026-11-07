@@ -585,6 +585,23 @@ function run() {
         const itAfter = ev("(function(){applyTombstones();return state.insuranceTypes.indexOf('意外险');})()");
         ok('险种删除墓碑生效（applyTombstones 把它从清单剔除）', itAfter < 0, itAfter);
 
+        // ---------- 19) v1.41.8：保险 ⋯ 贴着险种名 + 缴费日期日历弹层 ----------
+        stage = '19';
+        ev("state.insuranceTypes=['重疾险']; state.insuranceMembers=['本人']; fundEditMember='本人'; state.insurancePolicies=[{id:'重疾险__本人',type:'重疾险',member:'本人',covered:true,amount:0,premium:0,renewAt:'2026-11-20',createdAt:1,updatedAt:1}]; renderInsuranceSection();");
+        ok('⋯ 紧跟险种名称右边，不再排在理赔记录后面',
+            ev("(function(){var row=document.querySelector('#insList .ins-row');if(!row)return false;var wrap=row.querySelector('.ins-name-wrap');var more=row.querySelector('.ins-type-more');var claim=row.querySelector('.ins-claim-btn');var kids=Array.prototype.slice.call(row.children);return !!wrap && !!more && wrap.contains(more) && !!wrap.querySelector('.ins-type') && kids.indexOf(more)<kids.indexOf(claim);})()"));
+        ev("document.querySelector('#insList .ins-renew-at').click();");
+        ok('点日期框弹出日历窗口，日历下面有「清除缴费日期」',
+            ev("(function(){var p=document.querySelector('.ins-date-pop');if(!p)return false;var foot=p.querySelector('.idp-foot .idp-clear');return !!p.querySelector('.idp-grid .idp-day') && !!foot && foot.textContent.indexOf('清除缴费日期')>=0;})()"));
+        ok('日历停在已设日期那个月并高亮那天',
+            ev("(function(){var p=document.querySelector('.ins-date-pop');return !!p && p.querySelector('.idp-title').textContent==='2026年11月' && !!p.querySelector('.idp-day.active[data-idp-day=\"2026-11-20\"]');})()"));
+        ev("document.querySelector('.ins-date-pop .idp-clear').click();");
+        ok('点「清除缴费日期」真清掉 renewAt 且窗口关闭',
+            ev("(function(){return insPolicy('重疾险',fundEditMember).renewAt===null && !document.querySelector('.ins-date-pop');})()"));
+        ok('3 点菜单里已不再放「清除缴费日期」',
+            ev("(function(){document.querySelector('#insList .ins-type-more').click();var m=document.querySelector('.mw-ctx-menu');return !!m && m.textContent.indexOf('清除缴费日期')<0 && m.textContent.indexOf('修改名称')>=0 && m.textContent.indexOf('删除')>=0;})()"));
+        ev("closeMwMenu(); closeInsDatePop();");
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));
