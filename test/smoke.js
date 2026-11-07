@@ -694,6 +694,89 @@ async function run() {
         ok('云端那份用别的钥匙加密时，拿本次口令静默重解', cloudSecret === 'test-pass', cloudSecret);
         ev("__sessionSecret=''; closeStartupLock();");
 
+        // ---------- 22) v1.41.11：不再惊动钥匙串 + 手机输完自动进入 ----------
+        stage = '22';
+        const lcText = fs.readFileSync(path.join(REPO, 'js/ledger-crypto.js'), 'utf8');
+        ok('主钥匙改存普通字节（master-raw），不再把 CryptoKey 塞进 IndexedDB',
+            lcText.indexOf("CRYPTO_MASTER_RAW_KEY = 'master-raw'") >= 0 &&
+            lcText.indexOf("exportKey('raw'") >= 0 &&
+            lcText.indexOf("importKey('raw'") >= 0 &&
+            lcText.indexOf("idbGet('master')") < 0 &&
+            lcText.indexOf("idbPut(k, 'master')") < 0 &&
+            lcText.indexOf("idbPut(masterKey, 'master')") < 0);
+        ok('本机缓存只读新键，绝不碰会触发钥匙串的旧 master 记录',
+            /function hasLocalKey\(\)[\s\S]{0,200}loadMaster\(\)/.test(lcText) &&
+            lcText.indexOf('saveMaster(k)') >= 0);
+
+        const touchFlow = await ev(`(async function(){
+            var oldMM = window.matchMedia, oldEnabled = LedgerCrypto.isEnabled, oldUnlock = LedgerCrypto.unlock;
+            window.matchMedia = function(){ return { matches: true }; };
+            LedgerCrypto.isEnabled = function(){ return true; };
+            LedgerCrypto.unlock = function(s){ return s === 'test-pass' ? Promise.resolve(true) : Promise.reject(new Error('bad')); };
+            var out = {};
+            out.touch = startupIsTouch();
+            window.__gateP2 = startupUnlockGate();
+            out.hint = (document.getElementById('startupLockHint')||{}).textContent;
+            out.locked = document.body.classList.contains('app-locked');
+            document.getElementById('startupLockInput').value = 'test-pass';
+            await startupAutoUnlock();
+            out.after = [__sessionSecret, document.body.classList.contains('app-locked')];
+            window.matchMedia = oldMM; LedgerCrypto.isEnabled = oldEnabled; LedgerCrypto.unlock = oldUnlock;
+            return JSON.stringify(out);
+        })()`);
+        ok('触屏设备：输完口令自动放行，不用点「解锁并进入」',
+            touchFlow === '{"touch":true,"hint":"输完会直接进去，不用点按钮","locked":true,"after":["test-pass",false]}', touchFlow);
+
+        const quietFail = await ev(`(async function(){
+            var oldEnabled = LedgerCrypto.isEnabled, oldUnlock = LedgerCrypto.unlock;
+            LedgerCrypto.isEnabled = function(){ return true; };
+            LedgerCrypto.unlock = function(){ return Promise.reject(new Error('bad')); };
+            window.__gateP3 = startupUnlockGate();
+            var inp = document.getElementById('startupLockInput');
+            inp.value = 'half-typed';
+            await startupAutoUnlock();
+            var out = [inp.value, document.body.classList.contains('app-locked'), document.getElementById('startupLockError').classList.contains('hidden')];
+            LedgerCrypto.isEnabled = oldEnabled; LedgerCrypto.unlock = oldUnlock;
+            closeStartupLock();
+            return JSON.stringify(out);
+        })()`);
+        ok('手机输到一半的自动试探失败：不清空、不报红字、照样停在锁屏',
+            quietFail === '["half-typed",true,true]', quietFail);
+
+        const timerSet = ev(`(function(){
+            var oldMM = window.matchMedia, oldEnabled = LedgerCrypto.isEnabled;
+            window.matchMedia = function(){ return { matches: true }; };
+            LedgerCrypto.isEnabled = function(){ return true; };
+            window.__gateP4 = startupUnlockGate();
+            var inp = document.getElementById('startupLockInput');
+            inp.value = 'test-pass';
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            var has = !!__startupAutoTimer;
+            window.matchMedia = oldMM; LedgerCrypto.isEnabled = oldEnabled;
+            closeStartupLock();
+            return has;
+        })()`);
+        ok('触屏输入会排一次自动解锁，解锁 / 关闭后定时器清干净',
+            timerSet === true && ev('__startupAutoTimer') === null, [timerSet, ev('__startupAutoTimer')]);
+
+        const desktopNoAuto = ev(`(function(){
+            var oldMM = window.matchMedia, oldEnabled = LedgerCrypto.isEnabled;
+            window.matchMedia = function(){ return { matches: false }; };
+            LedgerCrypto.isEnabled = function(){ return true; };
+            window.__gateP5 = startupUnlockGate();
+            var hint = (document.getElementById('startupLockHint')||{}).textContent;
+            var inp = document.getElementById('startupLockInput');
+            inp.value = 'test-pass';
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            var has = !!__startupAutoTimer;
+            window.matchMedia = oldMM; LedgerCrypto.isEnabled = oldEnabled;
+            closeStartupLock();
+            return JSON.stringify([hint, has]);
+        })()`);
+        ok('桌面端不自动提交（打字停顿不误触），仍可按回车 / 点按钮',
+            desktopNoAuto === '["输完按回车，或点上面的按钮",false]', desktopNoAuto);
+        ev("__sessionSecret='';");
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.10';
+const APP_VERSION = '1.41.11';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -2084,6 +2084,16 @@ function submitSecretModal() {
 let __sessionSecret = '';            // 只活在这一次页面生命周期里，关掉就没了
 let __startupLockResolve = null;
 let __startupLockBound = false;
+let __startupUnlockBusy = false;
+let __startupAutoTimer = null;
+
+// v1.41.11：手机软键盘上还要多点一下「解锁并进入」才放行，用户嫌麻烦。
+// 触屏设备上停手约 1.2 秒就静默试一次；桌面端不这么干——打字中途停顿很常见，
+// 自动提交会不停拿半截口令去算，反而添乱（桌面上按回车就能直接进）。
+function startupIsTouch() {
+    try { return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches); }
+    catch (e) { return false; }
+}
 
 function startupLockError(msg) {
     const el = document.getElementById('startupLockError');
@@ -2104,11 +2114,25 @@ function startupUnlockGate() {
     if (peek) peek.checked = false;
     const forgotBox = document.getElementById('startupLockForgotBox');
     if (forgotBox) forgotBox.classList.add('hidden');
+    const hint = document.getElementById('startupLockHint');
+    if (hint) hint.textContent = startupIsTouch()
+        ? '输完会直接进去，不用点按钮'
+        : '输完按回车，或点上面的按钮';
     if (!__startupLockBound) {
         __startupLockBound = true;
-        if (inp) inp.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); submitStartupLock(); }
-        });
+        if (inp) {
+            inp.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); submitStartupLock(); }
+            });
+            inp.addEventListener('input', () => {
+                if (!startupIsTouch() || !document.body.classList.contains('app-locked')) return;
+                if (__startupAutoTimer) clearTimeout(__startupAutoTimer);
+                __startupAutoTimer = setTimeout(() => {
+                    __startupAutoTimer = null;
+                    startupAutoUnlock();
+                }, 1200);
+            });
+        }
         if (peek) peek.addEventListener('change', () => {
             const box = document.getElementById('startupLockInput');
             if (box) box.type = peek.checked ? 'text' : 'password';
@@ -2130,6 +2154,7 @@ function startupLockKeyGuard(e) {
 }
 
 function closeStartupLock() {
+    if (__startupAutoTimer) { clearTimeout(__startupAutoTimer); __startupAutoTimer = null; }
     document.body.classList.remove('app-locked');
     const lock = document.getElementById('startupLock');
     if (lock) lock.classList.add('hidden');
@@ -2139,23 +2164,51 @@ function closeStartupLock() {
     if (r) r(true);
 }
 
+// 解锁动作抽成一处：quiet=true 是「手机输到一半的自动试探」，
+// 没成功就当没发生，绝不清空输入、不弹红字、不抢焦点，用户接着输就行。
+async function tryStartupUnlock(secret, quiet) {
+    try {
+        await LedgerCrypto.unlock(secret, LedgerCrypto.keyring());
+        __sessionSecret = secret;
+        closeStartupLock();
+        return true;
+    } catch (e) {
+        if (!quiet) {
+            startupLockError('口令或恢复码不正确，再试一次');
+            const inp = document.getElementById('startupLockInput');
+            if (inp) { inp.value = ''; try { inp.focus(); } catch (e2) {} }
+        }
+        return false;
+    }
+}
+
 async function submitStartupLock() {
-    if (!document.body.classList.contains('app-locked')) return;
+    if (!document.body.classList.contains('app-locked') || __startupUnlockBusy) return;
     const inp = document.getElementById('startupLockInput');
     const btn = document.getElementById('startupLockBtn');
     const secret = inp ? inp.value : '';
     if (!secret) { startupLockError('请输入口令或恢复码'); return; }
     startupLockError('');
+    __startupUnlockBusy = true;
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在解锁…'; }
     try {
-        await LedgerCrypto.unlock(secret, LedgerCrypto.keyring());
-        __sessionSecret = secret;
-        closeStartupLock();
-    } catch (e) {
-        startupLockError('口令或恢复码不正确，再试一次');
-        if (inp) { inp.value = ''; try { inp.focus(); } catch (e2) {} }
+        await tryStartupUnlock(secret, false);
     } finally {
+        __startupUnlockBusy = false;
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-lock-open"></i> 解锁并进入'; }
+    }
+}
+
+async function startupAutoUnlock() {
+    if (!document.body.classList.contains('app-locked') || __startupUnlockBusy) return;
+    const inp = document.getElementById('startupLockInput');
+    const secret = inp ? inp.value : '';
+    if (!secret || secret.length < 8) return;      // 口令至少 8 位，没输够别白算一次
+    __startupUnlockBusy = true;
+    try {
+        await tryStartupUnlock(secret, true);
+    } finally {
+        __startupUnlockBusy = false;
     }
 }
 

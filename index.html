@@ -1432,10 +1432,12 @@
             <h2>账本已锁定</h2>
             <p class="sl-sub">输入加密口令（或恢复码）后打开账本</p>
             <input type="password" class="text-input secret-input" id="startupLockInput"
-                   autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="口令或恢复码">
+                   autocomplete="off" autocapitalize="none" spellcheck="false"
+                   enterkeyhint="go" placeholder="口令或恢复码">
             <div class="secret-error hidden" id="startupLockError"></div>
             <label class="secret-peek sl-peek"><input type="checkbox" id="startupLockPeek"> 显示输入内容</label>
             <button class="primary-btn" id="startupLockBtn" onclick="submitStartupLock()"><i class="fa-solid fa-lock-open"></i> 解锁并进入</button>
+            <div class="sl-foot" id="startupLockHint"></div>
             <div class="sl-foot">
                 口令只记在本次打开期间，不会写进本机文件。<br>
                 <button type="button" class="sl-forgot" id="startupLockForgot" onclick="startupLockForgot()">忘记口令？</button>
@@ -1471,7 +1473,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.10').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.11').catch(() => {});
             });
         }
     </script>

@@ -3,10 +3,9 @@
 // 结构：一把随机主密钥（AES-GCM 256）加密真正的数据；主密钥分别用
 // 「口令派生的 KEK」和「恢复码派生的 KEK」包一层（AES-KW）。
 // 每个封套自带这份 keyring，所以任何一份密文在任意设备上，只要有口令
-// 或恢复码就能解开；本机再把主密钥存进 IndexedDB（非可导出），
-// 日常打开就一次都不用输。
-// （主密钥必须可导出，WebCrypto 不接受用 wrapKey 包不可导出密钥；
-//  它存在 IndexedDB 里，能读到它的代码本来也能调用解密，收益差别不大）
+// 或恢复码就能解开；本机再把主密钥的**原始字节**存进 IndexedDB 做缓存，
+// 下次打开可以少输一次（v1.41.11 起启动门禁每次都会问口令，缓存只是备用）。
+// ⚠️ 千万别把 CryptoKey 对象直接存进去：WebKit 会拿系统钥匙串包它，每次都弹窗。
 //
 // 换口令只重新包一次主密钥，不重新加密数据。
 //
@@ -17,6 +16,13 @@ const CRYPTO_STATE_KEY = 'bookkeeping_app_crypto';
 const CRYPTO_DB_NAME = 'bookkeeping-crypto';
 const CRYPTO_DB_STORE = 'keys';
 const ENC_MAGIC = 'BKE1';
+// v1.41.11：本机缓存的主钥匙改存「普通字节」，键名也换一个新的。
+// 以前直接把 CryptoKey 对象存进 IndexedDB（键 'master'），WebKit 在 macOS / iOS 上
+// 会用系统钥匙串里一把叫「<App名> WebCrypto Master Key」的钥匙把它包起来，
+// 于是每次读写都弹「想要使用你储存在钥匙串中的机密信息」要登录密码。
+// 存 ArrayBuffer 就只是普通数据，WebKit 不会再去找钥匙串。
+// ⚠️ 旧的 'master' 记录永远不要读（一读就会再弹窗），也不要去删它，留着不碍事。
+const CRYPTO_MASTER_RAW_KEY = 'master-raw';
 const PBKDF2_PASS_ITER = 310000;      // 口令熵低，多迭代
 const PBKDF2_CODE_ITER = 100000;      // 恢复码本身约 100 bit，够用且解锁更快
 const REC_ALPHABET = '3456789ABCDEFGHJKLMNPQRSTUVWXYZ';   // 去掉易混的 0O1I
@@ -62,7 +68,7 @@ const LedgerCrypto = (() => {
     function idbPut(value, key) {
         return openDb().then(db => new Promise((resolve, reject) => {
             const tx = db.transaction(CRYPTO_DB_STORE, 'readwrite');
-            tx.objectStore(CRYPTO_DB_STORE).put(value, key || 'master');
+            tx.objectStore(CRYPTO_DB_STORE).put(value, key || CRYPTO_MASTER_RAW_KEY);
             tx.oncomplete = () => resolve(true);
             tx.onerror = () => reject(tx.error);
         }));
@@ -70,7 +76,7 @@ const LedgerCrypto = (() => {
     function idbGet(key) {
         return openDb().then(db => new Promise((resolve, reject) => {
             const tx = db.transaction(CRYPTO_DB_STORE, 'readonly');
-            const req = tx.objectStore(CRYPTO_DB_STORE).get(key || 'master');
+            const req = tx.objectStore(CRYPTO_DB_STORE).get(key || CRYPTO_MASTER_RAW_KEY);
             req.onsuccess = () => resolve(req.result || null);
             req.onerror = () => reject(req.error);
         }));
@@ -78,10 +84,28 @@ const LedgerCrypto = (() => {
     function idbDel(key) {
         return openDb().then(db => new Promise((resolve, reject) => {
             const tx = db.transaction(CRYPTO_DB_STORE, 'readwrite');
-            tx.objectStore(CRYPTO_DB_STORE).delete(key || 'master');
+            tx.objectStore(CRYPTO_DB_STORE).delete(key || CRYPTO_MASTER_RAW_KEY);
             tx.oncomplete = () => resolve(true);
             tx.onerror = () => reject(tx.error);
         }));
+    }
+
+    // v1.41.11：把主钥匙导成 32 字节原生存，读回来再 import 成 CryptoKey。
+    // 存的是普通 ArrayBuffer，不是 CryptoKey 对象 —— 这是「不再弹钥匙串」的关键。
+    // 存不下 / 读不回都只返回失败，绝不抛到业务层（钥匙本来就能用口令重算）。
+    async function saveMaster(k) {
+        try {
+            const raw = await crypto.subtle.exportKey('raw', k);
+            await idbPut(raw, CRYPTO_MASTER_RAW_KEY);
+            return true;
+        } catch (e) { return false; }
+    }
+    async function loadMaster() {
+        try {
+            const raw = await idbGet(CRYPTO_MASTER_RAW_KEY);
+            if (!raw) return null;
+            return await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
+        } catch (e) { return null; }
     }
 
     // ---- 本机加密开关状态 ----
@@ -160,14 +184,15 @@ const LedgerCrypto = (() => {
     }
     async function hasLocalKey() {
         if (cachedKey) return true;
-        try { const k = await idbGet('master'); if (k && k.type) { cachedKey = k; return true; } } catch (e) { /* 打不开就当没有 */ }
+        const k = await loadMaster();          // 只读 master-raw，绝不碰旧的 'master'
+        if (k) { cachedKey = k; return true; }
         return false;
     }
     async function lock() { cachedKey = null; }
     // 只忘掉本机密钥、保留加密设置：下次要口令或恢复码才能解锁
     async function forgetLocalKey() {
         cachedKey = null;
-        try { await idbDel('master'); } catch (e) { /* 删不掉也只是占地方 */ }
+        try { await idbDel(CRYPTO_MASTER_RAW_KEY); } catch (e) { /* 删不掉也只是占地方 */ }
         return true;
     }
 
@@ -188,7 +213,7 @@ const LedgerCrypto = (() => {
             hint: p.slice(0, 2) + '***',
             createdAt: new Date().toISOString(),
         };
-        await idbPut(masterKey, 'master');
+        await saveMaster(masterKey);
         cachedKey = masterKey;
         const st = { on: true, keyring: kr };
         if (!writeState(st)) throw new Error('本机存储写入失败，加密未能开启');
@@ -211,7 +236,7 @@ const LedgerCrypto = (() => {
             try {
                 const k = await unwrapMaster(wrap, pair[1]);
                 cachedKey = k;
-                try { await idbPut(k, 'master'); } catch (e) { /* 存不下也能用，只是下次还要输 */ }
+                await saveMaster(k);           // 存不下也能用，只是下次还要输
                 return true;
             } catch (e) { /* 换下一个 */ }
         }
@@ -223,7 +248,8 @@ const LedgerCrypto = (() => {
         const kring = kr || keyring();
         if (!kring) throw new Error('还没开启加密');
         let key = cachedKey;
-        if (!key) { const k = await idbGet('master'); if (!k) throw new Error('需要口令或恢复码才能加密'); key = k; cachedKey = k; }
+        if (!key) { const k = await loadMaster(); if (!k) throw new Error('需要口令或恢复码才能加密'); key = k; }
+        cachedKey = key;
         const iv = crypto.getRandomValues(new Uint8Array(12));
         const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, te.encode(text));
         return { enc: ENC_MAGIC, v: 1, iv: b64(iv), data: b64(ct), keyring: { v: kring.v, alg: 'AES-GCM', pass: kring.pass, recovery: kring.recovery, hint: kring.hint } };
@@ -238,7 +264,7 @@ const LedgerCrypto = (() => {
             await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(env.iv) }, k, unb64(env.data)));
         let key = cachedKey;
         if (!key) {
-            const stored = await idbGet('master');
+            const stored = await loadMaster();
             if (stored) key = cachedKey = stored;
         }
         if (!key) {
@@ -296,7 +322,7 @@ const LedgerCrypto = (() => {
     // ---- 关闭：调用方负责先把数据退回明文 ----
     async function disable() {
         cachedKey = null;
-        try { await idbDel('master'); } catch (e) { /* 删不掉也只是占地方 */ }
+        try { await idbDel(CRYPTO_MASTER_RAW_KEY); } catch (e) { /* 删不掉也只是占地方 */ }
         clearState();
         return true;
     }
