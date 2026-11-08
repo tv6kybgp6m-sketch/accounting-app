@@ -872,6 +872,49 @@ async function run() {
             /\.numpad-row\s*\{[^}]*gap:\s*8px/m.test(cssText) &&
             cssText.indexOf('touch-action: manipulation') >= 0);
 
+        // ---------- 24) v1.41.14：键盘左右留白 + 只禁键盘区的长按复制 ----------
+        stage = '24';
+        ok('手机端键盘左右留白从 14px 收到 6px（最左 / 最右不再空一大条）',
+            /#transactionModal \.numpad\s*\{[^}]*padding:\s*10px 6px/m.test(cssText));
+        ok('桌面 / 网页端键盘留白不变（还是 14px）',
+            /\.numpad\s*\{[^}]*padding:\s*10px 14px 14px/m.test(cssText));
+        const npLock = cssText.match(/\.numpad, \.numpad \*\s*\{([^}]*)\}/m);
+        ok('数字键盘区（含数字、⌫、OK 等所有按键）压掉长按呼出菜单和文字选择',
+            !!npLock &&
+            /-webkit-touch-callout:\s*none/.test(npLock[1]) &&
+            /-webkit-user-select:\s*none/.test(npLock[1]) &&
+            /user-select:\s*none/.test(npLock[1]));
+        ok('触屏下连原生拖拽也关掉（长按不会被系统抢走）',
+            /@media \(pointer: coarse\)\s*\{\s*\.numpad, \.numpad \*\s*\{[^}]*-webkit-user-drag:\s*none/m.test(cssText));
+        ok('手机底部导航标签也不弹长按复制（只写在触屏块里，桌面侧栏照旧）',
+            /\.nav-menu, \.nav-menu \*\s*\{[^}]*-webkit-touch-callout:\s*none/m.test(cssText) &&
+            /@media \(pointer: coarse\)\s*\{[\s\S]{0,600}\.nav-menu, \.nav-menu \*/m.test(cssText));
+        ok('账本其它地方照旧可以长按复制（没有写全局禁止规则）',
+            cssText.indexOf('user-select: all') >= 0 &&
+            !/^\s*\*\s*\{[^}]*-webkit-touch-callout/m.test(cssText));
+        const menuGuard = ev(`(function(){
+            bindNumpadPressFeedback();
+            var pad = document.getElementById('numpad');
+            var btn = document.getElementById('numpadBack');
+            var c = new MouseEvent('contextmenu', {bubbles:true, cancelable:true});
+            btn.dispatchEvent(c);
+            var s = new Event('selectstart', {bubbles:true, cancelable:true});
+            btn.dispatchEvent(s);
+            var out = document.getElementById('amountInput');
+            var s2 = new Event('selectstart', {bubbles:true, cancelable:true});
+            if (out) out.dispatchEvent(s2);
+            return JSON.stringify([c.defaultPrevented, s.defaultPrevented, s2.defaultPrevented, !!pad.dataset.menuBound]);
+        })()`);
+        ok('键盘上长按不再弹「拷贝 / 选择」，金额输入框里照样能选文字',
+            menuGuard === '[true,true,false,true]', menuGuard);
+        const backFlow = ev(`(function(){
+            calc.expr='123'; renderCalc();
+            document.getElementById('numpadBack').dispatchEvent(new MouseEvent('click',{bubbles:true}));
+            return calc.expr;
+        })()`);
+        ok('按一下删除键照样删掉一位（没有把点击处理一起挡掉）',
+            backFlow === '12', backFlow);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

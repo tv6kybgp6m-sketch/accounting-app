@@ -2333,6 +2333,27 @@ body.cat-dragging {
     touch-action: manipulation;
 }
 
+/* v1.41.14：iOS 把按键上的数字 / ⌫ / OK 当成普通文字，长按就弹「拷贝 / 选择」，
+   手指停在删除键上却一个数也没删掉，看起来就像按键失灵。
+   只在数字键盘这一块压掉文字选择、长按呼出菜单和原生拖拽 ——
+   账本其它地方照旧可以长按复制，所以千万别写成全局 * 或 body 规则。 */
+.numpad, .numpad * {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+@media (pointer: coarse) {
+    .numpad, .numpad * { -webkit-user-drag: none; }
+    /* 手机底部那排导航标签（交易记录 / 报表分析…）同样是按钮，
+       长按也不该弹「拷贝」。只在这块触屏规则里生效，桌面侧栏不受影响。 */
+    .nav-menu, .nav-menu * {
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-user-drag: none;
+    }
+}
+
 /* v1.39.78：按下反馈要看得见 —— 背景明显变灰 + 轻微下沉。
    原来只有 transform: scale(0.95) 和一个跟白底几乎同色的背景，
    手指按下去像没反应，不知道到底按没按上。
@@ -3013,7 +3034,9 @@ body.cat-dragging {
         margin-top: auto;
         flex-shrink: 0;
         gap: 1px;
-        padding: 10px 14px max(10px, env(safe-area-inset-bottom, 0px));
+        /* v1.41.14：左右各留 14px 时，最左/最右那两道空隙看着太宽，按键也跟着变窄。
+           收到 6px（负 margin 仍 -14px，灰底照旧铺满弹窗两侧），四列各宽出约 4px。 */
+        padding: 10px 6px max(10px, env(safe-area-inset-bottom, 0px));
         /* 负边距与 .modal-body 的左右 14px padding 对冲，让浅灰底铺满到弹窗两侧 */
         margin-left: -14px;
         margin-right: -14px;

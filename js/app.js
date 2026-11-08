@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.13';
+const APP_VERSION = '1.41.14';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -4547,6 +4547,15 @@ function closeTransactionModal() {
 function bindNumpadPressFeedback() {
     const pad = document.getElementById('numpad');
     if (!pad) return;
+    // v1.41.14：长按（尤其 ⌫）在部分 WebView 会弹系统「拷贝 / 选择」菜单，
+    // 结果一个数也没删掉。CSS 的 -webkit-touch-callout 管 iOS，这里再挡住
+    // contextmenu / selectstart（安卓、桌面右键）；只绑在键盘容器上，
+    // 金额输入框和账本其它地方的长按复制完全不受影响。
+    if (!pad.dataset.menuBound) {
+        pad.dataset.menuBound = '1';
+        pad.addEventListener('contextmenu', e => e.preventDefault());
+        pad.addEventListener('selectstart', e => e.preventDefault());
+    }
     const btns = pad.querySelectorAll('.numpad-btn');
     btns.forEach(btn => {
         if (btn.dataset.pressBound) return;
