@@ -282,6 +282,42 @@ async function run() {
             ev(`(state.accounts.find(a=>a.id==='a_plain').members||[]).slice().sort().join(',') === '家人,本人'`),
             ev(`JSON.stringify(state.accounts.find(a=>a.id==='a_plain').members)`));
 
+        // ---------- 9b) 共享账户：切成员不串草稿（v1.41.12 回归） ----------
+        // 支付宝在 stage 9 里已勾成「本人 + 家人」共用，两人的格子 key 完全一样。
+        // 以前切成员时下拉先变、表格还没重画，旧格子会被收进新成员的草稿，
+        // 本人的数就显示（并被保存）到家人名下。旧测试用的是成员专属账户，切过去整行消失，抓不到。
+        stage = '9b';
+        ev(`state.balances = []; state.returns = []; state.monthlyOpen = {};
+            paintModalMonth('monthly','2026-09'); openMonthlyModal('2026-09');
+            var s0 = document.getElementById('monthlyMemberSelect');
+            s0.value='本人'; s0.dispatchEvent(new Event('change',{bubbles:true}));
+            var ali = document.querySelector('#monthlyEntryList [data-bal="a_plain"][data-cat="cash"][data-cur="CNY"]');
+            ali.value='5000'; ali.dispatchEvent(new Event('input',{bubbles:true}));`);
+        ok('本人在共用的「支付宝」里填了 5000',
+            ev(`(document.querySelector('#monthlyEntryList [data-bal="a_plain"][data-cat="cash"][data-cur="CNY"]')||{}).value`) === '5000');
+        ev(`var s1 = document.getElementById('monthlyMemberSelect');
+            s1.value='家人'; s1.dispatchEvent(new Event('change',{bubbles:true}));`);
+        ok('切到家人：本人那 5000 自动存在本人名下',
+            ev(`!!state.balances.find(b=>b.member==='本人' && b.accountId==='a_plain' && b.amount===5000)`),
+            ev(`JSON.stringify(state.balances.map(b=>b.member+':'+b.accountId+':'+b.amount))`));
+        ok('重画后表格归属已跟着切到家人',
+            ev(`monthlyRenderedMember`) === '家人', ev(`monthlyRenderedMember`));
+        ok('家人页面里同一个支付宝格子是空的，不是 5000',
+            ev(`(function(){ var i=document.querySelector('#monthlyEntryList [data-bal="a_plain"][data-cat="cash"][data-cur="CNY"]'); return !!i && String(i.value).trim()===''; })()`),
+            ev(`(document.querySelector('#monthlyEntryList [data-bal="a_plain"][data-cat="cash"][data-cur="CNY"]')||{}).value`));
+        ok('家人的草稿里没有混进本人的数',
+            ev(`!monthlyDrafts['家人'] || monthlyDrafts['家人'].bal['a_plain__CNY__cash'] === undefined`),
+            ev(`JSON.stringify((monthlyDrafts['家人']||{}).bal)`));
+        ev(`saveMonthlyFor('家人', { quiet:true });`);
+        ok('在家人页面点保存，也不会把 5000 记到家人名下',
+            ev(`!state.balances.find(b=>b.member==='家人' && b.amount===5000)`),
+            ev(`JSON.stringify(state.balances.map(b=>b.member+':'+b.accountId+':'+b.amount))`));
+        ev(`var s2 = document.getElementById('monthlyMemberSelect');
+            s2.value='本人'; s2.dispatchEvent(new Event('change',{bubbles:true}));`);
+        ok('切回本人，5000 还在',
+            ev(`String((document.querySelector('#monthlyEntryList [data-bal="a_plain"][data-cat="cash"][data-cur="CNY"]')||{}).value)`) === '5000',
+            ev(`(document.querySelector('#monthlyEntryList [data-bal="a_plain"][data-cat="cash"][data-cur="CNY"]')||{}).value`));
+
 
         // ---------- 10) 顺序按家庭成员分开 ----------
         stage = '10';

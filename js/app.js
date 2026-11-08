@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.11';
+const APP_VERSION = '1.41.12';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -9969,6 +9969,9 @@ let monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
 // 不用每换一个成员就点一次「保存」（切过去的时候自动帮你存上一份）。
 let monthlyDrafts = {};
 let monthlyDraftMember = null;
+// v1.41.12：这张表此刻是按哪个成员画出来的。切成员时下拉先变、表格还没重画，
+// 中间那段「格子还是上一个人的」绝不能收进新成员的草稿（两人共用的账户会串账）。
+let monthlyRenderedMember = null;
 function monthlyDraftFor(member) {
     const m = member || monthlyMember();
     if (!monthlyDrafts[m]) monthlyDrafts[m] = { bal: {}, ret: {}, flow: {}, wt: {} };
@@ -10357,6 +10360,7 @@ function openMonthlyModal(month, focus) {
     monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
     monthlyDrafts = {};            // v1.39.94：重开弹窗不继承上次的草稿
     monthlyDraftMember = null;
+    monthlyRenderedMember = null;  // v1.41.12：重开弹窗，旧表格不算数
     monthlyFlowOpen.clear();
     monthlyDirty = false;
     monthlyCheckMode = false;   // v1.39.33：重开弹窗不继承上次的勾，要勾得再点一次「沿用上期」
@@ -10435,7 +10439,12 @@ function toggleMonthlyViewMode() {
 }
 
 function renderMonthlyEntry() {
-    if (monthlyDirty) captureMonthlyInputs();
+    // v1.41.12：只有「表格归属」和「当前下拉成员」是同一个人时，格子里的值才属于当前草稿。
+    // 刚切了成员、还没重画时，格子仍是上一个人的；这时收草稿，本人填的数就会跑到家人名下
+    //（支付宝这种两人共用的账户，格子 key 一模一样，最容易中招）。
+    const wantMember = monthlyMember();
+    if (monthlyDirty && monthlyRenderedMember === wantMember) captureMonthlyInputs();
+    monthlyRenderedMember = wantMember;
     const month = getModalMonth('monthly');
     const list = document.getElementById('monthlyEntryList');
     if (!list) return;
@@ -12112,8 +12121,11 @@ function initBalanceListeners() {
     if (monthlyMemberSel) monthlyMemberSel.addEventListener('change', () => {
         // v1.39.94：切家庭成员时，先把上一个成员填的自动存下来 ——
         // 录入时来回切成员不用每换一个就点一次保存（也不会把上一个成员的数弄丢）。
+        // v1.41.12：下拉已经指向新成员，但表格里还是旧成员的格子。收完、存完必须把
+        // monthlyDirty 清掉，否则下面重画时又会收一次；那时草稿指针已拨到新成员，
+        // 旧成员的数就被写进新成员的草稿里，共享账户（支付宝）上直接串成别人的账。
         const oldMember = monthlyDraftMember;
-        if (oldMember && monthlyDirty) {
+        if (oldMember && oldMember !== monthlyMemberSel.value && monthlyDirty) {
             captureMonthlyInputs();
             // 自动存失败（比如有格子没填汇率）就别切 —— 一重画用户刚填的数就没了
             if (!saveMonthlyFor(oldMember, { quiet: true })) {
@@ -12122,6 +12134,7 @@ function initBalanceListeners() {
                 return;
             }
             monthlyDrafts[oldMember] = { bal: {}, ret: {}, flow: {}, wt: {} };
+            monthlyDirty = false;                     // 这份已存进库，重画时别再收一遍
         }
         syncMonthlyDraftMember();
         refreshMonthlyViewMode();
