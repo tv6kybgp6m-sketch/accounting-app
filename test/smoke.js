@@ -813,6 +813,65 @@ async function run() {
             desktopNoAuto === '["输完按回车，或点上面的按钮",false]', desktopNoAuto);
         ev("__sessionSecret='';");
 
+        // ---------- 23) v1.41.13：连着记（切成员 / 切月份不被打断） + 手机数字键盘 ----------
+        stage = '23';
+        ev(`state.balances = []; state.returns = []; state.monthlyOpen = {};
+            state.accounts = [
+                { id:'a_plain', name:'支付宝', kind:'asset', group:'流动资金', color:'#111111', order:1, members:['本人','家人'] },
+                { id:'a_wife',  name:'她的卡', kind:'asset', group:'流动资金', color:'#333333', order:2, members:['家人'] }
+            ];
+            state.balanceMembers = ['本人','家人'];
+            state.hiddenItems = {}; state.sheetColOrder = {};
+            paintModalMonth('monthly','2026-03'); openMonthlyModal('2026-03');
+            var s0 = document.getElementById('monthlyMemberSelect');
+            s0.value='本人'; s0.dispatchEvent(new Event('change',{bubbles:true}));`);
+        ok('空白的 3 月打开就能填（编辑模式、格子不只读）',
+            ev(`monthlyViewMode === false`) &&
+            ev(`!document.querySelector('#monthlyEntryList [data-bal="a_plain"][data-cat="cash"]').readOnly`));
+        ev(`var m3 = document.querySelector('#monthlyEntryList [data-bal="a_plain"][data-cat="cash"][data-cur="CNY"]');
+            m3.value='5000'; m3.dispatchEvent(new Event('input',{bubbles:true}));
+            var s1 = document.getElementById('monthlyMemberSelect');
+            s1.value='家人'; s1.dispatchEvent(new Event('change',{bubbles:true}));`);
+        ok('切到家人：还是编辑模式，不用先点「编辑」',
+            ev(`monthlyViewMode === false`) &&
+            ev(`!document.querySelector('#monthlyEntryList [data-bal="a_plain"][data-cat="cash"]').readOnly`));
+        ev(`var s2 = document.getElementById('monthlyMemberSelect');
+            s2.value='本人'; s2.dispatchEvent(new Event('change',{bubbles:true}));`);
+        ok('切回本人（这次这个月已经有数据了）：仍然能直接输入，不会变成只读',
+            ev(`monthlyViewMode === false`) &&
+            ev(`!document.querySelector('#monthlyEntryList [data-bal="a_plain"][data-cat="cash"]').readOnly`),
+            ev(`JSON.stringify([monthlyViewMode, monthlyHasData])`));
+        // 模拟用户说的：3 月刚改完数，不点保存，直接点上面的月份切到 4 月
+        ev(`var m3b = document.querySelector('#monthlyEntryList [data-bal="a_plain"][data-cat="cash"][data-cur="CNY"]');
+            m3b.value='5200'; m3b.dispatchEvent(new Event('input',{bubbles:true}));
+            stepModalMonth('monthly', 1);`);
+        ok('切月份走到了 4 月', ev(`getModalMonth('monthly')`) === '2026-04', ev(`getModalMonth('monthly')`));
+        ok('3 月刚改的 5200 自动存进 3 月，4 月格子是空白（没被带过去）',
+            ev(`!!state.balances.find(b=>b.month==='2026-03' && b.member==='本人' && b.amount===5200)`) &&
+            ev(`String(document.querySelector('#monthlyEntryList [data-bal="a_plain"][data-cat="cash"][data-cur="CNY"]').value).trim()===''`),
+            ev(`JSON.stringify(state.balances.map(b=>b.month+':'+b.member+':'+b.accountId+':'+b.amount))`));
+        ok('5200 没有被写进 4 月（存的时候认的是旧月份）',
+            ev(`!state.balances.find(b=>b.month==='2026-04' && b.amount===5200)`));
+        ok('4 月也是编辑模式，可以接着填', ev(`monthlyViewMode === false`));
+        ev(`var m4 = document.querySelector('#monthlyEntryList [data-bal="a_plain"][data-cat="cash"][data-cur="CNY"]');
+            m4.value='7777'; m4.dispatchEvent(new Event('input',{bubbles:true}));
+            stepModalMonth('monthly', -1);`);
+        ok('切回 3 月：4 月的 7777 归 4 月，3 月还是 5200',
+            ev(`!!state.balances.find(b=>b.month==='2026-04' && b.member==='本人' && b.amount===7777)`) &&
+            ev(`String(document.querySelector('#monthlyEntryList [data-bal="a_plain"][data-cat="cash"][data-cur="CNY"]').value)`) === '5200',
+            ev(`JSON.stringify(state.balances.map(b=>b.month+':'+b.member+':'+b.amount))`));
+        ok('来回切好几次也不会变成只读', ev(`monthlyViewMode === false`));
+        // 手机数字键盘：左右间隙收到和上下一样、按键高一点点
+        ok('手机端：每列按键的左右间隙 = 每行按键的上下间隙（都是 1px）',
+            /#transactionModal \.numpad-row\s*\{[^}]*gap:\s*1px/m.test(cssText) &&
+            /#transactionModal \.numpad\s*\{[^}]*gap:\s*1px/m.test(cssText));
+        ok('手机端数字键调高了一点点（45 → 48px）',
+            /#transactionModal \.numpad-btn\s*\{[^}]*height:\s*48px/m.test(cssText));
+        ok('桌面 / 网页端键盘不受影响（基础键高 50px、行距 8px、触摸响应还在）',
+            /\.numpad-btn\s*\{[^}]*height:\s*50px/m.test(cssText) &&
+            /\.numpad-row\s*\{[^}]*gap:\s*8px/m.test(cssText) &&
+            cssText.indexOf('touch-action: manipulation') >= 0);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.12';
+const APP_VERSION = '1.41.13';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -9972,10 +9972,21 @@ let monthlyDraftMember = null;
 // v1.41.12：这张表此刻是按哪个成员画出来的。切成员时下拉先变、表格还没重画，
 // 中间那段「格子还是上一个人的」绝不能收进新成员的草稿（两人共用的账户会串账）。
 let monthlyRenderedMember = null;
+// v1.41.13：这张表还是按哪个月画出来的。草稿只按成员分，月份一变，
+// 草稿里上个月的数就会被新月份读出来（3 月的数跑到 4 月），切月份要先把旧数收好再清草稿。
+let monthlyRenderedMonth = null;
 function monthlyDraftFor(member) {
     const m = member || monthlyMember();
     if (!monthlyDrafts[m]) monthlyDrafts[m] = { bal: {}, ret: {}, flow: {}, wt: {} };
     return monthlyDrafts[m];
+}
+// v1.41.13：这一份已经存进库了 —— 换一本干净草稿，并把「当前正在用的那本」一起拨过去。
+// 只把 monthlyDrafts[成员] 换成新对象是**不够**的：切月份时成员没变，syncMonthlyDraftMember()
+// 不会动 monthlyInput，它还指着写满上个月数字的那本旧草稿，新月份照样把旧数读出来。
+function resetMonthlyDraft(member) {
+    const m = member || monthlyMember();
+    monthlyDrafts[m] = { bal: {}, ret: {}, flow: {}, wt: {} };
+    monthlyInput = monthlyDrafts[m];
 }
 // 当前成员变了没？变了就把草稿切到那个成员的那一份
 function syncMonthlyDraftMember() {
@@ -10361,6 +10372,7 @@ function openMonthlyModal(month, focus) {
     monthlyDrafts = {};            // v1.39.94：重开弹窗不继承上次的草稿
     monthlyDraftMember = null;
     monthlyRenderedMember = null;  // v1.41.12：重开弹窗，旧表格不算数
+    monthlyRenderedMonth = null;   // v1.41.13：同上，旧月份也不算数
     monthlyFlowOpen.clear();
     monthlyDirty = false;
     monthlyCheckMode = false;   // v1.39.33：重开弹窗不继承上次的勾，要勾得再点一次「沿用上期」
@@ -10405,9 +10417,12 @@ function monthHasSavedData(month, member) {
     return state.balances.some(b => b.month === month && b.member === member)
         || state.returns.some(r => r.month === month && r.member === member);
 }
-function refreshMonthlyViewMode() {
+function refreshMonthlyViewMode(preferEdit) {
     monthlyHasData = monthHasSavedData(getModalMonth('monthly'), monthlyMember());
-    monthlyViewMode = monthlyHasData;   // 有数据默认查看（只读）；没数据默认编辑（要填）
+    // v1.41.13：切成员 / 切月份是「连着记」的动作。切走时软件会自动把刚填的数存进库，
+    // 切回来若按「有数据 = 查看」判定，就变成只读、还得再点一次「编辑」，记录节奏被打断。
+    // 切换前在编辑的，切换后继续让填；只有刚打开弹窗（没传参数）才按老规矩判定。
+    monthlyViewMode = preferEdit ? false : monthlyHasData;
 }
 function applyMonthlyViewMode(list) {
     const modal = document.getElementById('monthlyModal');
@@ -10439,13 +10454,14 @@ function toggleMonthlyViewMode() {
 }
 
 function renderMonthlyEntry() {
-    // v1.41.12：只有「表格归属」和「当前下拉成员」是同一个人时，格子里的值才属于当前草稿。
-    // 刚切了成员、还没重画时，格子仍是上一个人的；这时收草稿，本人填的数就会跑到家人名下
-    //（支付宝这种两人共用的账户，格子 key 一模一样，最容易中招）。
+    // v1.41.12 / v1.41.13：只有「表格归属的成员 + 月份」和当前选择都一致时，
+    // 格子里的值才属于当前草稿。刚切了成员或月份、还没重画时，格子仍是上一张表的，
+    // 这时收草稿会把本人的数收给家人、把 3 月的数收给 4 月。
     const wantMember = monthlyMember();
-    if (monthlyDirty && monthlyRenderedMember === wantMember) captureMonthlyInputs();
-    monthlyRenderedMember = wantMember;
     const month = getModalMonth('monthly');
+    if (monthlyDirty && monthlyRenderedMember === wantMember && monthlyRenderedMonth === month) captureMonthlyInputs();
+    monthlyRenderedMember = wantMember;
+    monthlyRenderedMonth = month;
     const list = document.getElementById('monthlyEntryList');
     if (!list) return;
     const ms = document.getElementById('monthlyMemberSelect');
@@ -11521,8 +11537,7 @@ function renderMonthlySelfCheck() {
 
 function clearMonthlyInputs() {
     captureMonthlyInputs();
-    monthlyInput = { bal: {}, ret: {}, flow: {}, wt: {} };
-    if (monthlyDraftMember) monthlyDrafts[monthlyDraftMember] = { bal: {}, ret: {}, flow: {}, wt: {} };
+    resetMonthlyDraft(monthlyDraftMember);
     document.querySelectorAll('#monthlyEntryList input').forEach(i => {
         if (i.dataset.walletTotal !== undefined || i.dataset.bal !== undefined
             || i.dataset.ret !== undefined || i.dataset.flowIn !== undefined) i.value = '';
@@ -11593,8 +11608,8 @@ function syncChkCount() {
 //      撤销入口得在弹窗外面，所以保存后给一条带「撤销」按钮的提示条，见 showMonthlyUndoToast）
 // 原来只在打开时拍一张，导致「记了 → 保存 → 再打开 → 撤销」撤了个寂寞：
 // 快照拍到的就是刚保存完的样子，撤回到等于没撤。
-function snapshotMonthlyForUndo(memberOverride) {
-    const month = getModalMonth('monthly');
+function snapshotMonthlyForUndo(memberOverride, monthOverride) {
+    const month = monthOverride || getModalMonth('monthly');
     if (!month) return;
     const member = memberOverride || monthlyMember();
     const cp = arr => (arr || []).filter(x => x.month === month && x.member === member).map(x => Object.assign({}, x));
@@ -11707,14 +11722,16 @@ function saveMonthly() {
 //   opts.quiet = 不弹提示、不动核对模式（切换家庭成员时自动存那一份时用）
 function saveMonthlyFor(member, opts) {
     opts = opts || {};
-    const month = getModalMonth('monthly');
+    // v1.41.13：切月份时下拉已经是新月份了，表格却还是上个月的。
+    // 这时自动存「上一份」必须显式传旧月份，否则会把 3 月的数写进 4 月。
+    const month = opts.month || getModalMonth('monthly');
     if (!month) { if (!opts.quiet) showToast('请选择月份', 'error'); return false; }
     const list = document.getElementById('monthlyEntryList');
     if (!list) return false;
     let savedBal = 0, savedRet = 0, removed = 0;
     // v1.39.33 修掉的坑：撤销快照只在打开弹窗时拍，于是「记了 → 保存 → 再打开 → 撤销」撤了个寂寞
     // ——快照里装的就是刚保存完的样子。快照必须在这里拍：动 state 之前的那一张，才撤得掉这次保存。
-    snapshotMonthlyForUndo(member);
+    snapshotMonthlyForUndo(member, opts.month);
     // 先把这个成员这个月、这些「账户 × 币种」的旧余额整批清掉，再按格子写回去。
     // 不清的话同一笔数会同时留着「老的一条（没有类别）」和「新的一条（有类别）」，
     // 下一次读出来直接翻倍 —— 这是改口径时最容易踩的坑。
@@ -12116,7 +12133,26 @@ function initBalanceListeners() {
         () => ({ y: state.balanceYear || new Date().getFullYear(), m: state.balanceMonth || (new Date().getMonth() + 1) }),
         (y, m) => { state.balanceYear = y; state.balanceMonth = m; renderBalance(); },
         () => ({ withMonth: state.balancePeriod !== 'year' }));
-    bindModalMonth('monthly', () => { refreshMonthlyViewMode(); renderMonthlyEntry(); });
+    bindModalMonth('monthly', () => {
+        // v1.41.13：月份控件已经指向新月份，表格里却还是上个月的格子，草稿本也还留着
+        // 上个月的数。先把上个月收好、存进上个月、草稿清空，再按新月份重画 ——
+        // 否则 3 月的数会被 4 月读出来，没法连着一个月一个月记下去。
+        const oldMonth = monthlyRenderedMonth;
+        const newMonth = getModalMonth('monthly');
+        const wasEditing = !monthlyViewMode;
+        if (oldMonth && oldMonth !== newMonth && monthlyDirty) {
+            captureMonthlyInputs();
+            if (!saveMonthlyFor(monthlyMember(), { quiet: true, month: oldMonth })) {
+                paintModalMonth('monthly', oldMonth);   // 存失败（比如缺汇率）就别切
+                renderMonthlyEntry();
+                return;
+            }
+            resetMonthlyDraft(monthlyMember());
+            monthlyDirty = false;
+        }
+        refreshMonthlyViewMode(wasEditing);
+        renderMonthlyEntry();
+    });
     const monthlyMemberSel = document.getElementById('monthlyMemberSelect');
     if (monthlyMemberSel) monthlyMemberSel.addEventListener('change', () => {
         // v1.39.94：切家庭成员时，先把上一个成员填的自动存下来 ——
@@ -12124,6 +12160,8 @@ function initBalanceListeners() {
         // v1.41.12：下拉已经指向新成员，但表格里还是旧成员的格子。收完、存完必须把
         // monthlyDirty 清掉，否则下面重画时又会收一次；那时草稿指针已拨到新成员，
         // 旧成员的数就被写进新成员的草稿里，共享账户（支付宝）上直接串成别人的账。
+        // v1.41.13：切换属于连着记的动作，切换前在编辑，切换后也要继续能填。
+        const wasEditing = !monthlyViewMode;
         const oldMember = monthlyDraftMember;
         if (oldMember && oldMember !== monthlyMemberSel.value && monthlyDirty) {
             captureMonthlyInputs();
@@ -12133,11 +12171,11 @@ function initBalanceListeners() {
                 renderMonthlyEntry();
                 return;
             }
-            monthlyDrafts[oldMember] = { bal: {}, ret: {}, flow: {}, wt: {} };
+            resetMonthlyDraft(oldMember);
             monthlyDirty = false;                     // 这份已存进库，重画时别再收一遍
         }
         syncMonthlyDraftMember();
-        refreshMonthlyViewMode();
+        refreshMonthlyViewMode(wasEditing);
         renderMonthlyEntry();
     });
     // v1.39.91：原来的「币种」下拉（人民币 / 其他币种）已删掉 —— 页面固定就是多币种那套，
