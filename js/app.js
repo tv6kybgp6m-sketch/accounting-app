@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.14';
+const APP_VERSION = '1.41.15';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -273,6 +273,8 @@ let state = {
     accounts: DEFAULT_ACCOUNTS.map(a => ({ ...a })),
     balances: [],
     returns: [],               // 投资收益：{id, member, accountId, month, amount}
+    lendings: [],              // 借出款：{id, person, amount, lendDate, dueDate, repaidAt, createdAt, updatedAt}
+    reviews: { monthly: {}, yearly: {} },  // 自己写的月度/年度回顾（全家一份，不按成员分）
     recurring: [],               // 周期记账规则：{id, type, amount, categoryId, paymentMethod, note, member, dayOfMonth, startDate, untilDate, lastRunPeriod, active}
     pendingRecurring: [],        // 到点生成、但还没入账的周期账（本机待办队列，不参与同步）
     recurringSkipped: {},        // 'ruleId|日期' -> true：手动跳过的期次，不再重复生成
@@ -347,11 +349,15 @@ let state = {
 // state.balances.map(...) / state.accounts.filter(...)，不用每处再写 `|| []`
 // （以前 175 处直接用、50 处带 || []、19 处写成 (state.X || [])，三种写法混着，
 //   漏一处就是 undefined.map 抛错、整页渲染中断 —— 这里收成一处。）
-const ARRAY_STATE_FIELDS = ['transactions', 'categories', 'budgets', 'paymentMethods', 'accounts', 'balances', 'returns', 'recurring', 'pendingRecurring', 'insuranceMembers', 'insurancePolicies', 'balanceMembers', 'sheetCols', 'currencies'];
+const ARRAY_STATE_FIELDS = ['transactions', 'categories', 'budgets', 'paymentMethods', 'accounts', 'balances', 'returns', 'lendings', 'recurring', 'pendingRecurring', 'insuranceMembers', 'insurancePolicies', 'balanceMembers', 'sheetCols', 'currencies'];
 function ensureArrayFields() {
     ARRAY_STATE_FIELDS.forEach(k => {
         if (!Array.isArray(state[k])) state[k] = [];
     });
+    // 回顾是对象不是数组，单独兜底（老账本没有这两个键）
+    if (!state.reviews || typeof state.reviews !== 'object') state.reviews = {};
+    if (!state.reviews.monthly || typeof state.reviews.monthly !== 'object') state.reviews.monthly = {};
+    if (!state.reviews.yearly || typeof state.reviews.yearly !== 'object') state.reviews.yearly = {};
     // deleted 里那十三个墓碑列表同理（老数据可能缺键）
     if (!state.deleted || typeof state.deleted !== 'object') state.deleted = {};
     Object.keys(state.deleted).forEach(k => {
@@ -1584,6 +1590,8 @@ function buildSyncPayload() {
             accounts: state.accounts,
             balances: state.balances,
             returns: state.returns,
+            lendings: state.lendings,
+            reviews: state.reviews,
             balanceMembers: state.balanceMembers,
             memberAddedAt: state.memberAddedAt,
             fundTargets: state.fundTargets,
@@ -1928,6 +1936,29 @@ function mergeRemoteData(remoteData) {
         if (!cur || (r.updatedAt || 0) > (cur.updatedAt || 0)) ruleMap.set(r.id, r);
     });
     state.recurring = Array.from(ruleMap.values());
+
+    // v1.41.15 借出款：按 id 并集、较新的赢；删除靠记录自带 deletedAt（不新增墓碑 kind，
+    // 避免整体重赋值 state.deleted 时漏掉新 kind）。手写回顾按「月/年 key」较新的赢。
+    {
+        const lMap = new Map();
+        state.lendings.forEach(l => { if (l && l.id) lMap.set(l.id, l); });
+        (remote.lendings || []).forEach(l => {
+            if (!l || !l.id) return;
+            const cur = lMap.get(l.id);
+            if (!cur || (l.updatedAt || 0) > (cur.updatedAt || 0)) lMap.set(l.id, l);
+        });
+        state.lendings = Array.from(lMap.values());
+        const rr = (remote.reviews && typeof remote.reviews === 'object') ? remote.reviews : {};
+        ['monthly', 'yearly'].forEach(kind => {
+            const src = rr[kind] || {};
+            Object.keys(src).forEach(k => {
+                const v = src[k];
+                if (!v || typeof v !== 'object') return;
+                const cur = state.reviews[kind][k];
+                if (!cur || (v.updatedAt || 0) > (cur.updatedAt || 0)) state.reviews[kind][k] = v;
+            });
+        });
+    }
 
     // 家庭成员名单：并集（余额/收益记录的 id 编码了成员名，名单丢了记录就悬空）
     state.balanceMembers = [...new Set([...state.balanceMembers, ...(remote.balanceMembers || [])])];
@@ -7488,12 +7519,55 @@ const BAL_METRICS = {
 };
 let balanceRenderToken = 0;
 
-function accountById(id) { return state.accounts.find(a => a.id === id); }
+function accountById(id) {
+    if (id === LENDING_ACCOUNT_ID) return lendingVirtualAccount();
+    return state.accounts.find(a => a.id === id);
+}
 
 // 账户类型是全家共用的清单；成员维度作用在"余额记录"上，不是账户上
 function balAccounts() { return state.accounts; }
 function balanceMonths() { return [...new Set(state.balances.map(b => b.month))].sort(); }
 function balanceYears() { return [...new Set(balanceMonths().map(m => m.slice(0, 4)))].sort(); }
+
+// ==================== 借出款台账（v1.41.15）====================
+// 台账只存「谁 / 什么时候借的 / 多少 / 大概什么时候还」，金额永远是用户自己填的。
+// 不往 state.balances 写任何东西：读余额的两处汇总函数按月把「当时还没还的钱」
+// 并进去，所以当月、以及翻回历史月份，资产负债表都会自动出现这笔；标记已还后自动消失。
+// 录入表格读的是 balanceCellsByCurAtMonth，不走这里 —— 不用点「沿用上期」，
+// 也不会被保存时当成手填的数写回去（绝不自动写余额）。
+const LENDING_ACCOUNT_ID = '__lending__';
+function lendingOwner() {
+    return (state.balanceMembers && state.balanceMembers[0]) || '本人';
+}
+function lendingVisibleFor(member) {
+    return !member || member === 'all' || member === lendingOwner();
+}
+function lendingList() {
+    return (state.lendings || []).filter(l => l && l.id && !l.deletedAt && Number(l.amount) > 0);
+}
+// 某月月末快照时仍未归还的合计；repaidAt 落在当月内（含）就视为已还，当月不再计入。
+function lendingOutstandingAt(month) {
+    if (!month) return 0;
+    const end = month + '-31';
+    let sum = 0;
+    lendingList().forEach(l => {
+        const from = String(l.lendDate || '').slice(0, 10);
+        if (!from || from > end) return;
+        const repaid = String(l.repaidAt || '').slice(0, 10);
+        if (repaid && repaid <= end) return;
+        sum += Number(l.amount) || 0;
+    });
+    return sum;
+}
+function lendingCatKey() {
+    const cols = (typeof sheetAssetCats === 'function') ? sheetAssetCats() : [];
+    const hit = cols.find(c => c && c.key === 'other') || cols.find(c => c && c.kind === 'asset') || cols[0];
+    return hit ? hit.key : 'other';
+}
+function lendingVirtualAccount() {
+    return { id: LENDING_ACCOUNT_ID, name: '借出款', kind: 'asset', group: '其他',
+        icon: 'fa-hand-holding-dollar', color: '#8e8e93', virtual: true, bucket: 'other' };
+}
 
 // 只取「这个月本身」记过的账户。余额是快照不是流水，缺月不能拿上期顶替。
 // 一个账户现在可能同时在好几个类别里有数（支付宝既有余额又有花呗），
@@ -7508,6 +7582,10 @@ function balancesAtMonth(month, member = state.balanceOwner) {
             const neg = isLiabCat(balanceCatOf(b));
             map[b.accountId] = (map[b.accountId] || 0) + (neg ? -v : v);
         });
+    if (lendingVisibleFor(member)) {
+        const v = lendingOutstandingAt(month);
+        if (v) map[LENDING_ACCOUNT_ID] = (map[LENDING_ACCOUNT_ID] || 0) + v;
+    }
     return map;
 }
 
@@ -7575,6 +7653,13 @@ function balancesByCat(month, member = state.balanceOwner) {
             const c = balanceCatOf(b);
             cat[c] = (cat[c] || 0) + Math.abs(Number(b.amount) || 0);
         });
+    if (lendingVisibleFor(member)) {
+        const v = lendingOutstandingAt(month);
+        if (v) {
+            const k = lendingCatKey();
+            cat[k] = (cat[k] || 0) + v;
+        }
+    }
     return cat;
 }
 
@@ -7587,7 +7672,7 @@ function totalsFromCat(cat) {
 }
 
 function monthHasRecords(month) {
-    return !!month && state.balances.some(b => b.month === month);
+    return !!month && (state.balances.some(b => b.month === month) || lendingOutstandingAt(month) > 0);
 }
 
 
@@ -7754,6 +7839,7 @@ function renderBalance() {
     renderBalanceMemberBar();
     renderFamilySummary();
     renderNetBridge();
+    renderLendingCard();
     updateNavBadges();
 }
 
@@ -11515,13 +11601,20 @@ function renderMonthlySelfCheck() {
     // 上月有资产、本月空白的漏填提醒
     const prev = previousMonthOf(month);
     const prevMap = prev ? balancesAtMonth(prev, member) : {};
-    const missing = [];
+    const missing = [], maybeTopUp = [];
     Object.keys(prevMap).forEach(id => {
+        if (id === LENDING_ACCOUNT_ID) return;   // 台账自动带出的资产，不是漏填
         const p = prevMap[id];
         if (!(p > 0)) return;
-        if (acctNet[id] === undefined || acctNet[id] === 0) {
+        const now = acctNet[id];
+        if (now === undefined || now === 0) {
             const a = accountById(id);
             missing.push(a ? a.name : id);
+        } else if (now - p > Math.max(1000, p * 0.1)
+                   && retMap[id] === undefined && flowMap[id] === undefined) {
+            // 只读提醒：余额明显多了、收益和净入金却都空着，多半是这个月往里加过钱
+            const a = accountById(id);
+            maybeTopUp.push(a ? a.name : id);
         }
     });
 
@@ -11540,6 +11633,10 @@ function renderMonthlySelfCheck() {
     if (missing.length) {
         const shown = missing.slice(0, 5).join('、') + (missing.length > 5 ? ` 等 ${missing.length} 个` : '');
         html += `<div class="msc-line msc-warn"><i class="fa-solid fa-triangle-exclamation"></i> 上月有数本月空白：${shown} —— 确认是清掉了还是漏填</div>`;
+    }
+    if (maybeTopUp.length) {
+        const shown = maybeTopUp.slice(0, 5).join('、') + (maybeTopUp.length > 5 ? ` 等 ${maybeTopUp.length} 个` : '');
+        html += `<div class="msc-line msc-hint"><i class="fa-solid fa-circle-info"></i> 余额比上月多了一截、收益和净入金都空着：${shown} —— 是不是往里加过钱？（只提醒，不改任何数）</div>`;
     }
     el.innerHTML = html;
 }
@@ -14195,6 +14292,7 @@ function renderReturns() {
     renderReturnBreakdown(info);
     renderReturnMonthly();
     renderReturnMemberBar();
+    renderReturnMissing(info);
     updateReturnToggleStates();
 }
 
@@ -15401,6 +15499,267 @@ document.addEventListener('wheel', function (e) {
 // 这个监听器永远等不到 → init() 一次都不跑 → 页面看着在、但所有数据逻辑全部没启动
 // （连「清示例数据」这类启动时该做的事都跳过）。
 // 所以必须补一次 readyState 判断：已经好了就直接动手，别再干等。
+// ==================== v1.41.15：借出款台账 / 回顾报告 / 收益率缺料清单 ====================
+function _todayISO() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function _monthKeyNow() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+function _fmtY(v) { return formatCurrency(Math.round((Number(v) || 0) * 100) / 100); }
+
+// ---- 借出款：登记 / 修改 / 标记已还 / 删除 ----
+let lendingEditingId = null;
+function openLendingModal(id) {
+    const m = document.getElementById('lendingModal');
+    if (!m) return;
+    const rec = id ? (state.lendings || []).find(l => l.id === id) : null;
+    const gv = k => document.getElementById(k);
+    lendingEditingId = rec ? rec.id : '';
+    gv('lendingId').value = lendingEditingId;
+    gv('lendingPerson').value = rec ? (rec.person || '') : '';
+    gv('lendingAmount').value = rec ? rec.amount : '';
+    gv('lendingDate').value = rec ? (rec.lendDate || '') : _todayISO();
+    gv('lendingDue').value = rec ? (rec.dueDate || '') : '';
+    gv('lendingModalTitle').textContent = rec ? '修改借出款' : '记一笔借出';
+    m.classList.remove('hidden');
+    raiseOverlay(m);
+}
+function closeLendingModal() {
+    const m = document.getElementById('lendingModal');
+    if (m) m.classList.add('hidden');
+}
+function saveLending() {
+    const gv = k => document.getElementById(k);
+    const person = String(gv('lendingPerson').value || '').trim();
+    const amount = Number(gv('lendingAmount').value);
+    const lendDate = String(gv('lendingDate').value || '');
+    const dueDate = String(gv('lendingDue').value || '');
+    if (!person) { showToast('请填谁借的', 'error'); return; }
+    if (!(amount > 0)) { showToast('金额要大于 0', 'error'); return; }
+    if (!lendDate) { showToast('请填借款时间', 'error'); return; }
+    if (dueDate && dueDate < lendDate) { showToast('预计还款时间不能早于借款时间', 'error'); return; }
+    if (!Array.isArray(state.lendings)) state.lendings = [];
+    const now = Date.now();
+    const id = String(gv('lendingId').value || '');
+    const rec = id ? state.lendings.find(l => l.id === id) : null;
+    if (rec) Object.assign(rec, { person, amount, lendDate, dueDate, updatedAt: now });
+    else state.lendings.push({ id: 'lend_' + uid(), person, amount, lendDate, dueDate, repaidAt: '', createdAt: now, updatedAt: now });
+    saveState();
+    closeLendingModal();
+    renderLendingCard();
+    if (typeof renderBalance === 'function') renderBalance();
+    showToast('记下了，这笔钱会自动出现在资产负债表里', 'success');
+}
+function toggleLendingRepaid(id) {
+    const rec = (state.lendings || []).find(l => l.id === id);
+    if (!rec) return;
+    rec.repaidAt = rec.repaidAt ? '' : _todayISO();
+    rec.updatedAt = Date.now();
+    saveState();
+    renderLendingCard();
+    if (typeof renderBalance === 'function') renderBalance();
+}
+function deleteLending(id) {
+    const rec = (state.lendings || []).find(l => l.id === id);
+    if (!rec) return;
+    if (!confirm('删掉这笔借出款记录？资产负债表里它也会一起消失。')) return;
+    rec.deletedAt = Date.now();
+    rec.updatedAt = Date.now();
+    saveState();
+    renderLendingCard();
+    if (typeof renderBalance === 'function') renderBalance();
+}
+function renderLendingCard() {
+    const card = document.getElementById('lendingCard');
+    const box = document.getElementById('lendingList');
+    if (!card || !box) return;
+    const list = lendingList().slice().sort((a, b) => String(b.lendDate || '').localeCompare(String(a.lendDate || '')));
+    card.classList.toggle('hidden', list.length === 0);
+    if (!list.length) { box.innerHTML = ''; return; }
+    const open = list.filter(l => !l.repaidAt);
+    const total = open.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+    const sub = document.getElementById('lendingSub');
+    if (sub) sub.textContent = `未还 ${open.length} 笔 · 合计 ${_fmtY(total)}（已自动计入总资产）`;
+    box.innerHTML = list.map(l => {
+        const due = l.dueDate ? `预计 ${_esc(l.dueDate)} 还` : '没填预计还款时间';
+        const tag = l.repaidAt
+            ? `<span class="lend-tag done">已于 ${_esc(l.repaidAt)} 归还</span>`
+            : '<span class="lend-tag">未还</span>';
+        return `<div class="lend-row">
+            <span class="lend-who">${_esc(l.person || '未填')}</span>
+            <span class="lend-amt">${_fmtY(l.amount)}</span>
+            <span class="lend-date">借于 ${_esc(l.lendDate || '—')} · ${due}</span>
+            ${tag}
+            <span class="lend-ops">
+                <button class="link-btn" onclick="toggleLendingRepaid('${_esc(l.id)}')">${l.repaidAt ? '撤销已还' : '标记已还'}</button>
+                <button class="link-btn" onclick="openLendingModal('${_esc(l.id)}')">修改</button>
+                <button class="link-btn danger" onclick="deleteLending('${_esc(l.id)}')">删除</button>
+            </span>
+        </div>`;
+    }).join('');
+}
+
+// ---- 月度 / 年度回顾：自动报告（只给事实）+ 自己写的一段话 ----
+let reviewTab = 'month';
+let reviewMonth = null;
+function openReviewModal() {
+    const m = document.getElementById('reviewModal');
+    if (!m) return;
+    if (!reviewMonth) reviewMonth = _monthKeyNow();
+    m.classList.remove('hidden');
+    raiseOverlay(m);
+    renderReviewModal();
+}
+function closeReviewModal() {
+    const m = document.getElementById('reviewModal');
+    if (m) m.classList.add('hidden');
+}
+function setReviewTab(t) { reviewTab = (t === 'year') ? 'year' : 'month'; renderReviewModal(); }
+function stepReviewMonth(delta) {
+    const cur = reviewMonth || _monthKeyNow();
+    const p = cur.split('-').map(Number);
+    const step = (reviewTab === 'year' ? 12 : 1) * delta;
+    const d = new Date(p[0], p[1] - 1 + step, 1);
+    reviewMonth = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    renderReviewModal();
+}
+function renderReviewModal() {
+    const auto = document.getElementById('reviewAuto');
+    if (!auto) return;
+    const month = reviewMonth || _monthKeyNow();
+    const year = month.slice(0, 4);
+    const gv = k => document.getElementById(k);
+    if (gv('reviewPeriodLabel')) gv('reviewPeriodLabel').textContent = reviewTab === 'year'
+        ? `${year} 年` : `${month.slice(0, 4)} 年 ${Number(month.slice(5, 7))} 月`;
+    if (gv('reviewTabMonth')) gv('reviewTabMonth').classList.toggle('active', reviewTab === 'month');
+    if (gv('reviewTabYear')) gv('reviewTabYear').classList.toggle('active', reviewTab === 'year');
+    auto.innerHTML = reviewTab === 'year' ? reviewYearPageHTML(year) : reviewMonthReportHTML(month);
+    const kind = reviewTab === 'year' ? 'yearly' : 'monthly';
+    const key = reviewTab === 'year' ? year : month;
+    const saved = (state.reviews && state.reviews[kind] && state.reviews[kind][key]) || null;
+    if (gv('reviewText')) gv('reviewText').value = saved ? (saved.text || '') : '';
+    if (gv('reviewTextLabel')) gv('reviewTextLabel').textContent = reviewTab === 'year' ? '这一年想记的话' : '这个月想记的话';
+    if (gv('reviewSaved')) gv('reviewSaved').textContent = saved && saved.updatedAt ? '已保存过' : '';
+    renderReviewHistory(kind);
+}
+function saveReviewText() {
+    const month = reviewMonth || _monthKeyNow();
+    const kind = reviewTab === 'year' ? 'yearly' : 'monthly';
+    const key = reviewTab === 'year' ? month.slice(0, 4) : month;
+    const text = String((document.getElementById('reviewText') || {}).value || '').trim();
+    if (!state.reviews || typeof state.reviews !== 'object') state.reviews = { monthly: {}, yearly: {} };
+    if (!state.reviews[kind] || typeof state.reviews[kind] !== 'object') state.reviews[kind] = {};
+    if (!text) delete state.reviews[kind][key];
+    else state.reviews[kind][key] = { text, updatedAt: Date.now() };
+    saveState();
+    const hint = document.getElementById('reviewSaved');
+    if (hint) hint.textContent = text ? '已保存' : '已清空';
+    renderReviewHistory(kind);
+}
+function renderReviewHistory(kind) {
+    const box = document.getElementById('reviewHistory');
+    if (!box) return;
+    const map = (state.reviews && state.reviews[kind]) || {};
+    const keys = Object.keys(map).filter(k => map[k] && map[k].text).sort().reverse();
+    if (!keys.length) { box.innerHTML = '<div class="review-empty">还没写过。写过的会留在这里，随时能翻。</div>'; return; }
+    box.innerHTML = '<div class="review-history-title">以前写的</div>' + keys.slice(0, 24).map(k =>
+        `<div class="review-hist-row"><b>${_esc(k)}</b><span>${_esc(map[k].text)}</span></div>`).join('');
+}
+// 一屏四行：收支结余（带近 6 个月均值）、分类前五、净资产与当月收益、习惯统计。
+// 全部是已有数据的加减和排序，不写任何数、不给「应该花多少」这类判断。
+function reviewMonthReportHTML(month) {
+    const txns = state.transactions.filter(t => getMonthKey(t.date) === month);
+    const sumOf = (rows) => rows.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+    const inc = sumOf(txns.filter(t => t.type === 'income'));
+    const exp = sumOf(txns.filter(t => t.type === 'expense'));
+    let cursor = month, sum6 = 0, n6 = 0;
+    for (let i = 0; i < 6; i++) {
+        cursor = previousMonthOf(cursor);
+        if (!cursor) break;
+        const rows = state.transactions.filter(t => t.type === 'expense' && getMonthKey(t.date) === cursor);
+        if (rows.length) { sum6 += sumOf(rows); n6++; }
+    }
+    const avg6 = n6 ? sum6 / n6 : null;
+    const byCat = {};
+    txns.filter(t => t.type === 'expense').forEach(t => {
+        const k = t.categoryId || 'other';
+        byCat[k] = (byCat[k] || 0) + (Number(t.amount) || 0);
+    });
+    const catName = id => {
+        const c = state.categories.find(x => x.id === id);
+        return c ? (c.name || c.label || id) : id;
+    };
+    const top5 = Object.keys(byCat).sort((a, b) => byCat[b] - byCat[a]).slice(0, 5)
+        .map(k => `${_esc(catName(k))} ${_fmtY(byCat[k])}（${exp > 0 ? (byCat[k] / exp * 100).toFixed(1) : '0.0'}%）`).join(' · ');
+    const t = totalsFromCat(balancesByCat(month, 'all'));
+    const rmap = returnsAtMonth(month, 'all');
+    const profit = Object.keys(rmap).reduce((s, k) => s + (Number(rmap[k]) || 0), 0);
+    const days = new Set(txns.map(x => String(x.date).slice(0, 10))).size;
+    const noNote = txns.filter(x => !String(x.note || '').trim()).length;
+    return `<div class="review-report">
+        <div class="rr-row"><span class="rr-k">收支结余</span><span class="rr-v">支出 ${_fmtY(exp)} · 收入 ${_fmtY(inc)} · 结余 ${_fmtY(inc - exp)}${avg6 !== null ? `<em>近 6 个月月均支出 ${_fmtY(avg6)}</em>` : ''}</span></div>
+        <div class="rr-row"><span class="rr-k">分类前五</span><span class="rr-v">${top5 || '这个月没有支出记录'}</span></div>
+        <div class="rr-row"><span class="rr-k">家底与投资</span><span class="rr-v">净资产 ${_fmtY(t.net)}（资产 ${_fmtY(t.asset)} / 负债 ${_fmtY(t.liability)}）· 当月投资收益 ${_fmtY(profit)}</span></div>
+        <div class="rr-row"><span class="rr-k">记账习惯</span><span class="rr-v">记了 ${days} 天 · 共 ${txns.length} 笔 · ${noNote} 笔没写备注</span></div>
+        <div class="rr-foot">这里只摆事实，不判断该花多少、也不预测下个月。</div>
+    </div>`;
+}
+function reviewYearPageHTML(year) {
+    const months = [];
+    for (let i = 1; i <= 12; i++) months.push(year + '-' + String(i).padStart(2, '0'));
+    let yearExp = 0, yearProfit = 0;
+    months.forEach(m => {
+        state.transactions.forEach(t => {
+            if (getMonthKey(t.date) !== m || t.type !== 'expense') return;
+            yearExp += Number(t.amount) || 0;
+        });
+        const rm = returnsAtMonth(m, 'all');
+        Object.keys(rm).forEach(k => { yearProfit += Number(rm[k]) || 0; });
+    });
+    const withBal = months.filter(m => monthHasRecords(m));
+    let delta = null;
+    if (withBal.length > 1) {
+        delta = totalsFromCat(balancesByCat(withBal[withBal.length - 1], 'all')).net
+              - totalsFromCat(balancesByCat(withBal[0], 'all')).net;
+    }
+    const notes = months.filter(m => state.reviews && state.reviews.monthly && state.reviews.monthly[m] && state.reviews.monthly[m].text)
+        .map(m => `<div class="review-hist-row"><b>${m}</b><span>${_esc(state.reviews.monthly[m].text)}</span></div>`).join('');
+    return `<div class="review-report rr-year">
+        <div class="rr-big"><span>一年总支出</span><b>${_fmtY(yearExp)}</b></div>
+        <div class="rr-big"><span>一年投资收益</span><b>${_fmtY(yearProfit)}</b></div>
+        <div class="rr-big"><span>净资产增加</span><b>${delta === null ? '—' : _fmtY(delta)}</b></div>
+        <div class="rr-foot">净资产增加按这一年内第一次与最后一次有余额记录的月份相减，不是预测。</div>
+        <div class="rr-notes"><div class="review-history-title">这一年写过的月度备注</div>${notes || '<div class="review-empty">这一年还没写过月度备注</div>'}</div>
+    </div>`;
+}
+
+// ---- 收益率缺料清单（只读）：这个月的率到底算全了没有 ----
+function renderReturnMissing(info) {
+    const box = document.getElementById('retMissingCard');
+    if (!box) return;
+    const y = Number(state.returnYear) || new Date().getFullYear();
+    const m = Number(state.returnMonth) || (new Date().getMonth() + 1);
+    const month = (info && info.month) || (y + '-' + String(m).padStart(2, '0'));
+    const member = state.balanceOwner;
+    let st;
+    try { st = portfolioMonthStats(month, null, null, member); }
+    catch (e) { box.classList.add('hidden'); return; }
+    const rmap = returnsAtMonth(month, member);
+    const nameOf = id => { const a = accountById(id); return a ? a.name : id; };
+    const unknown = (st.unknown || []).map(nameOf);
+    const noProfit = (st.eligible || []).filter(id => rmap[id] === undefined || rmap[id] === null).map(nameOf);
+    if (!unknown.length && !noProfit.length) { box.classList.add('hidden'); return; }
+    let html = '<div class="rm-head"><i class="fa-solid fa-circle-info"></i> <b>这个月的收益率可能没算全</b>（只提醒，不改任何数）</div><ul>';
+    if (unknown.length) html += `<li>缺上月余额、也没填净入金，已从这个月的率里剔除：<b>${_esc(unknown.slice(0, 8).join('、'))}</b>${unknown.length > 8 ? ` 等 ${unknown.length} 个` : ''}</li>`;
+    if (noProfit.length) html += `<li>有余额但本月没录收益，只进了分母没进分子，会把整体率摊低：<b>${_esc(noProfit.slice(0, 8).join('、'))}</b>${noProfit.length > 8 ? ` 等 ${noProfit.length} 个` : ''}</li>`;
+    html += '</ul>';
+    box.innerHTML = html;
+    box.classList.remove('hidden');
+}
+
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
 } else {

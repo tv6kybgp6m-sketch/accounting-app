@@ -171,6 +171,7 @@
                                     <i class="fa-solid fa-chevron-down ym-anchor-caret"></i>
                                 </button>
                             </div>
+                            <button class="secondary-btn" onclick="openReviewModal()"><i class="fa-solid fa-book-open"></i> 回顾 / 月报</button>
                         </div>
                     </div>
                     <!-- 月度结账清单：把每月重复的那几步集中成待办（原来藏在资产负债页最底下） -->
@@ -378,6 +379,18 @@
                         <div class="bridge-note" id="bridgeNote"></div>
                     </div>
 
+                    <!-- 借出款台账：金额自己填，每月自动并进总资产，标记已还后自动消失 -->
+                    <div class="chart-card lend-card hidden" id="lendingCard">
+                        <div class="chart-header">
+                            <div class="drill-title-wrap">
+                                <h3>借出款</h3>
+                                <span class="chart-subtitle" id="lendingSub"></span>
+                            </div>
+                            <button class="secondary-btn" onclick="openLendingModal()"><i class="fa-solid fa-plus"></i> 记一笔借出</button>
+                        </div>
+                        <div id="lendingList"></div>
+                    </div>
+
                     <div class="chart-card drill-card">
                         <div class="chart-header">
                             <div class="drill-title-wrap">
@@ -477,6 +490,7 @@
                     <div class="report-summary ret-sum" id="retSummary"></div>
                     <div class="ret-scope" id="retScope"></div>
                     <div class="ret-check hidden" id="retCheckWarn"></div>
+                    <div class="ret-missing hidden" id="retMissingCard"></div>
                     <div class="caliber-note" id="caliberNote">
                         <div class="cn-head">
                             <i class="fa-solid fa-circle-info"></i>
@@ -1473,10 +1487,75 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.14').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.15').catch(() => {});
             });
         }
     </script>
+        <!-- 借出款登记（v1.41.15） -->
+        <div class="modal-overlay hidden" id="lendingModal">
+            <div class="modal balance-modal">
+                <div class="modal-header">
+                    <div class="drill-title-wrap">
+                        <h2 id="lendingModalTitle">记一笔借出</h2>
+                        <div class="cat-txn-sub">还款时间可以不填；这笔钱每月自动出现在资产负债表里，标记已还后自动消失</div>
+                    </div>
+                    <button class="modal-close" onclick="closeLendingModal()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="lendingId">
+                    <div class="form-row">
+                        <div class="form-group"><label>谁借的</label><input type="text" id="lendingPerson" placeholder="例如：张三"></div>
+                        <div class="form-group"><label>金额</label><input type="number" id="lendingAmount" placeholder="0.00" step="0.01" min="0"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>借款时间</label><input type="date" id="lendingDate"></div>
+                        <div class="form-group"><label>大概还款时间（可不填）</label><input type="date" id="lendingDue"></div>
+                    </div>
+                    <div class="scope-foot">
+                        <button class="secondary-btn" onclick="closeLendingModal()">取消</button>
+                        <button class="primary-btn" onclick="saveLending()">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 月度 / 年度回顾：自动生成的报告 + 自己写的一段话（v1.41.15） -->
+        <div class="modal-overlay hidden" id="reviewModal">
+            <div class="modal balance-modal review-modal">
+                <div class="modal-header">
+                    <div class="drill-title-wrap">
+                        <h2>月度 / 年度回顾</h2>
+                        <div class="cat-txn-sub" id="reviewSub">只给事实，不给「应该花多少」；想记的话自己写</div>
+                    </div>
+                    <button class="modal-close" onclick="closeReviewModal()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="review-tabs">
+                        <button class="period-btn active" id="reviewTabMonth" onclick="setReviewTab('month')">月报</button>
+                        <button class="period-btn" id="reviewTabYear" onclick="setReviewTab('year')">一年一页纸</button>
+                    </div>
+                    <div class="review-ym">
+                        <button class="secondary-btn" onclick="stepReviewMonth(-1)">‹ 上一期</button>
+                        <span id="reviewPeriodLabel"></span>
+                        <button class="secondary-btn" onclick="stepReviewMonth(1)">下一期 ›</button>
+                    </div>
+                    <div id="reviewAuto"></div>
+                    <div class="review-write">
+                        <label id="reviewTextLabel">这个月想记的话</label>
+                        <textarea id="reviewText" rows="3" placeholder="特殊的支出、大额、当时发生了什么……可不填"></textarea>
+                        <div class="scope-foot">
+                            <span class="review-saved" id="reviewSaved"></span>
+                            <button class="primary-btn" onclick="saveReviewText()">保存这段话</button>
+                        </div>
+                    </div>
+                    <div id="reviewHistory"></div>
+                    <div class="scope-foot">
+                        <button class="primary-btn" onclick="closeReviewModal()">完成</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     <div class="modal-overlay hidden" id="classTagModal">
         <div class="modal">
             <div class="modal-header">

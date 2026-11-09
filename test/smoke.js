@@ -915,6 +915,65 @@ async function run() {
         ok('按一下删除键照样删掉一位（没有把点击处理一起挡掉）',
             backFlow === '12', backFlow);
 
+        // ---------- 25) v1.41.15：借出款 / 回顾报告 / 收益率缺料清单 / 加钱提醒 ----------
+        stage = '25';
+        const appSrc = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        const _balBefore = ev(`state.balances.length`);
+        ev(`document.getElementById('lendingPerson').value='张三';
+            document.getElementById('lendingAmount').value='10000';
+            document.getElementById('lendingDate').value='2026-08-15';
+            document.getElementById('lendingDue').value='';
+            document.getElementById('lendingId').value='';
+            saveLending();`);
+        ok('借出款登记成功，台账里有一笔', ev(`state.lendings.length`) === 1,
+            ev(`JSON.stringify(state.lendings.map(l=>l.person+':'+l.amount+':'+l.lendDate))`));
+        ok('没往 state.balances 写任何东西（不自动写余额，不碰历史数据）',
+            ev(`state.balances.length`) === _balBefore);
+        const _assetBefore = ev(`(function(){ var s=state.lendings; state.lendings=[];
+            var v=totalsFromCat(balancesByCat('2026-10','all')).asset; state.lendings=s; return v; })()`);
+        ok('借出当月自动出现在总资产里', ev(`lendingOutstandingAt('2026-08')`) === 10000);
+        ok('中间月份、当前月也自动出现，不用点「沿用上期」',
+            ev(`JSON.stringify([lendingOutstandingAt('2026-09'),lendingOutstandingAt('2026-10')])`) === '[10000,10000]');
+        ok('借款之前的月份不会出现', ev(`lendingOutstandingAt('2026-07')`) === 0);
+        ok('总资产里确实多了这一万（只多这一万）',
+            ev(`totalsFromCat(balancesByCat('2026-10','all')).asset`) - _assetBefore === 10000,
+            JSON.stringify([_assetBefore, ev(`totalsFromCat(balancesByCat('2026-10','all')).asset`)]));
+        ok('录入表格里没有这个虚拟账户（不用手填、保存也不会写回）',
+            ev(`Object.keys(balanceCellsByCurAtMonth('2026-10','all')).indexOf(LENDING_ACCOUNT_ID) < 0`));
+        ok('虚拟账户在图表里也有名字，不会空白',
+            ev(`accountById(LENDING_ACCOUNT_ID).name`) === '借出款');
+        ev(`toggleLendingRepaid(state.lendings[0].id);`);
+        ok('标记已还会记下还款日期', ev(`!!state.lendings[0].repaidAt`));
+        ev(`state.lendings[0].repaidAt='2026-10-05';`);
+        ok('还款当月起不再计入总资产，之前月份照旧',
+            ev(`JSON.stringify([lendingOutstandingAt('2026-09'),lendingOutstandingAt('2026-10')])`) === '[10000,0]',
+            ev(`JSON.stringify([lendingOutstandingAt('2026-09'),lendingOutstandingAt('2026-10')])`));
+        ev(`toggleLendingRepaid(state.lendings[0].id);`);
+        ok('撤销已还后又回到未还', ev(`lendingOutstandingAt('2026-10')`) === 10000);
+
+        ev(`reviewMonth='2026-10'; reviewTab='month'; renderReviewModal();`);
+        ok('自动月报是一屏四行（收支 / 分类前五 / 家底与投资 / 记账习惯）',
+            ev(`document.querySelectorAll('#reviewAuto .rr-row').length`) === 4);
+        ok('月报只摆事实，不写「应该花多少」这类判断',
+            ev(`document.getElementById('reviewAuto').innerHTML`).indexOf('应该') < 0);
+        ev(`document.getElementById('reviewText').value='10 月装修花了 9 万'; saveReviewText();`);
+        ok('手写的月度回顾存下来了',
+            ev(`state.reviews.monthly['2026-10'] && state.reviews.monthly['2026-10'].text`) === '10 月装修花了 9 万');
+        ev(`reviewTab='year'; renderReviewModal();`);
+        ok('一年一页纸给三个数（总支出 / 投资收益 / 净资产增加）',
+            ev(`document.querySelectorAll('#reviewAuto .rr-big').length`) === 3);
+        ok('一页纸里能翻到这一年写过的月度备注',
+            ev(`document.getElementById('reviewAuto').innerHTML`).indexOf('10 月装修花了 9 万') >= 0);
+
+        ev(`renderReturnMissing({month:'2026-10'});`);
+        ok('收益率缺料清单能跑、且不改任何账本数据',
+            ev(`!!document.getElementById('retMissingCard')`) && ev(`state.balances.length`) === _balBefore);
+        ok('缺料清单分开列「被剔出比率」和「只进分母没进分子」两种原因',
+            appSrc.indexOf('unknown.length') >= 0 && appSrc.indexOf('noProfit.length') >= 0);
+        ok('加钱提醒是只读的：只提示、不写数',
+            appSrc.indexOf('是不是往里加过钱') >= 0 && appSrc.indexOf('maybeTopUp.push') >= 0 &&
+            appSrc.indexOf('（只提醒，不改任何数）') >= 0);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));
