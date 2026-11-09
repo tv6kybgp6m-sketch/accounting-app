@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.16';
+const APP_VERSION = '1.41.17';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -329,6 +329,8 @@ let state = {
     fxRates: {},                 // 汇率（按月×币种）：{ '2026-10': { USD: 7.15, HKD: 0.92 } }
     sheetColOrder: {},            // 列的顺序按成员各排各的：sheetColOrder[成员] = [列key…]（没设 = 用默认顺序）
     hiddenItems: {},              // 收起来的行/列：hiddenItems[成员][月份] = { cols:[], accounts:[] }（本地 UI 状态，不进云同步）
+    hiddenForever: {},            // v1.41.17：按成员长期收起的行/列，跨月生效（本地 UI，不进云同步）
+    hiddenForeverMigrated: false, // 把「当前月已收起的」并进长期集合，只做一次
     monthlyOpen: {},              // 月度账单「账户×渠道」开关，按成员分别记录：monthlyOpen[member][accountId][cat]=true/false（显式覆盖）；不写=按自动规则（该成员上个月记过才开）
     moneyVisibleByPage: { balance: false, funds: false, returns: false },  // 每页独立的金额眼睛状态（默认全闭眼）
     reportMetric: 'expense',
@@ -602,6 +604,8 @@ function saveStateNow() {
         recurringSkipped: state.recurringSkipped || {},
         monthlyOpen: state.monthlyOpen || {},  // 月度账单「账户×渠道」开关状态（本地 UI，不进 iCloud 同步）
         hiddenItems: state.hiddenItems || {},  // v1.39.95：收起来的行/列（本地 UI，不进 iCloud 同步）
+        hiddenForever: state.hiddenForever || {},          // v1.41.17：跨月长期收起（本地 UI，不进 iCloud 同步）
+        hiddenForeverMigrated: !!state.hiddenForeverMigrated,
         sheetColOrder: state.sheetColOrder || {},  // v1.39.96：列顺序按成员各排各的（跟着数据一起同步）
         // v1.39.67 修复 v1.39.65 漏存：异常订单「排除」列表此前没进本机存储，
         // 关网刷新即丢（有网时靠从云端合并回来"看起来"没丢）。
@@ -4612,6 +4616,53 @@ function bindNumpadPressFeedback() {
         btn.addEventListener('mouseup', release);
         btn.addEventListener('mouseleave', release);
     });
+
+    // v1.41.17：⌫ 长按连续删。短按仍走原来的 click（只删一位），
+    // 长按 400ms 后先删一位、再每 90ms 删一位；松手 / 滑出 / 金额删空即停。
+    // 只绑退格键，其它数字键行为不变；容器级的长按菜单拦截照旧生效。
+    const back = document.getElementById('numpadBack');
+    if (back && !back.dataset.repeatBound) {
+        back.dataset.repeatBound = '1';
+        let delay = null, timer = null, repeating = false;
+        const stop = () => {
+            if (delay) { clearTimeout(delay); delay = null; }
+            if (timer) { clearInterval(timer); timer = null; }
+        };
+        const start = () => {
+            stop();
+            repeating = false;
+            delay = setTimeout(() => {
+                delay = null;
+                repeating = true;
+                numpadBack();
+                timer = setInterval(() => {
+                    if (!calc.expr) { stop(); return; }
+                    numpadBack();
+                }, 90);
+            }, 400);
+        };
+        // 有 Pointer Events 就只走这一套，避免触屏「touchstart + 合成 mousedown」重复启动
+        const usePointer = typeof window.PointerEvent === 'function';
+        if (usePointer) {
+            back.addEventListener('pointerdown', start);
+            ['pointerup', 'pointercancel', 'pointerleave'].forEach(t => back.addEventListener(t, stop));
+        } else {
+            back.addEventListener('touchstart', start, { passive: true });
+            back.addEventListener('mousedown', start);
+            ['touchend', 'touchcancel', 'mouseup', 'mouseleave'].forEach(t =>
+                back.addEventListener(t, stop, { passive: true }));
+            back.addEventListener('touchmove', (e) => {
+                const t = e.touches && e.touches[0];
+                if (!t) return;
+                const r = back.getBoundingClientRect();
+                if (t.clientX < r.left || t.clientX > r.right || t.clientY < r.top || t.clientY > r.bottom) stop();
+            }, { passive: true });
+        }
+        // 长按松手后浏览器还会补一个 click；捕获阶段挡掉，避免多删一位
+        back.addEventListener('click', (e) => {
+            if (repeating) { e.preventDefault(); e.stopImmediatePropagation(); repeating = false; }
+        }, true);
+    }
 }
 
 // ---- Custom Calculator-style Number Pad ----
@@ -7536,6 +7587,10 @@ function balanceYears() { return [...new Set(balanceMonths().map(m => m.slice(0,
 // 录入表格读的是 balanceCellsByCurAtMonth，不走这里 —— 不用点「沿用上期」，
 // 也不会被保存时当成手填的数写回去（绝不自动写余额）。
 const LENDING_ACCOUNT_ID = '__lending__';
+// v1.41.17：借出款单独成一类，不再塞进「其他」。这个 key 只出现在
+// balancesByCat() 的汇总结果里，不是 sheetCols 的一列 —— 所以月度账单
+// 不会多出一个可以手填的格子，也就不会和台账自动并进来的数双算。
+const LENDING_CAT_KEY = 'lending';
 function lendingOwner() {
     return (state.balanceMembers && state.balanceMembers[0]) || '本人';
 }
@@ -7545,24 +7600,23 @@ function lendingVisibleFor(member) {
 function lendingList() {
     return (state.lendings || []).filter(l => l && l.id && !l.deletedAt && Number(l.amount) > 0);
 }
-// 某月月末快照时仍未归还的合计；repaidAt 落在当月内（含）就视为已还，当月不再计入。
-function lendingOutstandingAt(month) {
-    if (!month) return 0;
+// 某月月末快照时仍未归还的那些笔（明细用）；repaidAt 落在当月内（含）就视为已还。
+function lendingActiveAt(month) {
+    if (!month) return [];
     const end = month + '-31';
-    let sum = 0;
-    lendingList().forEach(l => {
+    return lendingList().filter(l => {
         const from = String(l.lendDate || '').slice(0, 10);
-        if (!from || from > end) return;
+        if (!from || from > end) return false;
         const repaid = String(l.repaidAt || '').slice(0, 10);
-        if (repaid && repaid <= end) return;
-        sum += Number(l.amount) || 0;
-    });
-    return sum;
+        return !(repaid && repaid <= end);
+    }).sort((a, b) => String(a.lendDate || '').localeCompare(String(b.lendDate || '')));
+}
+// 某月月末快照时仍未归还的合计
+function lendingOutstandingAt(month) {
+    return lendingActiveAt(month).reduce((s, l) => s + (Number(l.amount) || 0), 0);
 }
 function lendingCatKey() {
-    const cols = (typeof sheetAssetCats === 'function') ? sheetAssetCats() : [];
-    const hit = cols.find(c => c && c.key === 'other') || cols.find(c => c && c.kind === 'asset') || cols[0];
-    return hit ? hit.key : 'other';
+    return LENDING_CAT_KEY;
 }
 function lendingVirtualAccount() {
     return { id: LENDING_ACCOUNT_ID, name: '借出款', kind: 'asset', group: '其他',
@@ -7667,6 +7721,7 @@ function balancesByCat(month, member = state.balanceOwner) {
 function totalsFromCat(cat) {
     let asset = 0, liability = 0;
     sheetAssetCats().forEach(c => { asset += (cat[c.key] || 0); });
+    asset += Number(cat[LENDING_CAT_KEY] || 0);   // v1.41.17：借出款单独一类，仍算总资产
     sheetLiabCats().forEach(c => { liability += (cat[c.key] || 0); });
     return { asset, liability, net: asset - liability, ratio: asset > 0 ? liability / asset : 0 };
 }
@@ -8474,6 +8529,9 @@ function balancePieEntries(info, metric) {
             const v = cat[c.key] || 0;
             if (v > 0) rows.push({ id: c.key, label: c.label, amount: v, signed: v });
         });
+        // v1.41.17：借出款单独成一类，饼图也要算进去，否则各块加起来对不上总资产
+        const lv = Number(cat[LENDING_CAT_KEY] || 0);
+        if (lv > 0) rows.push({ id: LENDING_CAT_KEY, label: '借出款', amount: lv, signed: lv });
     } else if (metric === 'liability') {
         const liabByAcct = {};
         state.balances
@@ -8572,7 +8630,9 @@ function renderBalanceBreakdown() {
 
     const cat = monthHasRecords(info.month) ? balancesByCat(info.month) : {};
     // 直接按用户指定的 6 类资产统计：现金 / 货币基金 / 定期存款 / 股票基金 / 黄金 / 其他
-    const grandAsset = sheetAssetCats().reduce((s, c) => s + (cat[c.key] || 0), 0);
+    // v1.41.17：借出款单独成一类，不混在「其他」里，占比也单独算。
+    const lendTotal = Number(cat[LENDING_CAT_KEY] || 0);
+    const grandAsset = sheetAssetCats().reduce((s, c) => s + (cat[c.key] || 0), 0) + lendTotal;
     const grandLiab = sheetLiabCats().reduce((s, c) => s + (cat[c.key] || 0), 0);
     const grand = metric === 'liability' ? grandLiab : (metric === 'asset' ? grandAsset : grandAsset + grandLiab);
 
@@ -8581,16 +8641,23 @@ function renderBalanceBreakdown() {
     const liabKeys = new Set(sheetLiabCats().map(c => c.key));
     const items = sheetAssetCats().concat(sheetLiabCats())
         .map(c => ({ c, v: cat[c.key] || 0 }))
-        .filter(x => x.v > 0)
-        .sort((a, b) => b.v - a.v);
+        .filter(x => x.v > 0);
+    if (lendTotal > 0) items.push({
+        c: { key: LENDING_CAT_KEY, label: '借出款', color: '#8e8e93', icon: 'fa-hand-holding-dollar' },
+        v: lendTotal
+    });
+    items.sort((a, b) => b.v - a.v);
     const top = items.length ? items[0].v : 1;
 
     let html = '';
     items.forEach(({ c, v }) => {
         const pct = grand ? (v / grand) * 100 : 0;
         const defIcon = liabKeys.has(c.key) ? 'fa-credit-card' : 'fa-chart-pie';
+        const click = c.key === LENDING_CAT_KEY
+            ? `openLendingDetail('${_esc(info.month || '')}')`
+            : `openAccountHistoryForPeriod('${info.month}','${_esc(c.label)}')`;
         html += `
-        <div class="breakdown-item" onclick="openAccountHistoryForPeriod('${info.month}','${_esc(c.label)}')">
+        <div class="breakdown-item" onclick="${click}">
             <div class="breakdown-icon" style="background:${c.color}22;color:${c.color}">
                 <i class="fa-solid ${c.icon || defIcon}"></i>
             </div>
@@ -9838,20 +9905,60 @@ function hiddenSlot(member, month, create) {
     if (!Array.isArray(slot.rows)) slot.rows = [];   // v1.39.98：多资产账户里被收起的「某一行」
     return slot;
 }
-// 某个成员某个月收起了哪些列 / 哪些账户
+// v1.41.17：按成员长期收起的行/列，不带月份，跨月生效。
+// 收起时两处都写、展开时两处都清，避免「点开这个月，下个月又冒出来」。
+function hiddenForeverSlot(member, create) {
+    if (!state.hiddenForever || typeof state.hiddenForever !== 'object') state.hiddenForever = {};
+    const m = member || 'all';
+    if (!state.hiddenForever[m]) {
+        if (!create) return null;
+        state.hiddenForever[m] = { cols: [], accounts: [], rows: [] };
+    }
+    const slot = state.hiddenForever[m];
+    if (!Array.isArray(slot.cols)) slot.cols = [];
+    if (!Array.isArray(slot.accounts)) slot.accounts = [];
+    if (!Array.isArray(slot.rows)) slot.rows = [];
+    return slot;
+}
+// 升级老数据：只接管「当前月已经收起的」，历史月份里当年只收一月的临时操作保持原样。
+function migrateHiddenForever() {
+    if (state.hiddenForeverMigrated) return;
+    state.hiddenForeverMigrated = true;
+    const cur = (typeof getModalMonth === 'function' ? getModalMonth('monthly') : '') || '';
+    if (!cur) return;
+    Object.keys(state.hiddenItems || {}).forEach(mb => {
+        const src = (state.hiddenItems[mb] || {})[cur];
+        if (!src) return;
+        const dst = hiddenForeverSlot(mb, true);
+        ['cols', 'accounts', 'rows'].forEach(k => (Array.isArray(src[k]) ? src[k] : [])
+            .forEach(x => { if (dst[k].indexOf(x) < 0) dst[k].push(x); }));
+    });
+}
+function hiddenField(kind) {
+    return kind === 'cols' ? 'cols' : (kind === 'rows' ? 'rows' : 'accounts');
+}
+// 某成员某月收起了哪些 = 当月 ∪ 长期（去重）
 function hiddenNow(kind, member, month) {
+    migrateHiddenForever();
+    const k = hiddenField(kind);
     const slot = hiddenSlot(member, month, false);
-    if (!slot) return [];
-    if (kind === 'cols') return slot.cols;
-    if (kind === 'rows') return slot.rows;
-    return slot.accounts;
+    const forever = hiddenForeverSlot(member, false);
+    const out = [];
+    [slot ? slot[k] : [], forever ? forever[k] : []].forEach(arr =>
+        (arr || []).forEach(x => { if (out.indexOf(x) < 0) out.push(x); }));
+    return out;
 }
 function setHiddenItem(kind, id, member, month, on) {
+    const k = hiddenField(kind);
     const slot = hiddenSlot(member, month, true);
-    const arr = kind === 'cols' ? slot.cols : (kind === 'rows' ? slot.rows : slot.accounts);
+    const arr = slot[k];
     const i = arr.indexOf(id);
     if (on && i < 0) arr.push(id);
     if (!on && i >= 0) arr.splice(i, 1);
+    const f = hiddenForeverSlot(member, true);
+    const fi = f[k].indexOf(id);
+    if (on && fi < 0) f[k].push(id);
+    if (!on && fi >= 0) f[k].splice(fi, 1);
     saveState();
     renderMonthlyEntry();
 }
@@ -9874,7 +9981,7 @@ function hideSheetColumn(key) {
     const c = getSheetCols().find(x => x.key === key);
     if (!c) return;
     setHiddenItem('cols', key, monthlyMember(), getModalMonth('monthly'), true);
-    showToast(`已收起「${c.label}」这一列（只对当前成员、当前月份），需要时在「隐藏的」里打开`, 'info');
+    showToast(`已收起「${c.label}」这一列（以后每个月都保持收起），需要时在「隐藏的」里打开`, 'info');
 }
 function unhideSheetColumn(key) {
     setHiddenItem('cols', key, monthlyMember(), getModalMonth('monthly'), false);
@@ -9883,7 +9990,7 @@ function hideMonthlyAccount(accountId) {
     const a = accountById(accountId);
     if (!a) return;
     setHiddenItem('accounts', accountId, monthlyMember(), getModalMonth('monthly'), true);
-    showToast(`已收起「${a.name}」这一行（只对当前成员、当前月份），需要时在「隐藏的」里打开`, 'info');
+    showToast(`已收起「${a.name}」这一行（以后每个月都保持收起），需要时在「隐藏的」里打开`, 'info');
 }
 function unhideMonthlyAccount(accountId) {
     setHiddenItem('accounts', accountId, monthlyMember(), getModalMonth('monthly'), false);
@@ -9893,7 +10000,7 @@ function hideMonthlyAccountRow(accountId, cur) {
     const a = accountById(accountId);
     if (!a || !cur) return;
     setHiddenItem('rows', acctCurKey(accountId, cur), monthlyMember(), getModalMonth('monthly'), true);
-    showToast(`已收起「${a.name}」的${currencyLabel(cur)}这一行（数据还留着，随时能打开）`, 'info');
+    showToast(`已收起「${a.name}」的${currencyLabel(cur)}这一行（以后每个月都保持收起，随时能打开）`, 'info');
 }
 function unhideMonthlyAccountRow(accountId, cur) {
     setHiddenItem('rows', acctCurKey(accountId, cur), monthlyMember(), getModalMonth('monthly'), false);
@@ -10725,6 +10832,23 @@ function renderMonthlyEntry() {
             ${pcell('__net', ' mw-sumcol')}
         </div>`;
 
+    // v1.41.17：借出款只读行。数字来自台账在「这个月月末」的未还合计，
+    // 不带 data-bal，草稿 / 保存 / 合计都不会把它当成手填的数 → 不会双算。
+    const lendingRow = (() => {
+        const active = lendingActiveAt(month);
+        const v = active.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+        const blank = () => '<div class="mw-c"></div>';
+        return `<div class="mw-tr mw-lend-row" onclick="openLendingDetail('${_esc(month)}')" title="点这里看这个月还没还的借出款明细">
+            <div class="mw-rowname">
+                <span class="mw-acct-dot" style="background:var(--accent)"></span>
+                <span class="mw-name">借出款</span>
+                <span class="mw-lend-hint">${active.length ? active.length + ' 笔' : '暂无'} · 明细 →</span>
+            </div>
+            ${assetCats.map(blank).join('')}${liabCats.map(blank).join('')}${retCol ? blank() : ''}${blank()}
+            <div class="mw-c mw-sumcol"><span class="mw-rownet">这个月未还 <b>${maskMoney(v)}</b></span></div>
+        </div>`;
+    })();
+
     list.innerHTML = `<div class="mw-scroll"><div class="mw-grid" style="--mw-cols:${cols}">
         <div class="mw-h mw-corner">账户 / 类型</div>
         ${assetCats.map(c => colHeadHTML(c, '')).join('')}
@@ -10733,6 +10857,7 @@ function renderMonthlyEntry() {
         <div class="mw-h mw-col">净入金</div><div class="mw-h mw-col mw-col-sum">小计 / 对账</div>
         ${summaryRows}
         ${rows}
+        ${lendingRow}
     </div></div>`
         // v1.39.75：底部这两块按用户要求删掉——常用渠道快捷键 chip、以及「一行=…一列=…」那段说明。
         // 加行 / 加列两个按钮已在顶部「本人」那一行常驻，说明文字用户早就看熟了。
@@ -15531,6 +15656,39 @@ function closeLendingModal() {
     const m = document.getElementById('lendingModal');
     if (m) m.classList.add('hidden');
 }
+// v1.41.17：从月度账单那一行 / 资产构成那一行点进来，按「当前查看的月份」列明细。
+// 纯只读，不写 state.balances —— 数字来源仍是台账，避免和余额格双算。
+function openLendingDetail(month) {
+    const box = document.getElementById('lendingDetailModal');
+    if (!box) return;
+    const m = month || (typeof getModalMonth === 'function' ? getModalMonth('monthly') : '') || _monthKeyNow();
+    const list = lendingActiveAt(m);
+    const total = list.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+    const title = document.getElementById('lendingDetailTitle');
+    if (title) title.textContent = `${m.replace('-', '年')}月 · 借出款`;
+    const rows = document.getElementById('lendingDetailList');
+    if (rows) rows.innerHTML = list.length
+        ? list.map(l => {
+            const due = l.dueDate ? `说好 ${_esc(String(l.dueDate).slice(0, 10))} 还` : '没填预计还款时间';
+            return `<div class="rr-row lend-detail-row">
+                <span>借给 <b>${_esc(l.person || '未填')}</b> · ${_esc(String(l.lendDate || '').slice(0, 10))} 借出 · ${due}</span>
+                <b>${_esc(_fmtY(l.amount))}</b></div>`;
+        }).join('') + `<div class="rr-row lend-detail-row"><span>这个月未还合计</span><b>${_esc(_fmtY(total))}</b></div>`
+        : '<div class="rr-row"><span>这个月没有还没还的借出款</span></div>';
+    box.classList.remove('hidden');
+    raiseOverlay(box);
+}
+function closeLendingDetail() {
+    const box = document.getElementById('lendingDetailModal');
+    if (box) box.classList.add('hidden');
+}
+// 台账一有变动，三处跟着重画：卡片、资产负债页、以及开着的月度账单那一行。
+function refreshLendingViews() {
+    renderLendingCard();
+    if (typeof renderBalance === 'function') renderBalance();
+    const mm = document.getElementById('monthlyModal');
+    if (mm && !mm.classList.contains('hidden') && typeof renderMonthlyEntry === 'function') renderMonthlyEntry();
+}
 function saveLending() {
     const gv = k => document.getElementById(k);
     const person = String(gv('lendingPerson').value || '').trim();
@@ -15549,8 +15707,7 @@ function saveLending() {
     else state.lendings.push({ id: 'lend_' + uid(), person, amount, lendDate, dueDate, repaidAt: '', createdAt: now, updatedAt: now });
     saveState();
     closeLendingModal();
-    renderLendingCard();
-    if (typeof renderBalance === 'function') renderBalance();
+    refreshLendingViews();
     showToast('记下了，这笔钱会自动出现在资产负债表里', 'success');
 }
 function toggleLendingRepaid(id) {
@@ -15559,8 +15716,7 @@ function toggleLendingRepaid(id) {
     rec.repaidAt = rec.repaidAt ? '' : _todayISO();
     rec.updatedAt = Date.now();
     saveState();
-    renderLendingCard();
-    if (typeof renderBalance === 'function') renderBalance();
+    refreshLendingViews();
 }
 function deleteLending(id) {
     const rec = (state.lendings || []).find(l => l.id === id);
@@ -15569,8 +15725,7 @@ function deleteLending(id) {
     rec.deletedAt = Date.now();
     rec.updatedAt = Date.now();
     saveState();
-    renderLendingCard();
-    if (typeof renderBalance === 'function') renderBalance();
+    refreshLendingViews();
 }
 function renderLendingCard() {
     const card = document.getElementById('lendingCard');

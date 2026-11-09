@@ -1488,7 +1488,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.16').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.17').catch(() => {});
             });
         }
     </script>
@@ -1515,6 +1515,26 @@
                     <div class="scope-foot">
                         <button class="secondary-btn" onclick="closeLendingModal()">取消</button>
                         <button class="primary-btn" onclick="saveLending()">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 借出款明细（v1.41.17）：按当前查看月份的月末口径，纯只读 -->
+        <div class="modal-overlay hidden" id="lendingDetailModal">
+            <div class="modal balance-modal review-modal">
+                <div class="modal-header">
+                    <div class="drill-title-wrap">
+                        <h2 id="lendingDetailTitle">借出款</h2>
+                        <div class="cat-txn-sub">这个月月末还没还的钱；金额已自动计入资产负债，不用在这里填</div>
+                    </div>
+                    <button class="modal-close" onclick="closeLendingDetail()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="review-report" id="lendingDetailList"></div>
+                    <div class="scope-foot">
+                        <button class="secondary-btn" onclick="closeLendingDetail()">关闭</button>
+                        <button class="primary-btn" onclick="closeLendingDetail(); openLendingModal()"><i class="fa-solid fa-plus"></i> 记一笔借出</button>
                     </div>
                 </div>
             </div>

@@ -189,22 +189,28 @@ async function run() {
         ok('「隐藏的」按钮出现了并带数量',
             ev(`!document.getElementById('mwHiddenBtn').classList.contains('hidden') && document.getElementById('mwHiddenBtn').textContent.indexOf('1') >= 0`),
             ev(`document.getElementById('mwHiddenBtn').textContent`));
-        // 换个月份 → 那一列照旧显示（收起只对当前月份）
+        // v1.41.17：收起改成「以后每个月都保持」，不再只对当月生效
         ev(`paintModalMonth('monthly','2026-08'); renderMonthlyEntry();`);
-        ok('换到 8 月：那一列照旧显示（收起只对当月生效）',
-            ev(`!!document.querySelector('#monthlyEntryList [data-col-key="gold"]')`));
+        ok('换到 8 月：那一列仍然收起（跨月保持）',
+            ev(`!document.querySelector('#monthlyEntryList [data-col-key="gold"]')`));
+        ok('长期收起按成员存、不带月份',
+            ev(`(state.hiddenForever['本人'] && state.hiddenForever['本人'].cols || []).indexOf('gold') >= 0`));
         ev(`paintModalMonth('monthly','2026-09'); renderMonthlyEntry();`);
         ok('换回 9 月：那列仍然是收起的',
             ev(`!document.querySelector('#monthlyEntryList [data-col-key="gold"]')`));
         ev(`unhideSheetColumn('gold');`);
         ok('展开后列回来了', ev(`!!document.querySelector('#monthlyEntryList [data-col-key="gold"]')`));
+        ev(`paintModalMonth('monthly','2026-08'); renderMonthlyEntry();`);
+        ok('展开后换月份也不会再冒出来（两处一起清干净了）',
+            ev(`!!document.querySelector('#monthlyEntryList [data-col-key="gold"]')`));
+        ev(`paintModalMonth('monthly','2026-09'); renderMonthlyEntry();`);
         // 账户行同理
         ev(`hideMonthlyAccount('a_plain');`);
         ok('收起的账户在当月不显示',
             ev(`document.querySelectorAll('#monthlyEntryList [data-mw-account="a_plain"]').length === 0`));
         ev(`paintModalMonth('monthly','2026-08'); renderMonthlyEntry();`);
-        ok('换到 8 月：那个账户照旧显示',
-            ev(`document.querySelectorAll('#monthlyEntryList [data-mw-account="a_plain"]').length >= 1`));
+        ok('换到 8 月：那个账户也仍然收起（跨月保持）',
+            ev(`document.querySelectorAll('#monthlyEntryList [data-mw-account="a_plain"]').length === 0`));
         ev(`paintModalMonth('monthly','2026-09'); renderMonthlyEntry();`);
         // 换成员：本人收起的，家人那边不受影响
         ev(`var s4 = document.getElementById('monthlyMemberSelect');
@@ -987,6 +993,56 @@ async function run() {
         ok('加钱提醒是只读的：只提示、不写数',
             appSrc.indexOf('是不是往里加过钱') >= 0 && appSrc.indexOf('maybeTopUp.push') >= 0 &&
             appSrc.indexOf('（只提醒，不改任何数）') >= 0);
+
+        // ---------- 26) v1.41.17：借出款单独成类 / 月度账单只读行 / 长按连删 ----------
+        stage = '26';
+        const _bal26 = ev(`state.balances.length`);
+        ok('借出款单独成一类，不再混进「其他」',
+            ev(`balancesByCat('2026-10','all').lending`) === 10000 &&
+            ev(`balancesByCat('2026-10','all').other || 0`) === 0);
+        ok('总资产仍然只多这一万（台账和账单没有双算）',
+            ev(`totalsFromCat(balancesByCat('2026-10','all')).asset`) -
+            ev(`(function(){ var s=state.lendings; state.lendings=[];
+                var v=totalsFromCat(balancesByCat('2026-10','all')).asset; state.lendings=s; return v; })()`) === 10000);
+        ev(`state.balancePeriod='month'; state.balanceYear=2026; state.balanceMonth=10; renderBalanceBreakdown();`);
+        const _bdHtml = ev(`document.getElementById('balBreakdownList').innerHTML`);
+        ok('资产构成里「借出款」单独一行、带占比', _bdHtml.indexOf('借出款') >= 0 && _bdHtml.indexOf('%') >= 0);
+        ok('资产饼图也没漏掉借出款（各块加起来对得上总资产）',
+            ev(`balancePieEntries({month:'2026-10'}, 'asset').some(r => r.id==='lending' && r.amount===10000)`));
+        ev(`paintModalMonth('monthly','2026-10'); renderMonthlyEntry();`);
+        ok('月度账单里有「借出款」这一行，点得到明细',
+            ev(`!!document.querySelector('#monthlyEntryList .mw-lend-row[onclick^="openLendingDetail"]')`));
+        ok('这一行是只读的：没有可填的余额格、也不写 state.balances',
+            ev(`document.querySelectorAll('#monthlyEntryList .mw-lend-row [data-bal]').length`) === 0 &&
+            ev(`state.balances.length`) === _bal26);
+        ok('这一行标着「这个月未还」',
+            ev(`document.querySelector('#monthlyEntryList .mw-lend-row').innerHTML`).indexOf('这个月未还') >= 0);
+        ev(`openLendingDetail('2026-07');`);
+        ok('翻到借款之前的月份，明细里没有这笔',
+            ev(`document.getElementById('lendingDetailList').innerHTML`).indexOf('没有还没还') >= 0);
+        ev(`openLendingDetail('2026-10');`);
+        const _ldHtml = ev(`document.getElementById('lendingDetailList').innerHTML`);
+        ok('翻到 10 月，明细里能看到借给谁、什么时候借的、合计',
+            _ldHtml.indexOf('张三') >= 0 && _ldHtml.indexOf('2026-08-15') >= 0 && _ldHtml.indexOf('这个月未还合计') >= 0);
+        ev(`closeLendingDetail();`);
+
+        ev(`calc.expr='123456'; renderCalc();`);
+        const _down = ev(`typeof window.PointerEvent === 'function' ? 'pointerdown' : 'mousedown'`);
+        const _up = ev(`typeof window.PointerEvent === 'function' ? 'pointerup' : 'mouseup'`);
+        ev(`document.getElementById('numpadBack').dispatchEvent(new MouseEvent('${_down}',{bubbles:true}));`);
+        await new Promise(r => setTimeout(r, 620));
+        const _afterHold = ev(`calc.expr`);
+        ev(`document.getElementById('numpadBack').dispatchEvent(new MouseEvent('${_up}',{bubbles:true}));`);
+        ok('长按 ⌫ 会连续删掉好几位', _afterHold.length <= 3 && _afterHold.length >= 1, _afterHold);
+        await new Promise(r => setTimeout(r, 200));
+        ok('松手后立刻停，不会继续删', ev(`calc.expr`) === _afterHold, ev(`calc.expr`));
+        ev(`document.getElementById('numpadBack').dispatchEvent(new MouseEvent('click',{bubbles:true}));`);
+        ok('长按松手后补的那下 click 不会多删一位', ev(`calc.expr`) === _afterHold);
+        ev(`document.getElementById('numpadBack').dispatchEvent(new MouseEvent('${_down}',{bubbles:true}));`);
+        ev(`document.getElementById('numpadBack').dispatchEvent(new MouseEvent('${_up}',{bubbles:true}));`);
+        const _beforeTap = ev(`calc.expr`);
+        ev(`document.getElementById('numpadBack').dispatchEvent(new MouseEvent('click',{bubbles:true}));`);
+        ok('短按仍然只删一位', ev(`calc.expr`).length === Math.max(0, _beforeTap.length - 1), ev(`calc.expr`));
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
