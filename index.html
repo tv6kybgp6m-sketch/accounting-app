@@ -364,6 +364,19 @@
                         </div>
                     </div>
 
+                    <!-- 借出款台账：金额自己填，每月自动并进总资产，标记已还后自动消失 -->
+                    <!-- v1.41.16：放在概览卡正下方，空台账也常驻显示，别让入口藏在页面深处 -->
+                    <div class="chart-card lend-card hidden" id="lendingCard">
+                        <div class="chart-header">
+                            <div class="drill-title-wrap">
+                                <h3>借出款</h3>
+                                <span class="chart-subtitle" id="lendingSub"></span>
+                            </div>
+                            <button class="secondary-btn" onclick="openLendingModal()"><i class="fa-solid fa-plus"></i> 记一笔借出</button>
+                        </div>
+                        <div id="lendingList"></div>
+                    </div>
+
                     <!-- 净资产变动桥：这个月的钱从哪儿来、到哪儿去 -->
                     <div class="chart-card bridge-card hidden" id="bridgeCard">
                         <div class="chart-header">
@@ -377,18 +390,6 @@
                             <canvas id="bridgeChart"></canvas>
                         </div>
                         <div class="bridge-note" id="bridgeNote"></div>
-                    </div>
-
-                    <!-- 借出款台账：金额自己填，每月自动并进总资产，标记已还后自动消失 -->
-                    <div class="chart-card lend-card hidden" id="lendingCard">
-                        <div class="chart-header">
-                            <div class="drill-title-wrap">
-                                <h3>借出款</h3>
-                                <span class="chart-subtitle" id="lendingSub"></span>
-                            </div>
-                            <button class="secondary-btn" onclick="openLendingModal()"><i class="fa-solid fa-plus"></i> 记一笔借出</button>
-                        </div>
-                        <div id="lendingList"></div>
                     </div>
 
                     <div class="chart-card drill-card">
@@ -1487,7 +1488,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.15').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.16').catch(() => {});
             });
         }
     </script>

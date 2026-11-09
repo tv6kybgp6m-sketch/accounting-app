@@ -919,6 +919,20 @@ async function run() {
         stage = '25';
         const appSrc = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
         const _balBefore = ev(`state.balances.length`);
+        // v1.41.16 回归：空台账时入口也必须看得见。此前整张卡片被 hidden，
+        // 而唯一的「记一笔借出」按钮在卡片里 → 没有第一笔就永远打不开登记。
+        ev(`renderLendingCard();`);
+        ok('一笔借出款都没有时，资产负债页的「借出款」卡片也看得见',
+            ev(`!document.getElementById('lendingCard').classList.contains('hidden')`));
+        ok('空状态有说明文字，并讲清不用在「记月度账单」里重复填',
+            ev(`document.getElementById('lendingList').innerHTML`).indexOf('记月度账单') >= 0);
+        ok('空状态下「记一笔借出」按钮就在，点了能打开登记弹窗',
+            ev(`!!document.querySelector('#lendingCard button[onclick^="openLendingModal"]')`) &&
+            ev(`(function(){ openLendingModal();
+                 var v = !document.getElementById('lendingModal').classList.contains('hidden');
+                 closeLendingModal(); return v; })()`));
+        ok('切到资产负债页会重画这张卡片',
+            /function renderBalance\(\)[\s\S]{0,6000}renderLendingCard\(\);/.test(appSrc));
         ev(`document.getElementById('lendingPerson').value='张三';
             document.getElementById('lendingAmount').value='10000';
             document.getElementById('lendingDate').value='2026-08-15';

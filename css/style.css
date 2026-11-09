@@ -5522,6 +5522,7 @@ body.app-locked .fab-add { display: none !important; }
 .link-btn { border: 0; background: none; padding: 2px 4px; color: var(--accent-text); font-size: 12px; cursor: pointer; border-radius: var(--radius-sm); }
 .link-btn:hover { background: var(--accent-light); }
 .link-btn.danger { color: var(--expense-text); }
+.lend-empty { padding: 4px 2px 8px; font-size: 12px; line-height: 1.8; color: var(--text-muted); }
 .msc-hint { color: var(--text-secondary); }
 .ret-missing { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); font-size: 12px; line-height: 1.8; color: var(--text-secondary); }
 .rm-head { color: var(--text-primary); margin-bottom: 4px; }

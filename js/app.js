@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.15';
+const APP_VERSION = '1.41.16';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -15576,12 +15576,18 @@ function renderLendingCard() {
     const card = document.getElementById('lendingCard');
     const box = document.getElementById('lendingList');
     if (!card || !box) return;
+    // v1.41.16：入口必须常驻。空台账时整张卡片藏起来的话，唯一的「记一笔借出」
+    // 按钮也跟着消失，第一笔永远登记不了（要有一笔记录才能看见入口的死锁）。
+    card.classList.remove('hidden');
     const list = lendingList().slice().sort((a, b) => String(b.lendDate || '').localeCompare(String(a.lendDate || '')));
-    card.classList.toggle('hidden', list.length === 0);
-    if (!list.length) { box.innerHTML = ''; return; }
+    const sub = document.getElementById('lendingSub');
+    if (!list.length) {
+        if (sub) sub.textContent = '';
+        box.innerHTML = '<div class="lend-empty">还没有借出款。别人欠你的钱记在这里，填一次就每个月自动并进总资产，不用在「记月度账单」里重复填。</div>';
+        return;
+    }
     const open = list.filter(l => !l.repaidAt);
     const total = open.reduce((s, l) => s + (Number(l.amount) || 0), 0);
-    const sub = document.getElementById('lendingSub');
     if (sub) sub.textContent = `未还 ${open.length} 笔 · 合计 ${_fmtY(total)}（已自动计入总资产）`;
     box.innerHTML = list.map(l => {
         const due = l.dueDate ? `预计 ${_esc(l.dueDate)} 还` : '没填预计还款时间';
