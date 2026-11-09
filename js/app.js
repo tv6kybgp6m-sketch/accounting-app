@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.17';
+const APP_VERSION = '1.41.18';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -10838,14 +10838,13 @@ function renderMonthlyEntry() {
         const active = lendingActiveAt(month);
         const v = active.reduce((s, l) => s + (Number(l.amount) || 0), 0);
         const blank = () => '<div class="mw-c"></div>';
-        return `<div class="mw-tr mw-lend-row" onclick="openLendingDetail('${_esc(month)}')" title="点这里看这个月还没还的借出款明细">
-            <div class="mw-rowname">
-                <span class="mw-acct-dot" style="background:var(--accent)"></span>
-                <span class="mw-name">借出款</span>
-                <span class="mw-lend-hint">${active.length ? active.length + ' 笔' : '暂无'} · 明细 →</span>
-            </div>
+        // v1.41.18：行名只留「借出款」三个字，说明挪到悬停提示里，免得窄列挤成一团；
+        // 金额留在小计列、始终明文 —— 这个页面就是来看数填数的，不跟着小眼睛打码。
+        return `<div class="mw-tr mw-lend-row" onclick="openLendingDetail('${_esc(month)}')"
+            title="这个月未还 ${_esc(_fmtY(v))} · ${active.length} 笔；点这里看明细">
+            <div class="mw-rowname"><span class="mw-name">借出款</span></div>
             ${assetCats.map(blank).join('')}${liabCats.map(blank).join('')}${retCol ? blank() : ''}${blank()}
-            <div class="mw-c mw-sumcol"><span class="mw-rownet">这个月未还 <b>${maskMoney(v)}</b></span></div>
+            <div class="mw-c mw-sumcol"><span class="mw-rownet"><b>${_fmtY(v)}</b></span></div>
         </div>`;
     })();
 
@@ -15721,11 +15720,41 @@ function toggleLendingRepaid(id) {
 function deleteLending(id) {
     const rec = (state.lendings || []).find(l => l.id === id);
     if (!rec) return;
-    if (!confirm('删掉这笔借出款记录？资产负债表里它也会一起消失。')) return;
+    if (!confirm('删掉这笔借出款记录？所有月份的资产负债表里它都会一起消失，8 秒内可以撤回。')) return;
+    const snapshot = Object.assign({}, rec);   // 删之前的样子，撤销时整份写回
     rec.deletedAt = Date.now();
     rec.updatedAt = Date.now();
     saveState();
     refreshLendingViews();
+    showLendingUndoToast(rec.person || '未填', snapshot);
+}
+// v1.41.18：8 秒撤回。删除是软删，记录还在 state.lendings 里，把快照写回、清掉 deletedAt 即可。
+// 快照由每个 toast 的闭包自己拿着，连删几笔也能各撤各的，不会互相覆盖。
+function undoLendingDelete(snapshot) {
+    if (!snapshot || !snapshot.id) return;
+    let rec = (state.lendings || []).find(l => l.id === snapshot.id);
+    if (!rec) {
+        if (!Array.isArray(state.lendings)) state.lendings = [];
+        rec = Object.assign({}, snapshot);
+        state.lendings.push(rec);
+    } else Object.assign(rec, snapshot);
+    delete rec.deletedAt;                 // 快照里没这个键，得显式清，否则还是被 lendingList 过滤掉
+    rec.updatedAt = Date.now();           // 比云端的删除新，同步时不会被搬回来
+    saveState();
+    refreshLendingViews();
+    showToast('已撤回，这笔借出款恢复了', 'success');
+}
+function showLendingUndoToast(name, snapshot) {
+    const container = document.getElementById('toastContainer');
+    if (!container) { showToast('已删除借出款', 'success'); return; }
+    const toast = document.createElement('div');
+    toast.className = 'toast undo lend-undo';
+    toast.innerHTML = `<i class="fa-solid fa-trash-arrow-up"></i> 已删除「${_esc(name)}」的借出款`
+        + `<button class="toast-undo-btn" type="button">撤销</button>`;
+    const btn = toast.querySelector('.toast-undo-btn');
+    if (btn) btn.addEventListener('click', () => { undoLendingDelete(snapshot); toast.remove(); });
+    container.appendChild(toast);
+    setTimeout(() => { toast.classList.add('fade-out'); setTimeout(() => toast.remove(), 300); }, 8000);
 }
 function renderLendingCard() {
     const card = document.getElementById('lendingCard');
@@ -15743,7 +15772,7 @@ function renderLendingCard() {
     }
     const open = list.filter(l => !l.repaidAt);
     const total = open.reduce((s, l) => s + (Number(l.amount) || 0), 0);
-    if (sub) sub.textContent = `未还 ${open.length} 笔 · 合计 ${_fmtY(total)}（已自动计入总资产）`;
+    if (sub) sub.textContent = `未还 ${open.length} 笔 · 合计 ${maskMoney(total)}（已自动计入总资产）`;
     box.innerHTML = list.map(l => {
         const due = l.dueDate ? `预计 ${_esc(l.dueDate)} 还` : '没填预计还款时间';
         const tag = l.repaidAt
@@ -15751,7 +15780,7 @@ function renderLendingCard() {
             : '<span class="lend-tag">未还</span>';
         return `<div class="lend-row">
             <span class="lend-who">${_esc(l.person || '未填')}</span>
-            <span class="lend-amt">${_fmtY(l.amount)}</span>
+            <span class="lend-amt">${maskMoney(Number(l.amount) || 0)}</span>
             <span class="lend-date">借于 ${_esc(l.lendDate || '—')} · ${due}</span>
             ${tag}
             <span class="lend-ops">

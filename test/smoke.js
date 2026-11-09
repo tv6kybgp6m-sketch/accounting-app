@@ -1015,8 +1015,9 @@ async function run() {
         ok('这一行是只读的：没有可填的余额格、也不写 state.balances',
             ev(`document.querySelectorAll('#monthlyEntryList .mw-lend-row [data-bal]').length`) === 0 &&
             ev(`state.balances.length`) === _bal26);
-        ok('这一行标着「这个月未还」',
-            ev(`document.querySelector('#monthlyEntryList .mw-lend-row').innerHTML`).indexOf('这个月未还') >= 0);
+        ok('悬停提示里有「这个月未还」和笔数',
+            ev(`document.querySelector('#monthlyEntryList .mw-lend-row').getAttribute('title')`).indexOf('这个月未还') >= 0 &&
+            ev(`document.querySelector('#monthlyEntryList .mw-lend-row').getAttribute('title')`).indexOf('笔') >= 0);
         ev(`openLendingDetail('2026-07');`);
         ok('翻到借款之前的月份，明细里没有这笔',
             ev(`document.getElementById('lendingDetailList').innerHTML`).indexOf('没有还没还') >= 0);
@@ -1043,6 +1044,37 @@ async function run() {
         const _beforeTap = ev(`calc.expr`);
         ev(`document.getElementById('numpadBack').dispatchEvent(new MouseEvent('click',{bubbles:true}));`);
         ok('短按仍然只删一位', ev(`calc.expr`).length === Math.max(0, _beforeTap.length - 1), ev(`calc.expr`));
+
+        // ---------- 27) v1.41.18：只读行精简 / 眼睛口径 / 删除撤回 / 弹窗字号 / 卡片位置 ----------
+        stage = '27';
+        const htmlSrc = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+        const cssSrc = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        ev(`moneyVisible=false; paintModalMonth('monthly','2026-10'); renderMonthlyEntry(); renderLendingCard();`);
+        ok('月度账单那行，行名只剩「借出款」三个字',
+            ev(`document.querySelector('#monthlyEntryList .mw-lend-row .mw-rowname').textContent.trim()`) === '借出款');
+        const _rowHtml = ev(`document.querySelector('#monthlyEntryList .mw-lend-row .mw-sumcol').innerHTML`);
+        ok('闭着眼时，月度账单里的借出款金额照样明文显示',
+            _rowHtml.indexOf('****') < 0 && /10,?000/.test(_rowHtml), _rowHtml);
+        ok('资产负债表页的借出款金额跟着小眼睛打码',
+            ev(`document.getElementById('lendingSub').textContent`).indexOf('****') >= 0,
+            ev(`document.getElementById('lendingSub').textContent`));
+        ev(`moneyVisible=true; renderLendingCard();`);
+        ok('小眼睛打开后，资产负债页金额显示出来',
+            /10,?000/.test(ev(`document.getElementById('lendingSub').textContent`)),
+            ev(`document.getElementById('lendingSub').textContent`));
+        ok('借出款卡片挪到了资产负债页最下面（家庭成员汇总之后）',
+            htmlSrc.indexOf('id="lendingCard"') > htmlSrc.indexOf('id="familySummaryCard"'));
+        ok('记一笔借出弹窗的输入框字号放大到 16px',
+            cssSrc.indexOf('#lendingModal .text-input { font-size: 16px;') >= 0);
+        ev(`window.confirm = () => true; deleteLending(state.lendings[0].id);`);
+        ok('删除后这笔不再计入（软删）', ev(`lendingList().length`) === 0);
+        ok('删完弹出 8 秒撤回条', ev(`!!document.querySelector('#toastContainer .lend-undo .toast-undo-btn')`));
+        ev(`document.querySelector('#toastContainer .lend-undo .toast-undo-btn').click();`);
+        ok('点撤回后这笔回来了、deletedAt 也清掉了',
+            ev(`lendingList().length`) === 1 && ev(`!state.lendings[0].deletedAt`),
+            ev(`JSON.stringify(state.lendings.map(l => ({p:l.person,d:!!l.deletedAt})))`));
+        ok('撤回后金额重新计入总资产', ev(`lendingOutstandingAt('2026-10')`) === 10000,
+            ev(`lendingOutstandingAt('2026-10')`));
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {

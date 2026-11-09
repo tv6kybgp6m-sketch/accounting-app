@@ -5526,8 +5526,14 @@ body.app-locked .fab-add { display: none !important; }
 /* v1.41.17：月度账单里的借出款只读行 / 明细弹窗 */
 .mw-lend-row { cursor: pointer; background: var(--bg-input); }
 .mw-lend-row:hover { background: var(--accent-light); }
-.mw-lend-hint { margin-left: auto; font-size: 11px; color: var(--accent-text); white-space: nowrap; }
 .lend-detail-row { justify-content: space-between; align-items: center; gap: 16px; }
+/* v1.41.18：记一笔借出的表单按月度账单的字号放大（只作用在这个弹窗） */
+#lendingModal .form-group { margin-bottom: 18px; }
+#lendingModal .form-group label { font-size: 15px; margin-bottom: 8px; }
+#lendingModal .text-input { font-size: 16px; padding: 12px 14px; min-height: 46px; box-sizing: border-box; }
+#lendingModal .cat-txn-sub { font-size: 13px; line-height: 1.7; }
+#lendingModal .form-row { gap: 14px; }
+#lendingModal .scope-foot button { font-size: 15px; padding: 10px 18px; }
 .msc-hint { color: var(--text-secondary); }
 .ret-missing { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); font-size: 12px; line-height: 1.8; color: var(--text-secondary); }
 .rm-head { color: var(--text-primary); margin-bottom: 4px; }
