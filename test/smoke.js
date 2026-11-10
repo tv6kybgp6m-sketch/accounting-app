@@ -1075,6 +1075,13 @@ async function run() {
             ev(`JSON.stringify(state.lendings.map(l => ({p:l.person,d:!!l.deletedAt})))`));
         ok('撤回后金额重新计入总资产', ev(`lendingOutstandingAt('2026-10')`) === 10000,
             ev(`lendingOutstandingAt('2026-10')`));
+        // v1.41.19：上一轮放大规则没生效，根因是这四个 input 压根没带 text-input 类
+        const _lendForm = htmlSrc.slice(htmlSrc.indexOf('id="lendingModal"'), htmlSrc.indexOf('id="lendingDetailModal"'));
+        ok('「记一笔借出」四个输入框都带 text-input 类，放大规则才匹配得到',
+            (_lendForm.match(/class="text-input"/g) || []).length === 4,
+            String((_lendForm.match(/class="text-input"/g) || []).length));
+        ok('输入框有明确的 46px 高度（WKWebView 里日期框也撑得开）',
+            cssSrc.indexOf('#lendingModal .text-input { font-size: 16px; padding: 12px 14px; height: 46px;') >= 0);
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {

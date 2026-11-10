@@ -5530,7 +5530,8 @@ body.app-locked .fab-add { display: none !important; }
 /* v1.41.18：记一笔借出的表单按月度账单的字号放大（只作用在这个弹窗） */
 #lendingModal .form-group { margin-bottom: 18px; }
 #lendingModal .form-group label { font-size: 15px; margin-bottom: 8px; }
-#lendingModal .text-input { font-size: 16px; padding: 12px 14px; min-height: 46px; box-sizing: border-box; }
+#lendingModal .text-input { font-size: 16px; padding: 12px 14px; height: 46px; min-height: 46px; box-sizing: border-box; }
+#lendingModal input[type="date"]::-webkit-datetime-edit { font-size: inherit; }
 #lendingModal .cat-txn-sub { font-size: 13px; line-height: 1.7; }
 #lendingModal .form-row { gap: 14px; }
 #lendingModal .scope-foot button { font-size: 15px; padding: 10px 18px; }

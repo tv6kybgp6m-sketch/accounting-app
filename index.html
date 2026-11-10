@@ -1487,7 +1487,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.18').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.19').catch(() => {});
             });
         }
     </script>
@@ -1504,12 +1504,12 @@
                 <div class="modal-body">
                     <input type="hidden" id="lendingId">
                     <div class="form-row">
-                        <div class="form-group"><label>谁借的</label><input type="text" id="lendingPerson" placeholder="例如：张三"></div>
-                        <div class="form-group"><label>金额</label><input type="number" id="lendingAmount" placeholder="0.00" step="0.01" min="0"></div>
+                        <div class="form-group"><label>谁借的</label><input type="text" class="text-input" id="lendingPerson" placeholder="例如：张三"></div>
+                        <div class="form-group"><label>金额</label><input type="number" class="text-input" id="lendingAmount" placeholder="0.00" step="0.01" min="0"></div>
                     </div>
                     <div class="form-row">
-                        <div class="form-group"><label>借款时间</label><input type="date" id="lendingDate"></div>
-                        <div class="form-group"><label>大概还款时间（可不填）</label><input type="date" id="lendingDue"></div>
+                        <div class="form-group"><label>借款时间</label><input type="date" class="text-input" id="lendingDate"></div>
+                        <div class="form-group"><label>大概还款时间（可不填）</label><input type="date" class="text-input" id="lendingDue"></div>
                     </div>
                     <div class="scope-foot">
                         <button class="secondary-btn" onclick="closeLendingModal()">取消</button>
