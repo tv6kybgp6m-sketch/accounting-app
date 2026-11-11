@@ -1195,6 +1195,37 @@ async function run() {
             css29.indexOf('.primary-btn {\n    background: var(--accent-solid);') >= 0 &&
             css29.indexOf('.filter-select {\n    background: var(--bg-card);') >= 0);
 
+        // ---------- 30) v1.41.22：iOS 27 状态栏采样 / 底部导航栏 ----------
+        stage = '30';
+        const html30 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+        const css30 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const mf30 = JSON.parse(fs.readFileSync(path.join(REPO, 'manifest.json'), 'utf8'));
+        ok('状态栏探针在 body 最前面、排在 .mac-window 之前',
+            html30.indexOf('id="statusBarProbe"') > 0 &&
+            html30.indexOf('id="statusBarProbe"') < html30.indexOf('<div class="mac-window">'));
+        ok('探针默认藏着，只有手机端才显示',
+            css30.indexOf('#statusBarProbe { display: none; }') >= 0 &&
+            /#statusBarProbe \{\s*display: block;/.test(css30));
+        ok('探针 ≥12px 且层级压过所有弹窗 / 启动骨架',
+            css30.indexOf('height: 14px;') >= 0 && css30.indexOf('z-index: 2147483647;') >= 0);
+        ok('探针颜色跟主题变量走，弹窗打开时同步换成弹窗色（状态栏不会变纯白）',
+            css30.indexOf('body:has(.modal-overlay:not(.hidden)) #statusBarProbe { background: var(--bg-modal); }') >= 0);
+        ok('手机端顶部去掉渐变、弹窗遮罩去掉毛玻璃',
+            css30.indexOf('body, [data-theme="dark"] body { background: var(--bg-content); }') >= 0 &&
+            css30.indexOf('backdrop-filter: none;') >= 0);
+        ok('manifest 里紫色 / 米白的启动配色统一掉了',
+            mf30.theme_color === '#f5f5f7' && mf30.background_color === '#f5f5f7');
+        ok('底部导航 74px → 67px（约 10%），悬浮按钮与主内容留白同步',
+            css30.indexOf('height: calc(67px + env(safe-area-inset-bottom, 0px));') >= 0 &&
+            css30.indexOf('bottom: calc(67px + env(safe-area-inset-bottom, 0px));') >= 0 &&
+            css30.indexOf('padding-bottom: calc(143px + env(safe-area-inset-bottom, 0px));') >= 0 &&
+            css30.indexOf('calc(74px + env(safe-area-inset-bottom') < 0);
+        ok('小红点改成跟下面的图标同一条竖直线',
+            /\.nav-item \.nav-dot \{[\s\S]{0,220}?left: 50%;[\s\S]{0,140}?transform: translateX\(-50%\);/.test(css30));
+        ok('探针元素真的在 DOM 里、且对读屏隐藏',
+            ev(`!!document.getElementById('statusBarProbe')`) &&
+            ev(`document.getElementById('statusBarProbe').getAttribute('aria-hidden')`) === 'true');
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

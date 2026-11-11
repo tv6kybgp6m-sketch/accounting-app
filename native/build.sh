@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 bash ./minify.sh || echo "（minify 跳过，使用已提交的 js/app.min.js）"
 
 APP_NAME=Bookkeeping
-VERSION=1.41.21
+VERSION=1.41.22
 APP_DIR="dist/$APP_NAME.app"
 CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
@@ -29,6 +29,7 @@ cp version.json "$RES/"
 # 原生壳跑在 http://127.0.0.1，页面照样注册 service worker，站点缓存名就在这文件里。
 # 少了它 —— 打出来的 .app 和 DMG 里 SW 是空的，PWA 离线缓存整个失效。
 cp sw.js "$RES/"
+cp manifest.json "$RES/"   # index.html 里链了它；PWA 启动配色也在这里，别漏
 cp -R css js vendor icons "$RES/"
 
 echo "==> 生成应用图标..."

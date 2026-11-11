@@ -40,6 +40,10 @@
     <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
 </head>
 <body>
+    <!-- iOS 27 主屏幕 Web App 的状态栏改为「采样页面最顶端 ≥12px 的实色」，
+         运行时改 theme-color / status-bar-style 已经不生效。这条常驻探针永远在最顶层，
+         颜色跟着主题变量走；弹窗盖住顶部时系统采样的还是它，状态栏就不会突然变白。 -->
+    <div id="statusBarProbe" aria-hidden="true"></div>
     <div class="mac-window">
         <!-- Title Bar with Traffic Lights -->
         <div class="title-bar">
@@ -1504,7 +1508,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.21').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.22').catch(() => {});
             });
         }
     </script>
