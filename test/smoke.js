@@ -1083,6 +1083,75 @@ async function run() {
         ok('输入框有明确的 46px 高度（WKWebView 里日期框也撑得开）',
             cssSrc.indexOf('#lendingModal .text-input { font-size: 16px; padding: 12px 14px; height: 46px;') >= 0);
 
+        // ---------- 28) v1.41.20：外观「跟随系统」 ----------
+        stage = '28';
+        const html28 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+        const appSrc28 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        ok('设置页外观有三档：浅色 / 深色 / 跟随系统',
+            /data-theme="light"/.test(html28) && /data-theme="dark"/.test(html28) && /data-theme="system"/.test(html28));
+        ok('「跟随系统」用的是这份 Font Awesome 里真有的图标',
+            html28.indexOf('fa-circle-half-stroke') >= 0);
+        ok('外观是本机偏好，不进云同步载荷（另一台设备盖不掉它）',
+            ev(`buildSyncPayload().data.settings.theme`) === undefined);
+        ok('云端合并时也把 theme 摘掉，本地外观不会被远端覆盖',
+            appSrc28.indexOf('theme: _dropTheme') >= 0);
+        ok('手机上三档按钮改成整行平分、文字不换行，还带着 theme-row 这个类',
+            html28.indexOf('settings-row theme-row') >= 0 &&
+            cssSrc.indexOf('.settings-row.theme-row { flex-direction: column;') >= 0 &&
+            cssSrc.indexOf('white-space: nowrap; padding: 8px 6px;') >= 0);
+
+        // jsdom 本身没有 matchMedia，装一个可控的，再把系统主题监听接上
+        ev(`
+            var __mmDark = false, __mmCbs = [], __mmOld = window.matchMedia;
+            window.matchMedia = function (q) {
+                if (String(q).indexOf('prefers-color-scheme') < 0)
+                    return { matches: false, addEventListener: function(){}, addListener: function(){} };
+                return { media: q, get matches(){ return __mmDark; },
+                    addEventListener: function(t,f){ if(t==='change') __mmCbs.push(f); },
+                    addListener: function(f){ __mmCbs.push(f); } };
+            };
+            state.currentView = 'transactions';   // 别让重画图表把前面的断言环境搅了
+            watchSystemTheme();
+        `);
+        ok('系统主题监听挂上了', ev(`__mmCbs.length`) >= 1);
+        ok('老环境没有 matchMedia 时不报错、只是不自动跟随',
+            ev(`(function(){ var m=window.matchMedia; window.matchMedia=undefined; var r=watchSystemTheme(); window.matchMedia=m; return r; })()`) === false);
+
+        ev(`applyTheme('system');`);
+        ok('选「跟随系统」时，存下来的是 system 这个选择',
+            ev(`state.settings.theme`) === 'system');
+        ok('系统是浅色时，DOM 上解析成 light（绝不会把 system 写进 data-theme）',
+            ev(`document.documentElement.getAttribute('data-theme')`) === 'light');
+        ok('设置页高亮的是「跟随系统」而不是浅色',
+            ev(`document.querySelector('.theme-btn[data-theme="system"]').classList.contains('active')`) &&
+            !ev(`document.querySelector('.theme-btn[data-theme="light"]').classList.contains('active')`));
+        ok('图表配色读的是解析后的实际主题',
+            ev(`chartPalette().isDark`) === false);
+
+        ev(`__mmDark = true; __mmCbs.forEach(function(f){ f({matches:true}); });`);
+        ok('系统自动切成深色后，App 跟着变深色',
+            ev(`document.documentElement.getAttribute('data-theme')`) === 'dark');
+        ok('自动切换时图表配色也跟着变',
+            ev(`chartPalette().isDark`) === true);
+        ok('自动切换只改显示，不改存下来的选择（不会触发写盘 / 同步）',
+            ev(`state.settings.theme`) === 'system');
+        ok('自动切换后高亮的仍是「跟随系统」',
+            ev(`document.querySelector('.theme-btn[data-theme="system"]').classList.contains('active')`));
+
+        ev(`applyTheme('light'); __mmDark = false; __mmCbs.forEach(function(f){ f({matches:false}); });`);
+        ok('手动选了浅色后，系统主题再变化也不来干预',
+            ev(`document.documentElement.getAttribute('data-theme')`) === 'light' &&
+            ev(`state.settings.theme`) === 'light');
+        ok('手动选深色就是深色，跟系统无关',
+            ev(`applyTheme('dark'); document.documentElement.getAttribute('data-theme')`) === 'dark');
+        ok('老备份里的异常主题值兜底成浅色，不会把 CSS 打瞎',
+            ev(`resolvedTheme('banana')`) === 'light' &&
+            ev(`applyTheme('banana'); document.documentElement.getAttribute('data-theme')`) === 'light');
+        ok('init / 合并走的是同一个解析函数，data-theme 永远只有 light 或 dark',
+            ev(`(function(){ __mmDark = true; state.settings.theme='system'; refreshAppliedTheme(); return document.documentElement.getAttribute('data-theme'); })()`) === 'dark' &&
+            ev(`document.documentElement.getAttribute('data-theme') !== 'system'`));
+        ev(`applyTheme('light'); window.matchMedia = __mmOld;`);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

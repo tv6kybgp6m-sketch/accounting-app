@@ -1862,6 +1862,19 @@ body.cat-dragging {
     box-shadow: var(--shadow-sm);
 }
 
+/* v1.41.20：外观多了「跟随系统」一档。手机上三档横排会把「浅色 / 跟随系统」
+   挤成两行，改成整行上下排布、三档平分宽度并禁止换行；桌面仍是原来的横排。
+   ⚠️ 后面 @media 里还有一条 .settings-row{flex-direction:row}，这里必须用
+   .settings-row.theme-row 双类提高优先级，否则会被覆盖回横排。 */
+@media (max-width: 640px) {
+    .settings-row.theme-row { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 8px; }
+    .settings-row.theme-row .theme-toggle { width: 100%; flex-shrink: 1; }
+    .settings-row.theme-row .theme-btn {
+        flex: 1 1 0; min-width: 0; justify-content: center;
+        white-space: nowrap; padding: 8px 6px; font-size: 12px; gap: 4px;
+    }
+}
+
 .about-info {
     display: flex;
     align-items: center;

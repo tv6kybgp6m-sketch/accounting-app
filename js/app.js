@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.19';
+const APP_VERSION = '1.41.20';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1575,8 +1575,11 @@ async function initICloudSync() {
 
 // 同步文档的统一结构：iCloud 通道和云同步通道共用，避免两边字段漂移
 function buildSyncPayload() {
-    // 「自动弹出记一笔」是本机偏好，绝不进同步载荷：否则 Mac 没开会把手机上开了的状态覆盖成关（用户只在手机上记账）
-    const { autoOpenAdd, ...settingsForSync } = state.settings;
+    // 本机偏好绝不进同步载荷：
+    //  · autoOpenAdd —— Mac 没开会把手机上开了的状态覆盖成关（用户只在手机上记账）
+    //  · theme —— 外观跟各自的设备走，尤其「跟随系统」是按本机系统深浅色解析的，
+    //    让旧版本的另一台设备把它盖成 light/dark，这台就不再自动切换了。
+    const { autoOpenAdd, theme, ...settingsForSync } = state.settings;
     return {
         version: 1,
         lastModified: Date.now(),
@@ -1991,11 +1994,13 @@ function mergeRemoteData(remoteData) {
     // 注意要在 syncFingerprint() 之前修，否则会把"坏数据"当成一次内容变更推回去。
     repairNameLists();
 
-    // Settings: prefer remote if newer；但「自动弹出记一笔」是本机偏好，绝不从远端覆盖（见 buildSyncPayload）
+    // Settings: prefer remote if newer；但「自动弹出记一笔」和「外观」都是本机偏好，
+    // 绝不从远端覆盖（见 buildSyncPayload）：手机常开自动弹记账、Mac 跟随系统深浅色，
+    // 不该被另一台设备的设置盖掉。
     if (remoteData.lastModified > (iCloudLastSyncTime || 0)) {
-        const { autoOpenAdd: _drop, ...remoteSettings } = remote.settings || {};
+        const { autoOpenAdd: _drop, theme: _dropTheme, ...remoteSettings } = remote.settings || {};
         state.settings = { ...state.settings, ...remoteSettings };
-        document.documentElement.setAttribute('data-theme', state.settings.theme);
+        refreshAppliedTheme();
     }
 
     // 异常订单"排除"列表：按 txnId 并集（任一台排除过 = 全部排除）。本地优先，但并集下顺序无影响。
@@ -6881,12 +6886,69 @@ function renderSettings() {
     if (av) av.textContent = '版本 ' + APP_VERSION;
 }
 
+// ==================== 外观：浅色 / 深色 / 跟随系统（v1.41.20） ====================
+// 分工别搞混：state.settings.theme 存的是「用户选了哪一档」（可能是 system），
+// 而 DOM 上的 data-theme 永远是解析后的实际 light/dark —— CSS 变量覆盖、
+// chartPalette() 以及各处 getAttribute('data-theme') 都只读 DOM，老逻辑一行都不用改。
+const THEME_CHOICES = ['light', 'dark', 'system'];
+
+function systemPrefersDark() {
+    try {
+        return typeof window.matchMedia === 'function' &&
+            !!window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } catch (e) { return false; }
+}
+
+function resolvedTheme(choice) {
+    const c = THEME_CHOICES.indexOf(choice) >= 0 ? choice : 'light';   // 老备份里的异常值兜底
+    if (c === 'system') return systemPrefersDark() ? 'dark' : 'light';
+    return c;
+}
+
+function refreshAppliedTheme() {
+    const choice = state.settings && state.settings.theme;
+    const actual = resolvedTheme(choice);
+    document.documentElement.setAttribute('data-theme', actual);
+    document.querySelectorAll('.theme-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.theme === choice);
+    });
+    return actual;
+}
+
+function refreshThemeCharts() {
+    // 图表里的字色 / 网格色是画的时候从 data-theme 取的，主题换了要重画，
+    // 不然折线还是上一套配色。只重画当前页的图，别整个 renderView（会动到未保存的输入）。
+    try {
+        if (state.currentView === 'reports') renderReports();
+        else if (state.currentView === 'balance') renderBalance();
+        else if (state.currentView === 'returns') renderReturns();
+        else if (state.currentView === 'funds') renderFourFunds();
+    } catch (e) { /* 重画失败不该挡住主题切换 */ }
+}
+
 function applyTheme(theme) {
-    state.settings.theme = theme;
-    document.documentElement.setAttribute('data-theme', theme);
+    state.settings.theme = THEME_CHOICES.indexOf(theme) >= 0 ? theme : 'light';
+    refreshAppliedTheme();
     saveState();
-    // Re-render charts with new colors
-    if (state.currentView === 'reports') renderReports();
+    refreshThemeCharts();
+}
+
+// 系统深浅色一变就跟着变。只改显示、不 saveState、不写同步载荷：
+// 存着的仍然是「跟随系统」这一个选择，不该因为日落就触发一次账本上传。
+function watchSystemTheme() {
+    if (typeof window.matchMedia !== 'function') return false;
+    let mq;
+    try { mq = window.matchMedia('(prefers-color-scheme: dark)'); } catch (e) { return false; }
+    if (!mq) return false;
+    const onChange = () => {
+        if (!state.settings || state.settings.theme !== 'system') return;
+        refreshAppliedTheme();
+        refreshThemeCharts();
+    };
+    if (typeof mq.addEventListener === 'function') mq.addEventListener('change', onChange);
+    else if (typeof mq.addListener === 'function') mq.addListener(onChange);
+    else return false;
+    return true;
 }
 
 function setDefaultView(view) {
@@ -15336,14 +15398,10 @@ function initEventListeners() {
         showToast('货币已更新', 'success');
     });
 
-    // Theme
+    // Theme：三档（浅色 / 深色 / 跟随系统）。高亮与图表重画统一由 applyTheme 走一遍，
+    // 别在这里手动切 class，否则「跟随系统」时会和实际主题对不上。
     document.querySelectorAll('.theme-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            applyTheme(btn.dataset.theme);
-            document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            if (state.currentView === 'reports') renderReports();
-        });
+        btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
     });
 
     // Modal overlay click to close
@@ -15539,7 +15597,8 @@ async function init() {
     pruneTombstones();
     applyTombstones();
     if (_purged) showToast('已清掉 ' + _purged + ' 条示例数据', 'success');
-    document.documentElement.setAttribute('data-theme', state.settings.theme);
+    refreshAppliedTheme();   // 老备份/旧存档里的异常值在这里兜底成 light，绝不会把 system 写进 DOM
+    watchSystemTheme();      // 选了「跟随系统」时，系统深浅色变了就自动跟着切
     initEventListeners();
     initCategoryInteractions();
     initModalResize();      // v1.39.90：给所有弹窗装上右下角缩放手柄

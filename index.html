@@ -669,11 +669,12 @@
                                     <option value="¥">¥ 日元</option>
                                 </select>
                             </div>
-                            <div class="settings-row">
-                                <div class="settings-label">外观</div>
+                            <div class="settings-row theme-row">
+                                <div class="settings-label">外观<div class="settings-sublabel">跟着电脑 / 手机自动切换深浅色</div></div>
                                 <div class="theme-toggle">
                                     <button class="theme-btn active" data-theme="light"><i class="fa-solid fa-sun"></i> 浅色</button>
                                     <button class="theme-btn" data-theme="dark"><i class="fa-solid fa-moon"></i> 深色</button>
+                                    <button class="theme-btn" data-theme="system"><i class="fa-solid fa-circle-half-stroke"></i> 跟随系统</button>
                                 </div>
                             </div>
                             <div class="settings-row">
@@ -1487,7 +1488,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.19').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.20').catch(() => {});
             });
         }
     </script>
