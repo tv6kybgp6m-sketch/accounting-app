@@ -1160,12 +1160,22 @@
                 <div class="modal-header">
                     <div class="drill-title-wrap">
                         <h2>账户管理</h2>
-                        <div class="cat-txn-sub">账户 = 放钱的地方（中国银行 / 支付宝 / 摩根…）；一个账户里可以同时有资产和负债</div>
                     </div>
-                    <button class="modal-close" onclick="closeAccountsModal()"><i class="fa-solid fa-xmark"></i></button>
+                    <div class="acct-head-actions">
+                        <span class="acc-viewtag" id="accViewTag" style="display:none">只读查看</span>
+                        <button class="secondary-btn acc-mode-btn" id="accEditBtn" onclick="toggleAccountsViewMode()" style="display:none"><i class="fa-solid fa-pen"></i> <span id="accEditBtnLabel">编辑</span></button>
+                        <button class="modal-close" onclick="closeAccountsModal()"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
                 </div>
                 <div class="modal-body">
-                    <div class="account-new">
+                    <!-- v1.41.23：新增账户默认收起，打开弹窗先看到清单而不是一堆输入框 -->
+                    <button class="acct-add-toggle" id="acctAddToggle" onclick="toggleAccountAdd()">
+                        <span><i class="fa-solid fa-plus"></i> 新增账户</span>
+                        <i class="fa-solid fa-chevron-down acct-add-caret"></i>
+                    </button>
+                    <div class="account-new hidden" id="acctAddFields">
+                        <!-- v1.41.23：这段说明原来在 header 和列表里各写了一遍，现在只在「新增账户」展开时出现一次 -->
+                        <div class="acct-add-hint">账户 = 放钱的地方（中国银行 / 支付宝 / 微信…）。一个账户里可以同时有资产和负债，记账时在「负债」那一列填就行，不用给账户打标签。</div>
                         <input type="text" class="text-input" id="newAccountName" placeholder="放钱的地方，如 中国银行 / 支付宝">
                         <select class="text-input" id="newAccountGroup"></select>
                         <select class="text-input" id="newAccountCurrency">
@@ -1174,8 +1184,6 @@
                             <option value="HKD">港币</option>
                         </select>
                         <button class="primary-btn" onclick="addAccount()"><i class="fa-solid fa-plus"></i> 添加</button>
-                        <button class="primary-btn" id="accEditBtn" onclick="toggleAccountsViewMode()" style="display:none"><i class="fa-solid fa-pen"></i> <span id="accEditBtnLabel">编辑</span></button>
-                        <span class="acc-viewtag" id="accViewTag" style="display:none">（只读查看）</span>
                         <!-- v1.39.90：多币种账户 —— 勾了的账户，记月度账单选「其他币种」时才按币种分成几行 -->
                         <label class="acc-multi-toggle" title="这个账户里有美元 / 港币 / 其它币种时勾上。记月度账单把上面的「币种」切成「其他币种」时，勾了的账户会按币种分成几行分别记账">
                             <input type="checkbox" id="newAccountMulti">
@@ -1508,7 +1516,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.22').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.23').catch(() => {});
             });
         }
     </script>

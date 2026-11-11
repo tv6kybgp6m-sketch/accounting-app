@@ -1226,6 +1226,81 @@ async function run() {
             ev(`!!document.getElementById('statusBarProbe')`) &&
             ev(`document.getElementById('statusBarProbe').getAttribute('aria-hidden')`) === 'true');
 
+        // ---------- 31) v1.41.23：账户管理弹窗重排 ----------
+        stage = '31';
+        const html31 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+        const css31 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const acctModalHtml = html31.slice(html31.indexOf('id="accountsModal"'), html31.indexOf('<!-- Insurance Claim Modal -->'));
+        ok('新增账户默认收起，打开弹窗先看到清单而不是一排输入框',
+            /<div class="account-new hidden" id="acctAddFields">/.test(acctModalHtml) &&
+            acctModalHtml.indexOf('id="acctAddToggle"') >= 0);
+        ok('编辑 / 只读开关挪到标题栏右侧，不再混在新增那一行里',
+            acctModalHtml.indexOf('class="acct-head-actions"') >= 0 &&
+            acctModalHtml.indexOf('id="accEditBtn"') > acctModalHtml.indexOf('class="modal-header"') &&
+            acctModalHtml.indexOf('id="accEditBtn"') < acctModalHtml.indexOf('class="modal-body"'));
+        ok('「账户 = 放钱的地方」这段说明整页只留一遍（原来 header + 列表各一遍）',
+            (html31.match(/账户 = 放钱的地方/g) || []).length === 1 &&
+            acctModalHtml.indexOf('class="cat-txn-sub"') < 0);
+        ok('原有 id / onclick 一个都没丢，功能照旧能跑',
+            ['newAccountName', 'newAccountGroup', 'newAccountCurrency', 'newAccountMulti',
+                'accountManageList', 'accViewTag', 'accEditBtnLabel'].every(id => acctModalHtml.indexOf('id="' + id + '"') >= 0) &&
+            acctModalHtml.indexOf('onclick="addAccount()"') >= 0 &&
+            acctModalHtml.indexOf('onclick="toggleAccountsViewMode()"') >= 0);
+
+        // 假数据：两个账户 + 两个成员，绝不碰真实账本
+        ev(`state.accounts = [
+            { id:'acct_a', name:'中国银行', kind:'asset', group:'现金', color:'#007aff', icon:'fa-wallet', order:1, members:['本人'] },
+            { id:'acct_b', name:'支付宝', kind:'asset', group:'现金', color:'#34c759', icon:'fa-wallet', order:2, members:['本人','家人'] }
+        ]; state.balanceMembers = ['本人','家人']; accountsMembersOpen = false;`);
+        ev(`openAccountsModal();`);
+        const listHtml31 = ev(`document.getElementById('accountManageList').innerHTML`);
+        ok('有账户时打开弹窗：新增区收着、账户清单排在最上面',
+            ev(`document.getElementById('acctAddFields').classList.contains('hidden')`) === true &&
+            listHtml31.indexOf('account-section-title') < listHtml31.indexOf('acct-member-fold'));
+        ok('默认进只读查看模式，编辑按钮在标题栏可见',
+            ev(`document.getElementById('accountsModal').classList.contains('acc-viewmode')`) === true &&
+            ev(`document.getElementById('accEditBtn').style.display`) !== 'none');
+        ok('只读模式下每行只剩图标 + 名字 + 小标签（分组下拉藏起来）',
+            css31.indexOf('#accountsModal.acc-viewmode .acct-group-select { display: none; }') >= 0 &&
+            ev(`document.querySelectorAll('#accountManageList .account-row').length`) === 2 &&
+            ev(`document.querySelectorAll('#accountManageList .ar-title').length`) === 2);
+        ok('家庭成员收进折叠区，默认收起但入口一直在',
+            ev(`!!document.getElementById('acctMemberHead')`) &&
+            ev(`document.getElementById('acctMemberPanel').classList.contains('hidden')`) === true &&
+            ev(`document.getElementById('acctMemberHead').textContent.indexOf('家庭成员（2）') >= 0`));
+        ev(`toggleAccountMembers();`);
+        ok('点一下展开成员，再点一下收回',
+            ev(`!document.getElementById('acctMemberPanel').classList.contains('hidden')`) &&
+            ev(`document.getElementById('acctMemberHead').classList.contains('open')`) === true);
+        ev(`renderAccountManageList();`);
+        ok('重画列表不会把用户展开的成员面板弹回去',
+            ev(`!document.getElementById('acctMemberPanel').classList.contains('hidden')`));
+        ev(`toggleAccountMembers();`);
+        ok('收起后重画也保持收起',
+            ev(`renderAccountManageList(); document.getElementById('acctMemberPanel').classList.contains('hidden')`));
+        ev(`toggleAccountAdd();`);
+        ok('点「＋ 新增账户」才展开输入框',
+            ev(`!document.getElementById('acctAddFields').classList.contains('hidden')`) &&
+            ev(`document.getElementById('acctAddToggle').classList.contains('open')`) === true);
+
+        // 空台账防死锁：唯一添加入口不能被藏起来（v1.41.16 借出款踩过）
+        ev(`state.accounts = []; openAccountsModal();`);
+        ok('一个账户都没有时自动展开新增区，不会把唯一入口藏起来',
+            ev(`!document.getElementById('acctAddFields').classList.contains('hidden')`) &&
+            ev(`document.getElementById('accountManageList').innerHTML.indexOf('点上面「＋ 新增账户」添加')`) >= 0);
+        ev(`document.getElementById('newAccountName').value = '测试账户';
+            document.getElementById('newAccountGroup').value = '现金';
+            addAccount();`);
+        ok('新增账户功能没被重排弄坏',
+            ev(`state.accounts.length`) === 1 && ev(`state.accounts[0].name`) === '测试账户' &&
+            ev(`document.querySelectorAll('#accountManageList .account-row').length`) === 1);
+        ok('新样式全部 scoped 到 #accountsModal，不误伤别的弹窗',
+            css31.indexOf('#accountsModal .acct-add-toggle {') >= 0 &&
+            css31.indexOf('#accountsModal .acct-member-fold {') >= 0);
+        ok('手机端两个折叠按钮都有 44px 触屏高度',
+            css31.indexOf('#accountsModal .acct-add-toggle,\n    #accountsModal .acct-fold-head { min-height: 44px; }') >= 0);
+        ev(`closeAccountsModal();`);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

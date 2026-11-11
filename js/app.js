@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.22';
+const APP_VERSION = '1.41.23';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -12224,6 +12224,27 @@ function openReturnModal(month) { return openMonthlyModal(month || returnViewMon
 // 所以默认进查看模式：已有的东西全锁住防误触；只有「新增账户」还留着（新增是主动加东西，不是误改）。
 let accountsViewMode = false;
 let accountsHasData = false;
+let accountsMembersOpen = false;   // v1.41.23：家庭成员折叠状态，重画列表时别把它弹回去
+
+// v1.41.23：新增账户默认收起，点一下才展开；forceOpen 给 openAccountsModal() 复位用
+function toggleAccountAdd(forceOpen) {
+    const box = document.getElementById('acctAddFields');
+    const btn = document.getElementById('acctAddToggle');
+    if (!box || !btn) return;
+    const open = typeof forceOpen === 'boolean' ? forceOpen : box.classList.contains('hidden');
+    box.classList.toggle('hidden', !open);
+    btn.classList.toggle('open', open);
+    if (open) { const el = document.getElementById('newAccountName'); if (el) el.focus(); }
+}
+
+function toggleAccountMembers() {
+    accountsMembersOpen = !accountsMembersOpen;
+    const body = document.getElementById('acctMemberPanel');
+    const head = document.getElementById('acctMemberHead');
+    if (body) body.classList.toggle('hidden', !accountsMembersOpen);
+    if (head) head.classList.toggle('open', accountsMembersOpen);
+}
+
 function refreshAccountsViewMode() {
     accountsHasData = state.accounts.length > 0;
     accountsViewMode = accountsHasData;   // 有账户默认查看（只读防误触）；一个都没有就直接编辑（要加）
@@ -12254,6 +12275,9 @@ function openAccountsModal() {
     if (sel) sel.innerHTML = ASSET_GROUPS.map(g => `<option>${g}</option>`).join('');
     refreshAccountsViewMode();   // v1.39.39：有账户时默认「查看模式」（只读防误触）
     renderAccountManageList();
+    // v1.41.23：每次打开都把「新增账户」收回，先看到清单；
+    // 一个账户都没有时必须自动展开，否则唯一的添加入口也被藏起来（v1.41.16 借出款踩过这个死锁）。
+    toggleAccountAdd(!accountsHasData);
     document.getElementById('accountsModal').classList.remove('hidden');
     raiseOverlay('accountsModal');
 }
@@ -12271,25 +12295,33 @@ function renderAccountManageList() {
     // 不是账户自己的属性。所以这里就是一条扁平的渠道清单。
     const rows = state.accounts.slice().sort((a, b) =>
         (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
+    // v1.41.23：打开先看账户清单；家庭成员收进折叠区，重复说明挪到「新增账户」里只留一份。
+    // accountsMembersOpen 用变量记住，重画列表时不会把用户刚展开的面板弹回去。
     box.innerHTML = `
-        <div class="account-section-title">家庭成员</div>
-        <div class="fam-chips">${memberChips}<button class="fam-add" data-add="1"><i class="fa-solid fa-plus"></i> 添加</button></div>
-        <div class="account-hint">账户 = 放钱的地方（中国银行 / 支付宝 / 微信 / 摩根…）。一个账户里可以同时有资产和负债，
-            记账时在「负债」那一列填就行，不用再给账户打资产还是负债的标签。</div>
         <div class="account-section-title">账户（${rows.length}）<span class="acct-order-hint hint-pointer">按住名字拖动可调顺序</span><span class="acct-order-hint hint-touch">长按账户名可拖动排序</span></div>
-        ${rows.map((a) => { const recN = accountRecordCounts(a.id); const n = recN.bal + recN.ret;
+        <div class="acct-rows">${rows.map((a) => { const recN = accountRecordCounts(a.id); const n = recN.bal + recN.ret;
             // v1.39.94：标出这个账户属于哪些家庭成员 / 是否被收起来了
             const memberTag = (Array.isArray(a.members) && a.members.length) ? `<span class="be-kind">${_esc(a.members.join('、'))}</span>` : '';
+            const groupTag = a.group ? `<span class="be-kind">${_esc(a.group)}</span>` : '';
             return `
                 <div class="account-row" data-account-row="${a.id}">
                     <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
-                    <div class="ar-name" draggable="true" onclick="renameAccount('${a.id}')" title="按住拖动可调整账户顺序；点一下改名">${_esc(a.name)}<span class="be-kind">${_esc(a.group || '')}</span>${memberTag}</div>
+                    <div class="ar-name" draggable="true" onclick="renameAccount('${a.id}')" title="按住拖动可调整账户顺序；点一下改名"><span class="ar-title">${_esc(a.name)}</span>${groupTag}${memberTag}</div>
                     <select class="acct-group-select" data-group-account="${a.id}" title="账户分类">
                         ${groupsForKind(a.kind).map(g => `<option value="${g}" ${a.group === g ? 'selected' : ''}>${g}</option>`).join('')}
                     </select>
                     <button class="bh-edit" onclick="openAccountEdit('${a.id}')" title="编辑账户"><i class="fa-solid fa-pen"></i></button>
                     <button class="bh-delete${n ? ' bh-blocked' : ''}" onclick="deleteAccountFromList('${a.id}')" title="${n ? '还有 ' + n + ' 条记录，得先清掉才能删' : '删除'}"><i class="fa-solid ${n ? 'fa-lock' : 'fa-trash'}"></i></button>
-                </div>`; }).join('') || '<div class="breakdown-empty">暂无账户</div>'}`;
+                </div>`; }).join('') || '<div class="breakdown-empty">暂无账户，点上面「＋ 新增账户」添加</div>'}</div>
+        <div class="acct-member-fold">
+            <button class="acct-fold-head${accountsMembersOpen ? ' open' : ''}" id="acctMemberHead" onclick="toggleAccountMembers()">
+                <span><i class="fa-solid fa-user-group"></i> 家庭成员（${state.balanceMembers.length}）</span>
+                <i class="fa-solid fa-chevron-down acct-fold-caret"></i>
+            </button>
+            <div class="acct-member-panel${accountsMembersOpen ? '' : ' hidden'}" id="acctMemberPanel">
+                <div class="fam-chips">${memberChips}<button class="fam-add" data-add="1"><i class="fa-solid fa-plus"></i> 添加</button></div>
+            </div>
+        </div>`;
 
     // 账户行拖拽排序：和「记月度账单」里的行拖拽同一套观感 —— 整行卡片跟手 + 落点高亮线。
     // 用账户名当拖动手柄；拖完调 reorderMonthlyAccount（它会重排 order 并重画两处列表）。
