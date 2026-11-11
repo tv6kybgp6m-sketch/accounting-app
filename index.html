@@ -14,9 +14,25 @@
     </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" id="statusBarStyleMeta">
     <meta name="apple-mobile-web-app-title" content="记账本">
-    <meta name="theme-color" content="#5865F2">
+    <meta name="theme-color" content="#f5f5f7" id="themeColorMeta">
+    <script>
+        // 第一帧之前就把主题定下来：骨架屏、iOS 系统状态栏、标题栏都要是同一个颜色，
+        // 否则深色模式启动会先白一下。这里只读一个轻量本机偏好键，不碰账本数据。
+        (function () {
+            try {
+                var c = localStorage.getItem('bookkeeping_theme_choice') || 'light';
+                var dark = c === 'dark' || (c === 'system' && !!window.matchMedia &&
+                    window.matchMedia('(prefers-color-scheme: dark)').matches);
+                document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+                var tc = document.getElementById('themeColorMeta');
+                if (tc) tc.setAttribute('content', dark ? '#1c1c1e' : '#f5f5f7');
+                var sb = document.getElementById('statusBarStyleMeta');
+                if (sb) sb.setAttribute('content', dark ? 'black' : 'default');
+            } catch (e) { /* 隐私模式 / 老浏览器：由 init() 里的 refreshAppliedTheme() 兜底 */ }
+        })();
+    </script>
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
     <title>记账本</title>
@@ -670,7 +686,7 @@
                                 </select>
                             </div>
                             <div class="settings-row theme-row">
-                                <div class="settings-label">外观<div class="settings-sublabel">跟着电脑 / 手机自动切换深浅色</div></div>
+                                <div class="settings-label">外观</div>
                                 <div class="theme-toggle">
                                     <button class="theme-btn active" data-theme="light"><i class="fa-solid fa-sun"></i> 浅色</button>
                                     <button class="theme-btn" data-theme="dark"><i class="fa-solid fa-moon"></i> 深色</button>
@@ -678,7 +694,7 @@
                                 </div>
                             </div>
                             <div class="settings-row">
-                                <div class="settings-label">默认打开页面<div class="settings-sublabel">启动时自动进入的页面</div></div>
+                                <div class="settings-label">默认打开页面</div>
                                 <select class="settings-select" id="defaultViewSelect" onchange="setDefaultView(this.value)">
                                     <option value="transactions">交易记录</option>
                                     <option value="reports">报表分析</option>
@@ -689,7 +705,7 @@
                                 </select>
                             </div>
                             <div class="settings-row">
-                                <div class="settings-label">启动自动弹出记一笔<div class="settings-sublabel">打开应用时直接弹出记账输入框</div></div>
+                                <div class="settings-label">启动自动弹出记一笔</div>
                                 <label class="ios-toggle">
                                     <input type="checkbox" id="autoOpenAddToggle" onchange="setAutoOpenAdd(this.checked)">
                                     <span class="ios-toggle-slider"></span>
@@ -702,7 +718,7 @@
                                 </button>
                             </div>
                             <div class="settings-row">
-                                <div class="settings-label">预算管理<div class="settings-sublabel">移动端导航已收起，从这里进入</div></div>
+                                <div class="settings-label">预算管理</div>
                                 <button class="secondary-btn" onclick="switchView('budget')">
                                     <i class="fa-solid fa-wallet"></i> 管理
                                 </button>
@@ -1488,7 +1504,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.20').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.21').catch(() => {});
             });
         }
     </script>

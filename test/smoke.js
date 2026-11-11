@@ -1152,6 +1152,49 @@ async function run() {
             ev(`document.documentElement.getAttribute('data-theme') !== 'system'`));
         ev(`applyTheme('light'); window.matchMedia = __mmOld;`);
 
+        // ---------- 29) v1.41.21：设置小字精简 / 深色顶部 / 手机按钮高度 ----------
+        stage = '29';
+        const html29 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+        const css29 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const app29 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        ['跟着电脑 / 手机自动切换深浅色', '启动时自动进入的页面',
+            '打开应用时直接弹出记账输入框', '移动端导航已收起，从这里进入'].forEach(t => {
+            ok('设置页多余的灰色小字已删：' + t, html29.indexOf(t) < 0);
+        });
+        ok('备份 / 导出那些较长的说明文字没被误删',
+            html29.indexOf('存一份带日期的完整账本') >= 0 && html29.indexOf('从 .xlsx 表格读回账本') >= 0);
+        ok('两个状态栏 meta 与启动预读脚本都在 head 里',
+            html29.indexOf('id="themeColorMeta"') >= 0 && html29.indexOf('id="statusBarStyleMeta"') >= 0 &&
+            html29.indexOf('bookkeeping_theme_choice') >= 0 &&
+            html29.indexOf('id="themeColorMeta"') < html29.indexOf('<link rel="stylesheet" href="css/style.css">'));
+        ev(`applyTheme('dark');`);
+        ok('选深色时 theme-color / iOS 状态栏样式一起变深',
+            ev(`document.getElementById('themeColorMeta').getAttribute('content')`) === '#1c1c1e' &&
+            ev(`document.getElementById('statusBarStyleMeta').getAttribute('content')`) === 'black');
+        ok('启动预读键写的是「选择」本身', ev(`localStorage.getItem('bookkeeping_theme_choice')`) === 'dark');
+        ev(`applyTheme('light');`);
+        ok('选浅色时状态栏 meta 回到白底黑字',
+            ev(`document.getElementById('themeColorMeta').getAttribute('content')`) === '#f5f5f7' &&
+            ev(`document.getElementById('statusBarStyleMeta').getAttribute('content')`) === 'default');
+        ok('跟随系统存的是 system，下次启动第一帧就不会先白一下',
+            ev(`applyTheme('system'); localStorage.getItem('bookkeeping_theme_choice')`) === 'system');
+        ok('系统主题自动切换不会重复写盘（只在「选择」变化时写轻量键）',
+            app29.indexOf("if (localStorage.getItem(THEME_CHOICE_KEY) !== choice)") >= 0);
+        ev(`applyTheme('light');`);
+        const _bootLine = css29.split('\n').find(l => l.indexOf('#bootLoading {') === 0) || '';
+        ok('启动骨架屏底色不再是写死的 #f7f8fa',
+            _bootLine.indexOf('background: var(--bg-content)') >= 0 && _bootLine.indexOf('#f7f8fa') < 0);
+        ok('手机标题栏改成实色，不再透出状态栏的白',
+            /\.title-bar \{[\s\S]{0,320}?background: var\(--bg-content\);/.test(css29));
+        ok('四页按钮统一 32px 外框，且规则只写在手机端 media 里',
+            css29.indexOf('@media (max-width: 640px) {\n    :root { --ctrl-h: 32px; }') >= 0 &&
+            css29.indexOf('.filter-bar .filter-right .filter-select') >= 0 &&
+            css29.indexOf('.view-header .report-controls .primary-btn') >= 0 &&
+            css29.indexOf('.view-header .report-controls .money-eye-btn') >= 0);
+        ok('桌面端那套按钮样式没被改动',
+            css29.indexOf('.primary-btn {\n    background: var(--accent-solid);') >= 0 &&
+            css29.indexOf('.filter-select {\n    background: var(--bg-card);') >= 0);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

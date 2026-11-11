@@ -2661,6 +2661,8 @@ body.cat-dragging {
         height: 48px;
         padding: 0 16px;
         padding-top: env(safe-area-inset-top, 0px);
+        /* iOS 上 backdrop-filter 叠半透明底色偶尔会把状态栏的白透出来，手机端直接用实色 */
+        background: var(--bg-content);
         -webkit-backdrop-filter: blur(20px);
         backdrop-filter: blur(20px);
     }
@@ -5443,9 +5445,10 @@ table.bill-stats {
 
 /* ===== 启动骨架（B 优化：app.js 解析完成前先显示，避免白屏） ===== */
 @keyframes bootspin { to { transform: rotate(360deg); } }
-#bootLoading { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f7f8fa; }
-#bootLoading .spinner { width: 36px; height: 36px; border: 4px solid #e3e6f0; border-top-color: #5865F2; border-radius: 50%; animation: bootspin .8s linear infinite; }
-#bootLoading .boot-text { margin-top: 14px; font-size: 15px; color: #8a8f9c; font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; }
+/* 深色模式启动时不能先白一下：底色跟内容区走同一个令牌，转圈/文字也别写死浅色 */
+#bootLoading { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg-content); }
+#bootLoading .spinner { width: 36px; height: 36px; border: 4px solid var(--border-strong); border-top-color: var(--accent-solid); border-radius: 50%; animation: bootspin .8s linear infinite; }
+#bootLoading .boot-text { margin-top: 14px; font-size: 15px; color: var(--text-secondary); font-family: var(--font); }
 
 /* ===== v1.41.2：键盘焦点基线（WCAG 2.4.7） =====
    :where() 不抬高特异性，组件里已有的 focus-visible 规则仍优先；
@@ -5581,4 +5584,43 @@ body.app-locked .fab-add { display: none !important; }
     .rr-row { flex-direction: column; gap: 2px; }
     .rr-k { flex: none; }
     .lend-ops { margin-left: 0; width: 100%; }
+}
+
+/* ===== v1.41.21：手机端同一行的筛选 / 操作按钮高度拉齐 =====
+   之前「月报·年报·全部」「全部·支出·收入」是 4~6px 内边距的小胶囊，
+   旁边的日期 / 账户 / 口径 / 记月度账单却用 7~8px 内边距，换行后高矮差一截。
+   统一外框 32px：胶囊内部按钮 26px + 容器 padding 3px×2，旁边独立按钮直接 32px。
+   ⚠️ 只 scoped 手机端且带 .view-header / .filter-bar 前缀，桌面和弹窗里的按钮一个都不动。 */
+@media (max-width: 640px) {
+    :root { --ctrl-h: 32px; }
+    .filter-bar .filter-tabs,
+    .view-header .report-controls .report-period { align-items: center; }
+    .filter-bar .filter-tabs .filter-tab,
+    .view-header .report-controls .period-btn {
+        height: calc(var(--ctrl-h) - 6px);
+        padding-top: 0;
+        padding-bottom: 0;
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+        white-space: nowrap;
+    }
+    .filter-bar .filter-right .filter-select,
+    .view-header .report-controls .filter-select,
+    .view-header .report-controls .secondary-btn,
+    .view-header .report-controls .primary-btn,
+    .view-header .report-controls .money-eye-btn {
+        height: var(--ctrl-h);
+        min-height: var(--ctrl-h);
+        padding-top: 0;
+        padding-bottom: 0;
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+        white-space: nowrap;
+    }
 }

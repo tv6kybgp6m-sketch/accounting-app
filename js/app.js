@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.20';
+const APP_VERSION = '1.41.21';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -6905,13 +6905,31 @@ function resolvedTheme(choice) {
     return c;
 }
 
+// 手机最上面那条是系统状态栏 / Safari 工具栏，颜色由这两个 meta 决定，
+// 页面自己的 CSS 管不到。跟着解析后的实际主题一起换，深色才不会留一条白。
+const THEME_COLOR = { light: '#f5f5f7', dark: '#1c1c1e' };
+const THEME_CHOICE_KEY = 'bookkeeping_theme_choice';   // 只给 <head> 启动脚本预读，不进账本、不进云同步
+
+function syncThemeChrome(actual) {
+    const tc = document.getElementById('themeColorMeta');
+    if (tc) tc.setAttribute('content', THEME_COLOR[actual] || THEME_COLOR.light);
+    const sb = document.getElementById('statusBarStyleMeta');
+    if (sb) sb.setAttribute('content', actual === 'dark' ? 'black' : 'default');
+}
+
 function refreshAppliedTheme() {
-    const choice = state.settings && state.settings.theme;
+    const raw = state.settings && state.settings.theme;
+    const choice = THEME_CHOICES.indexOf(raw) >= 0 ? raw : 'light';
     const actual = resolvedTheme(choice);
     document.documentElement.setAttribute('data-theme', actual);
     document.querySelectorAll('.theme-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.theme === choice);
     });
+    syncThemeChrome(actual);
+    // 只在「选择」真的变了才写：系统深浅色自动切换时 choice 不变，这里一次盘都不落。
+    try {
+        if (localStorage.getItem(THEME_CHOICE_KEY) !== choice) localStorage.setItem(THEME_CHOICE_KEY, choice);
+    } catch (e) { /* 隐私模式：顶多启动时按浅色起一帧，不影响账本 */ }
     return actual;
 }
 
