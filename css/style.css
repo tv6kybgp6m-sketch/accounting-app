@@ -3234,6 +3234,36 @@ body.cat-dragging {
 .monthly-selfcheck .msc-ok { color: var(--income-text); }
 .monthly-selfcheck .msc-warn { color: var(--expense-text); }
 .monthly-selfcheck .msc-warn i, .monthly-selfcheck .msc-ok i { margin-right: 4px; }
+
+/* v1.41.29：录入自检挪到弹窗底部（取消/保存上方），始终可见，不再沉到表格最底下；
+   默认收起成一行，点开才看明细，省空间、手机也清爽 */
+#monthlyModal .modal-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    padding: 10px 22px 14px;
+}
+#monthlyModal .footer-btns { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+#monthlyModal .drill-title-wrap { flex: 1 1 auto; min-width: 0; }
+#monthlyModal .bal-entry-mode { display: flex; align-items: center; gap: 8px; }
+#monthlyModal .bal-entry-mode .mw-viewtag { margin-left: 0; }
+
+/* 顶部控件收一收：表上方的按钮行更紧凑、少占竖向空间 */
+#monthlyModal .bal-entry-head { margin-bottom: 2px; }
+#monthlyModal .bal-entry-actions { margin: 2px 0 4px; }
+#monthlyModal .modal-body { padding-top: 12px; }
+
+.monthly-selfcheck.msc-footer { margin-top: 0; padding: 8px 12px; border-radius: var(--radius-md); background: var(--bg-card); border: 0.5px solid var(--divider, var(--border)); font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
+.monthly-selfcheck.msc-footer.msc-empty { display: none; }
+.monthly-selfcheck.msc-footer .msc-summary { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-wrap: wrap; }
+.monthly-selfcheck.msc-footer .msc-net b { font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.monthly-selfcheck.msc-footer .msc-info { color: var(--text-muted); font-size: 11px; }
+.monthly-selfcheck.msc-footer .msc-flag { margin-left: auto; font-size: 11px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.monthly-selfcheck.msc-footer .msc-flag.ok { color: var(--income-text); background: rgba(52,199,89,.12); }
+.monthly-selfcheck.msc-footer .msc-flag.warn { color: var(--expense-text); background: rgba(255,59,48,.12); }
+.monthly-selfcheck.msc-footer .msc-caret { color: var(--text-muted); font-size: 10px; }
+.monthly-selfcheck.msc-footer .msc-detail { margin-top: 6px; }
+.monthly-selfcheck.msc-footer .msc-detail .msc-line { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; font-size: 11.5px; }
 .bal-entry-row {
     display: flex;
     align-items: center;
@@ -3373,6 +3403,7 @@ body.cat-dragging {
     .balance-modal .modal-footer {
         flex: 0 0 auto; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
     }
+    #monthlyModal .modal-footer { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
 }
 
 /* 资产负债：当月未记录的账户 */

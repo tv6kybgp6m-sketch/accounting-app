@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.28';
+const APP_VERSION = '1.41.29';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -10802,10 +10802,6 @@ function renderMonthlyEntry() {
     // 哪些账户展开成几行，由账户自己的「多币种账户」开关决定（multiCur）；
     // 某一行的币种被删掉后，这个账户就不再显示那一行（skipCurrencies）。
     const curRowsOf = (a) => accountCurrencyRows(a);
-    const sub = document.getElementById('monthlyModalSub');
-    if (sub) sub.textContent = month
-        ? `${member} · ${month.replace('-', '年')}月`
-        : '请先选择月份';
     if (!state.accounts.length) {
         list.innerHTML = '<div class="breakdown-empty">还没有账户，先到「账户」里添加</div>';
         return;
@@ -11648,7 +11644,11 @@ function updateMonthlyDerived() {
     const draft = monthlyDraftStats(month, member);
     // 1) 每行的收益率角标（先清空所有角标，再只填「有收益记录」的账户，避免清空收益后旧角标残留）
     list.querySelectorAll('[data-rate-for]').forEach(b => { b.textContent = ''; b.className = 'be-rate'; });
+    // 收益率角标只对「算收益率」范围内的账户有意义；
+    // 普通账户（没勾会算收益）即使填了余额，也不该冒出"本金未知"这种收益率提示
+    const investIds = new Set(investmentAccountIds());
     Object.keys(draft).forEach(id => {
+        if (!investIds.has(id)) return;
         const badge = list.querySelector(`[data-rate-for="${id}"]`);
         if (!badge) return;
         const st = portfolioMonthStats(month, [id], draft[id] ? { [id]: draft[id] } : null, member);
@@ -11789,7 +11789,8 @@ function renderMonthlySelfCheck() {
     const el = document.getElementById('monthlySelfCheck');
     if (!el) return;
     const month = getModalMonth('monthly');
-    if (!month) { el.innerHTML = ''; return; }
+    if (!month) { el.innerHTML = ''; el.classList.add('msc-empty'); return; }
+    el.classList.remove('msc-empty');
     const member = monthlyMember();
     const list = document.getElementById('monthlyEntryList');
     if (!list) return;
@@ -11861,26 +11862,42 @@ function renderMonthlySelfCheck() {
     });
 
     const fmt = v => formatCurrency(Math.round(v * 100) / 100);
-    let html = `<div class="msc-title">录入自检（只读核对）</div>`;
-    html += `<div class="msc-line msc-totals">
-        <span>总资产 <b>${fmt(sumAsset)}</b></span>
-        <span>总负债 <b class="msc-liab">${fmt(sumLiab)}</b></span>
-        <span>净资产 <b>${fmt(net)}</b></span>
+    const open = el.classList.contains('msc-open');
+    const hasIssue = !!(st.check || missing.length || maybeTopUp.length);
+    // 紧凑一行：净资产 + 总资产/负债 + 状态旗标；点开才展开明细（默认收起，省空间、手机也清爽）
+    let html = `<div class="msc-summary" onclick="toggleMonthlySelfCheck()">
+        <span class="msc-net">净资产 <b>${fmt(net)}</b></span>
+        <span class="msc-info">总资产 ${fmt(sumAsset)} · 负债 ${fmt(sumLiab)}</span>
+        <span class="msc-flag ${hasIssue ? 'warn' : 'ok'}">${hasIssue ? '⚠ 需核对' : '✓ 没问题'}</span>
+        <i class="fa-solid ${open ? 'fa-chevron-up' : 'fa-chevron-down'} msc-caret"></i>
     </div>`;
+    const lines = [];
     if (st.check) {
-        html += `<div class="msc-line msc-warn"><i class="fa-solid fa-triangle-exclamation"></i> 收益对不上：按"期末−期初−净入金"应得 ${fmt(st.check.implied)}，但收益填了 ${fmt(st.profit)}（差 ${fmt(st.check.gap)}）—— 可能是余额或收益填错</div>`;
+        lines.push(`<div class="msc-line msc-warn"><i class="fa-solid fa-triangle-exclamation"></i> 收益对不上：应得 ${fmt(st.check.implied)}，填了 ${fmt(st.profit)}（差 ${fmt(st.check.gap)}）</div>`);
     } else if (st.hasProfit) {
-        html += `<div class="msc-line msc-ok"><i class="fa-solid fa-circle-check"></i> 收益自洽：收益 ${fmt(st.profit)} 与"期末−期初−净入金"一致</div>`;
+        lines.push(`<div class="msc-line msc-ok"><i class="fa-solid fa-circle-check"></i> 收益自洽（收益 ${fmt(st.profit)} 与"期末−期初−净入金"一致）</div>`);
     }
     if (missing.length) {
         const shown = missing.slice(0, 5).join('、') + (missing.length > 5 ? ` 等 ${missing.length} 个` : '');
-        html += `<div class="msc-line msc-warn"><i class="fa-solid fa-triangle-exclamation"></i> 上月有数本月空白：${shown} —— 确认是清掉了还是漏填</div>`;
+        lines.push(`<div class="msc-line msc-warn"><i class="fa-solid fa-triangle-exclamation"></i> 上月有数本月空白：${shown}</div>`);
     }
     if (maybeTopUp.length) {
         const shown = maybeTopUp.slice(0, 5).join('、') + (maybeTopUp.length > 5 ? ` 等 ${maybeTopUp.length} 个` : '');
-        html += `<div class="msc-line msc-hint"><i class="fa-solid fa-circle-info"></i> 余额比上月多了一截、收益和净入金都空着：${shown} —— 是不是往里加过钱？（只提醒，不改任何数）</div>`;
+        lines.push(`<div class="msc-line msc-hint"><i class="fa-solid fa-circle-info"></i> 余额多了、收益和净入金空着：${shown} —— 是不是往里加过钱？（只提醒，不改任何数）</div>`);
+    }
+    if (lines.length) {
+        html += `<div class="msc-detail"${open ? '' : ' hidden'}>${lines.join('')}</div>`;
     }
     el.innerHTML = html;
+}
+
+// 录入自检明细：收起/展开（点顶部那一行触发）。展开状态存在容器 class 上，
+// 每次输入重算时仍然保留，不会一改数就自动合上。
+function toggleMonthlySelfCheck() {
+    const el = document.getElementById('monthlySelfCheck');
+    if (!el) return;
+    el.classList.toggle('msc-open');
+    renderMonthlySelfCheck();
 }
 
 function clearMonthlyInputs() {

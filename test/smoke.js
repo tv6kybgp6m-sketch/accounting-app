@@ -1573,6 +1573,29 @@ async function run() {
                 .every(id => html34.indexOf('id="' + id + '"') >= 0) &&
             html34.indexOf('id="acctEditCurrency"') < 0);
 
+        // ---------- 35) v1.41.29：非收益账户不显「本金未知」+ 自检挪到 footer + 顶部收纳 ----------
+        stage = '35';
+        ok('收益率角标只给「算收益率」的账户：普通账户填余额不再冒「本金未知」',
+            app34.indexOf('const investIds = new Set(investmentAccountIds());') >= 0 &&
+            app34.indexOf('if (!investIds.has(id)) return;') >= 0);
+        ok('记月度账单标题旁的「成员 · 年月」副标题已删干净',
+            html34.indexOf('monthlyModalSub') < 0 &&
+            app34.indexOf('monthlyModalSub') < 0);
+        ok('录入自检挪到弹窗底部（取消/保存上方）：紧凑一行、明细默认收起、可展开',
+            html34.indexOf('class="monthly-selfcheck msc-footer"') >= 0 &&
+            html34.indexOf('class="footer-btns"') >= 0 &&
+            html34.indexOf('id="monthlySelfCheck" class="monthly-selfcheck"') < 0 &&
+            app34.indexOf('function toggleMonthlySelfCheck()') >= 0 &&
+            app34.indexOf('msc-summary') >= 0 && app34.indexOf('msc-detail') >= 0);
+        ok('编辑 / 只读查看 / 已核对 挪到标题那一行，表上方只剩沿用上期/清空/撤销',
+            html34.indexOf('class="bal-entry-mode"') >= 0 &&
+            /<div class="bal-entry-mode">[\s\S]{0,500}id="mwChkCount"[\s\S]{0,300}id="mwEditBtn"/.test(html34) &&
+            /<div class="bal-entry-actions">[\s\S]{0,700}撤销这次填写<\/button>\s*<\/div>/.test(html34) &&
+            html34.indexOf('<button class="primary-btn" id="mwEditBtn"') < 0);
+        ok('自检进 footer 后手机端 safe-area 兜底仍在',
+            /#monthlyModal \.modal-footer \{\s*flex-direction: column;/.test(css34) &&
+            css34.indexOf('#monthlyModal .modal-footer { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }') >= 0);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));
