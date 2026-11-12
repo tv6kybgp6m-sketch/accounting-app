@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.26';
+const APP_VERSION = '1.41.27';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -9106,7 +9106,7 @@ function openAccountEdit(accountId, prefillName) {
     if (titleEl) titleEl.textContent = adding ? '添加账户' : '编辑账户';
     const subEl = document.getElementById('acctEditSub');
     if (subEl) subEl.textContent = adding
-        ? '新账户：起个名字（放钱的地方）、选好分类就能记了'
+        ? ''
         : `${a.group || '账户'} · ${(state.balances.filter(b => b.accountId === a.id).length)} 期余额 · ${(state.returns.filter(r => r.accountId === a.id).length)} 期收益`;
     paintAcctEditGroups(a ? a.kind : 'asset', a ? a.group : '');
     // v1.39.94：账户属于哪些家庭成员（新建时默认归当前正在录的成员）
@@ -10813,7 +10813,7 @@ function renderMonthlyEntry() {
     const curRowsOf = (a) => accountCurrencyRows(a);
     const sub = document.getElementById('monthlyModalSub');
     if (sub) sub.textContent = month
-        ? `${member} · ${month.replace('-', '年')}月：一行 = 一个放钱的地方（支付宝 / 微信 / 工商银行 / 摩根…），一列 = 一类资产；勾了「多币种账户」的账户会按币种分成几行，格子填真实数额，右侧合计按汇率换算成人民币`
+        ? `${member} · ${month.replace('-', '年')}月`
         : '请先选择月份';
     if (!state.accounts.length) {
         list.innerHTML = '<div class="breakdown-empty">还没有账户，先到「账户」里添加</div>';

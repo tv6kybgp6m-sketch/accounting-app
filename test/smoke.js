@@ -1256,10 +1256,13 @@ async function run() {
             acctModalHtml.indexOf('id="accEditBtn"') < acctModalHtml.indexOf('class="modal-body"') &&
             acctModalHtml.indexOf('onclick="toggleAccountsViewMode()"') >= 0 &&
             ['accountManageList', 'accViewTag', 'accEditBtnLabel'].every(id => acctModalHtml.indexOf('id="' + id + '"') >= 0));
-        ok('重复那段说明随旧表单一起删掉，改由完整编辑弹窗的副标题讲清楚',
-            (html31.match(/账户 = 放钱的地方/g) || []).length === 0 &&
-            acctModalHtml.indexOf('class="cat-txn-sub"') < 0 &&
-            app31.indexOf('新账户：起个名字（放钱的地方）、选好分类就能记了') >= 0);
+        ok('添加账户弹窗新增模式不再有那段引导文字（副标题只留编辑模式的统计）',
+            app31.indexOf('新账户：起个名字（放钱的地方）、选好分类就能记了') < 0);
+        ok('月度账单副标题不再堆说明，只留「成员 · 年月」',
+            app31.indexOf('一行 = 一个放钱的地方') < 0 &&
+            app31.indexOf('右侧合计按汇率换算成人民币') < 0);
+        ok('月度账单里「余额填期末数…」那行提示也删掉了',
+            html31.indexOf('余额填期末数；收益只填市值变动') < 0);
 
         // 假数据：两个账户 + 两个成员，绝不碰真实账本
         ev(`state.accounts = [

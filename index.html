@@ -1140,7 +1140,6 @@
                         <button class="secondary-btn" id="mwUndoBtn" onclick="undoLastMonthlySave()"
                                 title="把这一页填的东西全撤掉，回到你刚打开这页的样子（已经保存过的数不受影响）" hidden>
                             <i class="fa-solid fa-rotate-left"></i> 撤销这次填写</button>
-                        <span class="ret-tip">余额填期末数；收益只填市值变动、亏损填负数；净入金点「＋」填</span>
                     </div>
                     <div id="monthlyEntryList" class="balance-entry-list"></div>
                     <div id="monthlySelfCheck" class="monthly-selfcheck"></div>
@@ -1498,7 +1497,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.26').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.27').catch(() => {});
             });
         }
     </script>
