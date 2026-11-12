@@ -1226,26 +1226,40 @@ async function run() {
             ev(`!!document.getElementById('statusBarProbe')`) &&
             ev(`document.getElementById('statusBarProbe').getAttribute('aria-hidden')`) === 'true');
 
-        // ---------- 31) v1.41.23：账户管理弹窗重排 ----------
+        // ---------- 31) v1.41.24：账户管理「新增」走完整编辑弹窗 + 家庭成员下移 ----------
         stage = '31';
         const html31 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
         const css31 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const app31 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
         const acctModalHtml = html31.slice(html31.indexOf('id="accountsModal"'), html31.indexOf('<!-- Insurance Claim Modal -->'));
-        ok('新增账户默认收起，打开弹窗先看到清单而不是一排输入框',
-            /<div class="account-new hidden" id="acctAddFields">/.test(acctModalHtml) &&
-            acctModalHtml.indexOf('id="acctAddToggle"') >= 0);
-        ok('编辑 / 只读开关挪到标题栏右侧，不再混在新增那一行里',
+        ok('内嵌的简易新增表单整套删掉了，不再有两套新增逻辑',
+            acctModalHtml.indexOf('acctAddFields') < 0 &&
+            acctModalHtml.indexOf('newAccountName') < 0 &&
+            acctModalHtml.indexOf('newAccountGroup') < 0 &&
+            acctModalHtml.indexOf('onclick="addAccount()"') < 0 &&
+            app31.indexOf('function addAccount()') < 0 &&
+            css31.indexOf('.account-new {') < 0);
+        ok('点「＋ 新增账户」直接开完整编辑弹窗（成员 / 图标 / 颜色 / 多币种都在里面）',
+            /<button class="acct-add-toggle" id="acctAddToggle" onclick="openAccountEdit\(\)"/.test(acctModalHtml) &&
+            acctModalHtml.indexOf('fa-chevron-right') >= 0 &&
+            html31.indexOf('id="acctEditMembers"') >= 0 &&
+            html31.indexOf('id="acctEditIcons"') >= 0 &&
+            html31.indexOf('id="acctEditColors"') >= 0 &&
+            html31.indexOf('id="acctEditMulti"') >= 0 &&
+            html31.indexOf('id="acctEditEarns"') >= 0);
+        ok('新增按钮在账户清单之前，清单容器还在原位',
+            acctModalHtml.indexOf('id="acctAddToggle"') > 0 &&
+            acctModalHtml.indexOf('id="acctAddToggle"') < acctModalHtml.indexOf('id="accountManageList"'));
+        ok('编辑 / 只读开关仍在标题栏右侧',
             acctModalHtml.indexOf('class="acct-head-actions"') >= 0 &&
             acctModalHtml.indexOf('id="accEditBtn"') > acctModalHtml.indexOf('class="modal-header"') &&
-            acctModalHtml.indexOf('id="accEditBtn"') < acctModalHtml.indexOf('class="modal-body"'));
-        ok('「账户 = 放钱的地方」这段说明整页只留一遍（原来 header + 列表各一遍）',
-            (html31.match(/账户 = 放钱的地方/g) || []).length === 1 &&
-            acctModalHtml.indexOf('class="cat-txn-sub"') < 0);
-        ok('原有 id / onclick 一个都没丢，功能照旧能跑',
-            ['newAccountName', 'newAccountGroup', 'newAccountCurrency', 'newAccountMulti',
-                'accountManageList', 'accViewTag', 'accEditBtnLabel'].every(id => acctModalHtml.indexOf('id="' + id + '"') >= 0) &&
-            acctModalHtml.indexOf('onclick="addAccount()"') >= 0 &&
-            acctModalHtml.indexOf('onclick="toggleAccountsViewMode()"') >= 0);
+            acctModalHtml.indexOf('id="accEditBtn"') < acctModalHtml.indexOf('class="modal-body"') &&
+            acctModalHtml.indexOf('onclick="toggleAccountsViewMode()"') >= 0 &&
+            ['accountManageList', 'accViewTag', 'accEditBtnLabel'].every(id => acctModalHtml.indexOf('id="' + id + '"') >= 0));
+        ok('重复那段说明随旧表单一起删掉，改由完整编辑弹窗的副标题讲清楚',
+            (html31.match(/账户 = 放钱的地方/g) || []).length === 0 &&
+            acctModalHtml.indexOf('class="cat-txn-sub"') < 0 &&
+            app31.indexOf('新账户：起个名字（放钱的地方）、选好分类就能记了') >= 0);
 
         // 假数据：两个账户 + 两个成员，绝不碰真实账本
         ev(`state.accounts = [
@@ -1254,9 +1268,10 @@ async function run() {
         ]; state.balanceMembers = ['本人','家人']; accountsMembersOpen = false;`);
         ev(`openAccountsModal();`);
         const listHtml31 = ev(`document.getElementById('accountManageList').innerHTML`);
-        ok('有账户时打开弹窗：新增区收着、账户清单排在最上面',
-            ev(`document.getElementById('acctAddFields').classList.contains('hidden')`) === true &&
-            listHtml31.indexOf('account-section-title') < listHtml31.indexOf('acct-member-fold'));
+        ok('家庭成员折叠区排在「新增账户」正下方、账户清单之上',
+            listHtml31.indexOf('acct-member-fold') >= 0 &&
+            listHtml31.indexOf('acct-member-fold') < listHtml31.indexOf('account-section-title') &&
+            css31.indexOf('#accountsModal .acct-member-fold { margin: 0 0 12px;') >= 0);
         ok('默认进只读查看模式，编辑按钮在标题栏可见',
             ev(`document.getElementById('accountsModal').classList.contains('acc-viewmode')`) === true &&
             ev(`document.getElementById('accEditBtn').style.display`) !== 'none');
@@ -1264,7 +1279,7 @@ async function run() {
             css31.indexOf('#accountsModal.acc-viewmode .acct-group-select { display: none; }') >= 0 &&
             ev(`document.querySelectorAll('#accountManageList .account-row').length`) === 2 &&
             ev(`document.querySelectorAll('#accountManageList .ar-title').length`) === 2);
-        ok('家庭成员收进折叠区，默认收起但入口一直在',
+        ok('家庭成员入口一直在，默认收起',
             ev(`!!document.getElementById('acctMemberHead')`) &&
             ev(`document.getElementById('acctMemberPanel').classList.contains('hidden')`) === true &&
             ev(`document.getElementById('acctMemberHead').textContent.indexOf('家庭成员（2）') >= 0`));
@@ -1278,28 +1293,101 @@ async function run() {
         ev(`toggleAccountMembers();`);
         ok('收起后重画也保持收起',
             ev(`renderAccountManageList(); document.getElementById('acctMemberPanel').classList.contains('hidden')`));
-        ev(`toggleAccountAdd();`);
-        ok('点「＋ 新增账户」才展开输入框',
-            ev(`!document.getElementById('acctAddFields').classList.contains('hidden')`) &&
-            ev(`document.getElementById('acctAddToggle').classList.contains('open')`) === true);
 
-        // 空台账防死锁：唯一添加入口不能被藏起来（v1.41.16 借出款踩过）
+        // 点「＋ 新增账户」→ 完整编辑弹窗，并真的存出一个带成员 / 图标 / 颜色 / 桶的账户
+        ev(`document.getElementById('acctAddToggle').click();`);
+        ok('点新增账户打开的是完整编辑弹窗，而且压在账户管理弹窗之上',
+            ev(`!document.getElementById('accountEditModal').classList.contains('hidden')`) === true &&
+            ev(`document.getElementById('acctEditTitle').textContent`) === '添加账户' &&
+            ev(`parseInt(document.getElementById('accountEditModal').style.zIndex,10) > parseInt(document.getElementById('accountsModal').style.zIndex,10)`) === true);
+        ok('完整弹窗默认有名称 / 分类 / 币种 / 成员 / 图标 / 颜色可选',
+            ev(`document.getElementById('acctEditGroup').options.length`) >= 3 &&
+            ev(`document.querySelectorAll('#acctEditMembers input[type="checkbox"]').length`) === 2 &&
+            ev(`document.querySelectorAll('#acctEditIcons .icon-pick-item').length`) >= 8 &&
+            ev(`document.querySelectorAll('#acctEditColors .color-pick-item').length`) >= 8 &&
+            ev(`document.querySelectorAll('#acctEditColors .color-pick-item.selected').length`) === 1);
+        ev(`document.getElementById('acctEditName').value = '测试账户';
+            document.getElementById('acctEditGroup').value = '流动资金';
+            var _boxes = document.querySelectorAll('#acctEditMembers input[type="checkbox"]');
+            _boxes.forEach(function(b){ b.checked = true; });
+            acctEditDraft.icon = 'fa-building-columns';
+            acctEditDraft.earnsReturn = true;
+            saveAccountEdit();`);
+        const newAcc31 = JSON.parse(ev(`JSON.stringify(state.accounts[state.accounts.length-1])`));
+        ok('保存出来的账户带齐成员、图标、色板色、收益开关和四笔钱归桶',
+            newAcc31.name === '测试账户' && newAcc31.members.length === 2 &&
+            newAcc31.icon === 'fa-building-columns' &&
+            ev(`COLOR_OPTIONS.indexOf(state.accounts[state.accounts.length-1].color) >= 0`) === true &&
+            newAcc31.earnsReturn === true && newAcc31.bucket === 'cash',
+            { name: newAcc31.name, members: newAcc31.members, icon: newAcc31.icon, color: newAcc31.color, bucket: newAcc31.bucket });
+        ok('保存后账户管理清单立刻多出这一行，编辑弹窗自己关掉',
+            ev(`document.getElementById('accountEditModal').classList.contains('hidden')`) === true &&
+            ev(`document.querySelectorAll('#accountManageList .account-row').length`) === 3);
+
+        // 空台账防死锁：唯一添加入口常驻可见（v1.41.16 借出款踩过）
         ev(`state.accounts = []; openAccountsModal();`);
-        ok('一个账户都没有时自动展开新增区，不会把唯一入口藏起来',
-            ev(`!document.getElementById('acctAddFields').classList.contains('hidden')`) &&
+        ok('一个账户都没有时新增按钮照样看得见、点得开',
+            ev(`!!document.getElementById('acctAddToggle')`) &&
+            ev(`document.getElementById('acctAddToggle').offsetParent !== null || !document.getElementById('acctAddToggle').classList.contains('hidden')`) === true &&
             ev(`document.getElementById('accountManageList').innerHTML.indexOf('点上面「＋ 新增账户」添加')`) >= 0);
-        ev(`document.getElementById('newAccountName').value = '测试账户';
-            document.getElementById('newAccountGroup').value = '现金';
-            addAccount();`);
-        ok('新增账户功能没被重排弄坏',
-            ev(`state.accounts.length`) === 1 && ev(`state.accounts[0].name`) === '测试账户' &&
-            ev(`document.querySelectorAll('#accountManageList .account-row').length`) === 1);
+        ev(`document.getElementById('acctAddToggle').click();`);
+        ok('空账户也能从新增按钮进完整编辑弹窗',
+            ev(`!document.getElementById('accountEditModal').classList.contains('hidden')`) === true);
+        ev(`closeAccountEdit(); closeAccountsModal();`);
         ok('新样式全部 scoped 到 #accountsModal，不误伤别的弹窗',
             css31.indexOf('#accountsModal .acct-add-toggle {') >= 0 &&
             css31.indexOf('#accountsModal .acct-member-fold {') >= 0);
-        ok('手机端两个折叠按钮都有 44px 触屏高度',
+        ok('手机端新增按钮和成员折叠按钮都有 44px 触屏高度',
             css31.indexOf('#accountsModal .acct-add-toggle,\n    #accountsModal .acct-fold-head { min-height: 44px; }') >= 0);
-        ev(`closeAccountsModal();`);
+        ok('手机上完整编辑弹窗的「取消 / 保存」吸底，不用滚到底才看得见',
+            /@media \(max-width: 640px\) \{\s*#accountEditModal \.acct-edit-actions \{\s*position: sticky;/.test(css31) &&
+            css31.indexOf('background: var(--bg-modal);') >= 0);
+
+        // ---------- 32) v1.41.24：iOS WebKit 解密错误要当成「钥匙不对」 ----------
+        stage = '32';
+        ok('新增 isKeyMismatch：自家 WRONG_KEY / NEED_SECRET 照旧认',
+            /function isKeyMismatch\(e, msg\)[\s\S]{0,500}text === 'WRONG_KEY'/.test(app31) &&
+            ev(`isKeyMismatch(new Error('WRONG_KEY'), 'WRONG_KEY')`) === true &&
+            ev(`isKeyMismatch(new Error('NEED_SECRET'), 'NEED_SECRET')`) === true);
+        ok('iOS 的 OperationError / operation-specific reason 也归成钥匙不对',
+            ev(`isKeyMismatch({ name:'OperationError' }, 'The operation failed for an operation-specific reason')`) === true &&
+            ev(`isKeyMismatch({ name:'InvalidAccessError' }, 'boom')`) === true &&
+            ev(`isKeyMismatch(new Error('The operation failed for an operation-specific reason'), '')`) === true &&
+            ev(`isKeyMismatch(new Error('网络断了'), '网络断了')`) === false);
+        ok('钥匙不对时第一次失败会重试，第二次强制走口令框',
+            /const keyBad = isKeyMismatch\(e, msg\);[\s\S]{0,120}if \(keyBad && attempt === 0\) continue;/.test(app31) &&
+            app31.indexOf("await ensureUnlocked(raw.keyring, '读取云端数据', attempt > 0)") >= 0);
+        ok('拉取一开头就给强制弹口令框留一次配额',
+            /async function remotePullAndMerge\(\) \{\s*\n\s*beginAskCycle\(1\);/.test(app31));
+        ok('「拉不开就不推」的保护原样保留',
+            app31.indexOf('if (!pulled && __remoteLastError) return false;') >= 0);
+
+        const webkitFail = await ev(`(async function(){
+            var oldLooks = LedgerCrypto.looksEncrypted, oldDec = LedgerCrypto.decryptEnvelope,
+                oldHas = LedgerCrypto.hasLocalKey, oldUnlock = LedgerCrypto.unlock,
+                oldAsk = window.askSecret, oldSecret = __sessionSecret, oldErr = __remoteLastError;
+            var decCalls = 0, forced = [];
+            var oe = new Error('The operation failed for an operation-specific reason'); oe.name = 'OperationError';
+            LedgerCrypto.looksEncrypted = function(){ return true; };
+            LedgerCrypto.hasLocalKey = function(){ return Promise.resolve(true); };
+            LedgerCrypto.unlock = function(){ return Promise.resolve(true); };
+            LedgerCrypto.decryptEnvelope = function(){ decCalls++; return Promise.reject(oe); };
+            window.askSecret = function(){ return Promise.resolve(null); };
+            __sessionSecret = 'test-pass'; __remoteLastError = ''; beginAskCycle(1);
+            var result = await resolveCloudPayload({ enc:'BKE1', keyring:{} });
+            var out = [result, decCalls, __remoteLastError];
+            __sessionSecret = oldSecret; __remoteLastError = oldErr;
+            LedgerCrypto.looksEncrypted = oldLooks; LedgerCrypto.decryptEnvelope = oldDec;
+            LedgerCrypto.hasLocalKey = oldHas; LedgerCrypto.unlock = oldUnlock; window.askSecret = oldAsk;
+            return JSON.stringify(out);
+        })()`);
+        const webkitOut = JSON.parse(webkitFail);
+        ok('两次都解不开时重试过一次，状态栏换成人话而不是那句英文',
+            webkitOut[0] === null && webkitOut[1] === 2 &&
+            webkitOut[2].indexOf('加密钥匙对不上') >= 0 &&
+            webkitOut[2].indexOf('operating') < 0 && webkitOut[2].indexOf('operation-specific') < 0 &&
+            webkitOut[2].indexOf('和 Mac 相同的加密口令') >= 0,
+            webkitOut);
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {

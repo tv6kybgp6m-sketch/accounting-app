@@ -3276,21 +3276,6 @@ body.cat-dragging {
 .be-field { padding: 7px 8px 7px 22px; font-size: 14px; width: 100%; }
 
 /* 账户管理 */
-.account-new {
-    display: grid;
-    grid-template-columns: 1fr 84px 108px auto;
-    gap: 8px;
-    margin-bottom: 14px;
-}
-.account-new .text-input { padding: 8px 10px; font-size: 13px; }
-/* v1.39.90：账户管理「添加」那一行的多币种开关（自己占一行，别挤在输入框后面） */
-.account-new .acc-multi-toggle {
-    grid-column: 1 / -1;
-    display: flex; align-items: center; gap: 6px;
-    font-size: 12px; color: var(--text-secondary); cursor: pointer; user-select: none;
-}
-.account-new .acc-multi-toggle input { width: auto; height: auto; margin: 0; flex: 0 0 auto; }
-.account-new .acc-multi-toggle:hover { color: var(--text-primary); }
 /* v1.39.94：账户编辑窗口里的「属于哪些家庭成员」勾选框 */
 .acct-member-picker { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 12px; }
 .acct-member-pick { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--text-primary); cursor: pointer; }
@@ -3363,8 +3348,6 @@ body.cat-dragging {
 @media (max-width: 640px) {
     body:not(.show-txn-fab) .fab-add { display: none; }
     .view-header .secondary-btn { font-size: 12px; padding: 6px 10px; }
-    .account-new { grid-template-columns: 1fr 1fr; }
-    .account-new .primary-btn { grid-column: span 2; justify-content: center; }
     .be-input { width: 116px; }
     .bal-group-tag { display: none; }
     #view-balance .breakdown-amount { font-size: 12px; }
@@ -5676,17 +5659,7 @@ body.app-locked .fab-add { display: none !important; }
     font-family: var(--font); font-size: 13px; cursor: pointer;
 }
 #accountsModal .acct-add-toggle:hover { background: var(--accent-light); }
-#accountsModal .acct-add-toggle.open { border-style: solid; margin-bottom: 12px; }
-#accountsModal .acct-add-caret { font-size: 11px; transition: transform .18s ease; }
-#accountsModal .acct-add-toggle.open .acct-add-caret { transform: rotate(180deg); }
-/* 展开时名称框独占一整行：原来四个控件挤一行，placeholder 只露出「放钱的地方，如」 */
-#accountsModal #acctAddFields { grid-template-columns: 1fr 1fr auto; margin-bottom: 14px; }
-#accountsModal #acctAddFields > #newAccountName { grid-column: 1 / -1; }
-#accountsModal .acct-add-hint {
-    grid-column: 1 / -1;
-    font-size: 12px; line-height: 1.5; color: var(--text-muted);
-    background: var(--bg-card-hover); border-radius: var(--radius-sm); padding: 7px 10px;
-}
+#accountsModal .acct-add-caret { font-size: 11px; opacity: .7; }
 
 #accountsModal .acct-rows { margin-bottom: 6px; }
 #accountsModal .account-row { gap: 8px; padding: 9px 2px; }
@@ -5694,7 +5667,8 @@ body.app-locked .fab-add { display: none !important; }
 /* 查看模式：把改数据的控件收起来，每行只剩图标 + 名字 + 小标签 */
 #accountsModal.acc-viewmode .acct-group-select { display: none; }
 
-#accountsModal .acct-member-fold { margin-top: 14px; border-top: 0.5px solid var(--divider); }
+/* v1.41.24：家庭成员排在「新增账户」正下方、账户清单之上，底下一条线隔开 */
+#accountsModal .acct-member-fold { margin: 0 0 12px; border-bottom: 0.5px solid var(--divider); }
 #accountsModal .acct-fold-head {
     width: 100%; display: flex; align-items: center; justify-content: space-between;
     padding: 12px 2px; background: none; border: none; cursor: pointer;
@@ -5711,7 +5685,18 @@ body.app-locked .fab-add { display: none !important; }
     #accountsModal .acct-fold-head { min-height: 44px; }
     #accountsModal .acct-head-actions { gap: 6px; }
     #accountsModal .acct-head-actions .acc-viewtag { display: none; }
-    /* 手机端原有 .account-new{1fr 1fr} 被上面的 ID 规则盖住，这里显式写回来 */
-    #accountsModal #acctAddFields { grid-template-columns: 1fr 1fr; }
-    #accountsModal #acctAddFields > #newAccountName { grid-column: 1 / -1; }
+}
+
+/* v1.41.24：手机上「添加 / 编辑账户」字段多，保存按钮原来要滚到最底下才看得见。
+   只在这个弹窗里把按钮条吸在滚动区底部，桌面端观感一点不动。 */
+@media (max-width: 640px) {
+    #accountEditModal .acct-edit-actions {
+        position: sticky;
+        bottom: -12px;
+        z-index: 2;
+        margin-top: 14px;
+        padding: 10px 0 2px;
+        background: var(--bg-modal);
+        box-shadow: 0 -6px 10px -8px rgba(0, 0, 0, .35);
+    }
 }

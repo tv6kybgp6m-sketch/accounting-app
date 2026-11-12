@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.23';
+const APP_VERSION = '1.41.24';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1657,14 +1657,24 @@ async function buildCloudEnvelope(payload) {
     return env;
 }
 
+// iOS WebKit 把 AES-GCM 解不开报成 OperationError: The operation failed for an
+// operation-specific reason。原来只认自家 WRONG_KEY，于是既不重试也不弹口令框，
+// 直接把这句英文贴到状态栏，手机就一直卡在「正在同步…」。
+function isKeyMismatch(e, msg) {
+    const text = String(msg || (e && e.message) || '');
+    if (text === 'WRONG_KEY' || text === 'NEED_SECRET') return true;
+    if (e && (e.name === 'OperationError' || e.name === 'InvalidAccessError')) return true;
+    return /operation-specific reason|operation failed for an/i.test(text);
+}
+
 // 云端读回来的东西可能是密文，统一还原成同步载荷；没开加密时原样返回
 async function resolveCloudPayload(raw) {
     if (!raw) return null;
     if (!LedgerCrypto.looksEncrypted(raw)) return raw;
     for (let attempt = 0; attempt < 2; attempt++) {
         try {
-            // 第一次用本机密钥静默解；报 WRONG_KEY 说明密钥不是这一份数据的，
-            // 第二次强制弹口令，解出来的正确主密钥会覆盖本机缓存，以后就安静了
+            // 第一次用本机密钥静默解；钥匙不对就第二次强制弹口令，
+            // 用口令重算出正确主密钥并覆盖本机缓存，以后就安静了
             await ensureUnlocked(raw.keyring, '读取云端数据', attempt > 0);
             // v1.41.10：把本次启动输过的口令一起交给 decryptEnvelope，
             // 本机密钥开不了这份数据时它自己会重新解，不必再弹一次口令框。
@@ -1673,9 +1683,12 @@ async function resolveCloudPayload(raw) {
             return out;
         } catch (e) {
             const msg = (e && e.message) || String(e);
-            if (msg === 'WRONG_KEY' && attempt === 0) continue;
+            const keyBad = isKeyMismatch(e, msg);
+            if (keyBad && attempt === 0) continue;
             if (msg === '已取消') { __remoteLastError = '已取消：云端那份是加密的，本机打不开'; return null; }
-            __remoteLastError = '云端数据解不开：' + msg;
+            __remoteLastError = keyBad
+                ? '加密钥匙对不上：退出 App 重新打开，在锁屏输入和 Mac 相同的加密口令（或恢复码）'
+                : '云端数据解不开：' + msg;
             return null;
         }
     }
@@ -3353,6 +3366,7 @@ function gistLedgerFile(gist) {
 }
 
 async function remotePullAndMerge() {
+    beginAskCycle(1);          // v1.41.24：钥匙对不上时给「强制弹口令框」留一次配额
     const r = await gistApi('/gists/' + encodeURIComponent(remoteSyncCfg.gistId));
     if (r.networkError) { __remoteLastError = '网络不通'; return false; }
     if (r.status !== 200) { __remoteLastError = remoteErrorText(r.status); return false; }
@@ -9046,7 +9060,8 @@ function openAccountEdit(accountId, prefillName) {
     editingAccountId = adding ? null : accountId;
     acctEditDraft = {
         icon: (a && a.icon) || 'fa-wallet',
-        color: (a && a.color) || '#007aff',
+        // v1.41.24：新增模式从可选色板里轮一个（保证色板里能高亮）；编辑模式保留账户原色
+        color: (a && a.color) || COLOR_OPTIONS[state.accounts.length % COLOR_OPTIONS.length],
         earnsReturn: a ? accountEarnsReturn(a) : false
     };
     const nameEl = document.getElementById('acctEditName');
@@ -9140,13 +9155,14 @@ function saveAccountEdit() {
     const picked = readAcctEditMembers();
     if (picked && !picked.length) { showToast('至少选一个家庭成员', 'error'); return; }
     if (adding) {
-        // 新建：颜色按数量轮着来，顺序排最后
-        const palette = ['#007aff', '#34c759', '#ff9500', '#af52de', '#5ac8fa', '#ff3b30', '#a2845e', '#30b0c7'];
+        // v1.41.24：账户管理的「新增账户」也走这个完整弹窗了 —— 成员、图标、颜色、
+        // 收益开关都由弹窗决定；bucket 必须给（四笔钱页靠它归桶），别让自建账户丢进去。
         const acc = {
             id: 'acc_' + uid(), name, kind: 'asset', group, currency, multiCur,
             members: (picked && picked.length) ? picked : [monthlyMember()],
             icon: acctEditDraft.icon || 'fa-wallet',
-            color: palette[state.accounts.length % palette.length],
+            color: acctEditDraft.color || COLOR_OPTIONS[0],
+            bucket: (DEFAULT_ACCOUNT_BUCKET_BY_GROUP[group] || undefined),
             order: state.accounts.reduce((m, x) => Math.max(m, x.order || 0), 0) + 1,
             createdAt: Date.now(), updatedAt: Date.now(),
         };
@@ -12226,16 +12242,8 @@ let accountsViewMode = false;
 let accountsHasData = false;
 let accountsMembersOpen = false;   // v1.41.23：家庭成员折叠状态，重画列表时别把它弹回去
 
-// v1.41.23：新增账户默认收起，点一下才展开；forceOpen 给 openAccountsModal() 复位用
-function toggleAccountAdd(forceOpen) {
-    const box = document.getElementById('acctAddFields');
-    const btn = document.getElementById('acctAddToggle');
-    if (!box || !btn) return;
-    const open = typeof forceOpen === 'boolean' ? forceOpen : box.classList.contains('hidden');
-    box.classList.toggle('hidden', !open);
-    btn.classList.toggle('open', open);
-    if (open) { const el = document.getElementById('newAccountName'); if (el) el.focus(); }
-}
+// v1.41.24：「新增账户」改为直接打开 accountEditModal 的新增模式，
+// 内嵌简易表单 / toggleAccountAdd / addAccount 一并移除，避免两套新增逻辑打架。
 
 function toggleAccountMembers() {
     accountsMembersOpen = !accountsMembersOpen;
@@ -12270,14 +12278,9 @@ function toggleAccountsViewMode() {
 }
 
 function openAccountsModal() {
-    // 不再有「资产 / 负债」下拉，新增账户一律按资产分类给选项（分组只是展示用，不影响计算）
-    const sel = document.getElementById('newAccountGroup');
-    if (sel) sel.innerHTML = ASSET_GROUPS.map(g => `<option>${g}</option>`).join('');
     refreshAccountsViewMode();   // v1.39.39：有账户时默认「查看模式」（只读防误触）
     renderAccountManageList();
-    // v1.41.23：每次打开都把「新增账户」收回，先看到清单；
-    // 一个账户都没有时必须自动展开，否则唯一的添加入口也被藏起来（v1.41.16 借出款踩过这个死锁）。
-    toggleAccountAdd(!accountsHasData);
+    // v1.41.24：新增按钮常驻可见，空账户也不会把唯一入口藏起来（v1.41.16 借出款踩过这个死锁）。
     document.getElementById('accountsModal').classList.remove('hidden');
     raiseOverlay('accountsModal');
 }
@@ -12295,9 +12298,18 @@ function renderAccountManageList() {
     // 不是账户自己的属性。所以这里就是一条扁平的渠道清单。
     const rows = state.accounts.slice().sort((a, b) =>
         (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
-    // v1.41.23：打开先看账户清单；家庭成员收进折叠区，重复说明挪到「新增账户」里只留一份。
+    // v1.41.24：家庭成员折叠区排到「新增账户」正下方、账户清单之上。
     // accountsMembersOpen 用变量记住，重画列表时不会把用户刚展开的面板弹回去。
     box.innerHTML = `
+        <div class="acct-member-fold">
+            <button class="acct-fold-head${accountsMembersOpen ? ' open' : ''}" id="acctMemberHead" onclick="toggleAccountMembers()">
+                <span><i class="fa-solid fa-user-group"></i> 家庭成员（${state.balanceMembers.length}）</span>
+                <i class="fa-solid fa-chevron-down acct-fold-caret"></i>
+            </button>
+            <div class="acct-member-panel${accountsMembersOpen ? '' : ' hidden'}" id="acctMemberPanel">
+                <div class="fam-chips">${memberChips}<button class="fam-add" data-add="1"><i class="fa-solid fa-plus"></i> 添加</button></div>
+            </div>
+        </div>
         <div class="account-section-title">账户（${rows.length}）<span class="acct-order-hint hint-pointer">按住名字拖动可调顺序</span><span class="acct-order-hint hint-touch">长按账户名可拖动排序</span></div>
         <div class="acct-rows">${rows.map((a) => { const recN = accountRecordCounts(a.id); const n = recN.bal + recN.ret;
             // v1.39.94：标出这个账户属于哪些家庭成员 / 是否被收起来了
@@ -12312,16 +12324,7 @@ function renderAccountManageList() {
                     </select>
                     <button class="bh-edit" onclick="openAccountEdit('${a.id}')" title="编辑账户"><i class="fa-solid fa-pen"></i></button>
                     <button class="bh-delete${n ? ' bh-blocked' : ''}" onclick="deleteAccountFromList('${a.id}')" title="${n ? '还有 ' + n + ' 条记录，得先清掉才能删' : '删除'}"><i class="fa-solid ${n ? 'fa-lock' : 'fa-trash'}"></i></button>
-                </div>`; }).join('') || '<div class="breakdown-empty">暂无账户，点上面「＋ 新增账户」添加</div>'}</div>
-        <div class="acct-member-fold">
-            <button class="acct-fold-head${accountsMembersOpen ? ' open' : ''}" id="acctMemberHead" onclick="toggleAccountMembers()">
-                <span><i class="fa-solid fa-user-group"></i> 家庭成员（${state.balanceMembers.length}）</span>
-                <i class="fa-solid fa-chevron-down acct-fold-caret"></i>
-            </button>
-            <div class="acct-member-panel${accountsMembersOpen ? '' : ' hidden'}" id="acctMemberPanel">
-                <div class="fam-chips">${memberChips}<button class="fam-add" data-add="1"><i class="fa-solid fa-plus"></i> 添加</button></div>
-            </div>
-        </div>`;
+                </div>`; }).join('') || '<div class="breakdown-empty">暂无账户，点上面「＋ 新增账户」添加</div>'}</div>`;
 
     // 账户行拖拽排序：和「记月度账单」里的行拖拽同一套观感 —— 整行卡片跟手 + 落点高亮线。
     // 用账户名当拖动手柄；拖完调 reorderMonthlyAccount（它会重排 order 并重画两处列表）。
@@ -12381,47 +12384,8 @@ function renderAccountManageList() {
     applyAccountsViewMode();   // v1.39.39：查看模式要在重画后套只读 + 隐藏改数据的入口
 }
 
-function addAccount() {
-    const name = document.getElementById('newAccountName').value.trim();
-    const groupEl = document.getElementById('newAccountGroup');
-    const group = groupEl ? groupEl.value : '';
-    const curEl = document.getElementById('newAccountCurrency');
-    const currency = curEl ? curEl.value : 'CNY';
-    // v1.39.90：多币种账户 —— 只有勾了这个的账户，记月度账单选「其他币种」时才会
-    // 按币种展开成几行；没勾的就还是一行（人民币），不然满屏都是空行，太乱。
-    const multiEl = document.getElementById('newAccountMulti');
-    const multiCur = !!(multiEl && multiEl.checked);
-    if (!name) { showToast('请输入账户名称', 'error'); return; }
-    if (state.accounts.some(a => a.name === name)) { showToast('已有同名账户', 'error'); return; }
-    // 不再让用户选「资产 / 负债」：一个账户里两类都可能同时存在，
-    // 负债只是记账时填的那一列。kind 只在迁移老数据时还有用。
-    const palette = ['#007aff', '#34c759', '#ff9500', '#af52de', '#5ac8fa', '#ff3b30', '#a2845e', '#30b0c7'];
-    state.accounts.push({
-        id: 'acc_' + uid(),
-        name, kind: 'asset', group, currency, multiCur,
-        // 新建账户按分组给个默认桶（v1.39.29）：以前干脆不写 bucket，等于一建就是
-        // 「未分配」，四笔钱页提示"有 N 个资产账户未归类"、饼图多一块灰的，
-        // 而导出的四笔钱表直接把它算没了。认不出的分组就留空，用户自己在「去归类」里选。
-        bucket: (DEFAULT_ACCOUNT_BUCKET_BY_GROUP[group] || undefined),
-        // 这里原来写的是 `kind === 'asset' ? 'fa-wallet' : 'fa-credit-card'`，
-        // 但「资产 / 负债」下拉早就删了，kind 这个变量在本函数里根本不存在 ——
-        // 于是每次点「添加」都抛 ReferenceError: kind is not defined，
-        // 账户加不上而且没有任何提示（和 mwAddAccount 一样，图标直接写死即可）。
-        icon: 'fa-wallet',
-        color: palette[state.accounts.length % palette.length],
-        order: state.accounts.reduce((m, a) => Math.max(m, a.order || 0), 0) + 1,
-        createdAt: Date.now(), updatedAt: Date.now(),
-    });
-    document.getElementById('newAccountName').value = '';
-    const mEl = document.getElementById('newAccountMulti');
-    if (mEl) mEl.checked = false;      // v1.39.90：加完就复位，免得下一个账户误带着
-    saveState();
-    renderAccountManageList();
-    refreshAccountLists();
-    refreshAccountsModalIfOpen();
-    showToast('账户已添加', 'success');
-}
-
+// v1.41.24：旧的 addAccount()（只读名字 / 分类 / 币种的简易表单）已删除，
+// 新增统一走 openAccountEdit(null) 的完整弹窗。
 function renameAccount(id) {
     const a = accountById(id);
     if (!a) return;
@@ -12520,11 +12484,6 @@ function initBalanceListeners() {
         refreshMonthlyViewMode(wasEditing);
         renderMonthlyEntry();
     });
-    // v1.39.91：原来的「币种」下拉（人民币 / 其他币种）已删掉 —— 页面固定就是多币种那套，
-    // 哪些账户展开成几行由账户自己的「多币种账户」开关决定。
-    // 账户不再有「资产 / 负债」下拉，分组选项固定给资产那套（分组只是展示用）
-    const newGroupSel = document.getElementById('newAccountGroup');
-    if (newGroupSel) newGroupSel.innerHTML = ASSET_GROUPS.map(g => `<option>${g}</option>`).join('');
 }
 
 // 账户排序：order 决定「账户管理」里的显示顺序（新增的排最后）
