@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.27';
+const APP_VERSION = '1.41.28';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -140,11 +140,6 @@ const CURRENCY_DEFS = {
     TWD: { code: 'TWD', label: '新台币', symbol: 'NT$' },
 };
 const DEFAULT_CURRENCY_LIST = ['USD', 'HKD'];
-
-// 账户自带币种（v1.39.87 起有；v1.39.89 起只当「标签」用 ——
-// 月度账单改成按行分币种，不再靠账户币种决定格子怎么换算）
-const ACCOUNT_CURRENCIES = Object.keys(CURRENCY_DEFS).map(k => CURRENCY_DEFS[k]);
-function accountCurrency(a) { return (a && a.currency) || 'CNY'; }
 
 // 用户自己的币种清单（默认美元 + 港币）
 function currencyList() {
@@ -7094,8 +7089,8 @@ async function exportData() {
         const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
 
         addSheet('账户', state.accounts.map(a => ({
-            '名称': a.name, '类型': kindName(a.kind), '分组': a.group || '', '币种': currencyLabel(a.currency), '四笔钱归类': a.kind === 'asset' ? bucketName(a.bucket) : '—',
-        })), ['名称', '类型', '分组', '币种', '四笔钱归类'], [{wch:18},{wch:8},{wch:14},{wch:10},{wch:14}]);
+            '名称': a.name, '类型': kindName(a.kind), '分组': a.group || '', '四笔钱归类': a.kind === 'asset' ? bucketName(a.bucket) : '—',
+        })), ['名称', '类型', '分组', '四笔钱归类'], [{wch:18},{wch:8},{wch:14},{wch:14}]);
 
         addSheet('余额明细', state.balances.map(b => {
             const a = accountById(b.accountId);
@@ -9097,8 +9092,6 @@ function openAccountEdit(accountId, prefillName) {
     };
     const nameEl = document.getElementById('acctEditName');
     if (nameEl) nameEl.value = a ? a.name : (prefillName || '');
-    const ce = document.getElementById('acctEditCurrency');
-    if (ce) ce.value = a ? accountCurrency(a) : 'CNY';
     // v1.39.90：多币种账户开关
     const cm = document.getElementById('acctEditMulti');
     if (cm) cm.checked = !!(a && a.multiCur);
@@ -9177,8 +9170,6 @@ function saveAccountEdit() {
     const kind = a ? (a.kind === 'liability' ? 'liability' : 'asset') : 'asset';
     let group = document.getElementById('acctEditGroup').value;
     if (!groupsForKind(kind).includes(group)) group = groupsForKind(kind)[0];
-    const curEl = document.getElementById('acctEditCurrency');
-    const currency = curEl ? curEl.value : 'CNY';
     // v1.39.90：多币种账户开关
     const multiEl = document.getElementById('acctEditMulti');
     const multiCur = !!(multiEl && multiEl.checked);
@@ -9189,7 +9180,7 @@ function saveAccountEdit() {
         // v1.41.24：账户管理的「新增账户」也走这个完整弹窗了 —— 成员、图标、颜色、
         // 收益开关都由弹窗决定；bucket 必须给（四笔钱页靠它归桶），别让自建账户丢进去。
         const acc = {
-            id: 'acc_' + uid(), name, kind: 'asset', group, currency, multiCur,
+            id: 'acc_' + uid(), name, kind: 'asset', group, multiCur,
             members: (picked && picked.length) ? picked : [monthlyMember()],
             icon: acctEditDraft.icon || 'fa-wallet',
             color: acctEditDraft.color || COLOR_OPTIONS[0],
@@ -9211,7 +9202,7 @@ function saveAccountEdit() {
     }
     // 取消勾选时如果这个账户还有外币记录，会弹确认；用户点取消就别保存了
     if (!setAccountMultiCur(a, multiCur)) return;
-    Object.assign(a, { name, kind, group, currency, multiCur, icon: acctEditDraft.icon, color: acctEditDraft.color,
+    Object.assign(a, { name, kind, group, multiCur, icon: acctEditDraft.icon, color: acctEditDraft.color,
         earnsReturn: kind === 'asset' ? !!acctEditDraft.earnsReturn : undefined, updatedAt: Date.now() });
     if (picked && picked.length) a.members = picked;
     if (kind !== 'asset' && a.earnsReturn === undefined) delete a.earnsReturn;

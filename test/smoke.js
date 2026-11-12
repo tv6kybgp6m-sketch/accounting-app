@@ -1303,7 +1303,7 @@ async function run() {
             ev(`!document.getElementById('accountEditModal').classList.contains('hidden')`) === true &&
             ev(`document.getElementById('acctEditTitle').textContent`) === '添加账户' &&
             ev(`parseInt(document.getElementById('accountEditModal').style.zIndex,10) > parseInt(document.getElementById('accountsModal').style.zIndex,10)`) === true);
-        ok('完整弹窗默认有名称 / 分类 / 币种 / 成员 / 图标 / 颜色可选',
+        ok('完整弹窗默认有名称 / 分类 / 成员 / 图标 / 颜色可选（币种下拉已移除）',
             ev(`document.getElementById('acctEditGroup').options.length`) >= 3 &&
             ev(`document.querySelectorAll('#acctEditMembers input[type="checkbox"]').length`) === 2 &&
             ev(`document.querySelectorAll('#acctEditIcons .icon-pick-item').length`) >= 8 &&
@@ -1567,10 +1567,11 @@ async function run() {
             alertOut[0] === 1 && alertOut[1] === true &&
             alertOut[2] === 1 && alertOut[3] === 2 && alertOut[4] === 3,
             alertOut);
-        ok('删掉说明后，添加账户弹窗该有的字段一个没少',
-            ['acctEditName', 'acctEditGroup', 'acctEditCurrency', 'acctEditMembers',
+        ok('删掉说明后，添加账户弹窗该有的字段一个没少（币种下拉已移除，不再要求）',
+            ['acctEditName', 'acctEditGroup', 'acctEditMembers',
                 'acctEditEarns', 'acctEditMulti', 'acctEditIcons', 'acctEditColors']
-                .every(id => html34.indexOf('id="' + id + '"') >= 0));
+                .every(id => html34.indexOf('id="' + id + '"') >= 0) &&
+            html34.indexOf('id="acctEditCurrency"') < 0);
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {

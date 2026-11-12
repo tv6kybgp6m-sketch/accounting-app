@@ -1286,14 +1286,6 @@
                             <label class="settings-label">分类</label>
                             <select class="text-input" id="acctEditGroup"></select>
                         </div>
-                        <div>
-                            <label class="settings-label">币种</label>
-                            <select class="text-input" id="acctEditCurrency">
-                                <option value="CNY">人民币</option>
-                                <option value="USD">美元</option>
-                                <option value="HKD">港币</option>
-                            </select>
-                        </div>
                     </div>
                     <!-- v1.39.94：账户属于哪些家庭成员（每个家庭成员的账户可以不一样） -->
                     <label class="settings-label">属于哪些家庭成员</label>
@@ -1497,7 +1489,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.27').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.28').catch(() => {});
             });
         }
     </script>

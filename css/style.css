@@ -3354,7 +3354,25 @@ body.cat-dragging {
     .be-input { width: 116px; }
     .bal-group-tag { display: none; }
     #view-balance .breakdown-amount { font-size: 12px; }
-    .balance-modal .modal-body { max-height: calc(100dvh - 150px - env(safe-area-inset-top, 0px)); }
+    /* v1.41.28：手机上记月度账单等弹窗底部「取消 / 保存」常被居中 + 底部安全区吃掉。
+       改成竖排三段：头脚固定、中间滚动，整窗高度受视口约束，按钮永远看得见。
+       先给 100vh 兜底（无 dvh/env 支持时也能用），再用 dvh 版覆盖（精确避开安全区）。 */
+    .balance-modal {
+        width: 100vw; max-width: 100vw;
+        height: 100vh; max-height: 100vh;
+        height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+        border-radius: 0;
+        display: flex; flex-direction: column;
+    }
+    .balance-modal .modal-header { flex: 0 0 auto; padding-top: calc(18px + env(safe-area-inset-top, 0px)); }
+    .balance-modal .modal-body {
+        flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto;
+        padding-bottom: 16px;
+    }
+    .balance-modal .modal-footer {
+        flex: 0 0 auto; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    }
 }
 
 /* 资产负债：当月未记录的账户 */
