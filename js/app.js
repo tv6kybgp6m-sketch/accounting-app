@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.24';
+const APP_VERSION = '1.41.25';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1687,7 +1687,7 @@ async function resolveCloudPayload(raw) {
             if (keyBad && attempt === 0) continue;
             if (msg === '已取消') { __remoteLastError = '已取消：云端那份是加密的，本机打不开'; return null; }
             __remoteLastError = keyBad
-                ? '加密钥匙对不上：退出 App 重新打开，在锁屏输入和 Mac 相同的加密口令（或恢复码）'
+                ? '加密钥匙没对齐：同步时输入和 Mac 相同的加密口令（或恢复码），本机就会自动对齐'
                 : '云端数据解不开：' + msg;
             return null;
         }
@@ -2311,6 +2311,9 @@ async function ensureUnlocked(kring, why, force) {
         if (secret === null) throw new Error('已取消');
         try {
             await LedgerCrypto.unlock(secret, kr);
+            // v1.41.25：iOS 切后台触发 pagehide 会清空 __sessionSecret。
+            // 这里问到一次就记进本次会话，后面解密 / 备份 / 推送不用反复再问。
+            __sessionSecret = secret;
             return true;
         } catch (e) {
             lastError = (e && e.message) || '口令或恢复码不正确';
@@ -3268,6 +3271,9 @@ let __remoteVisibilityHooked = false;
 let __remoteBusy = false;
 let __lastPushedFingerprint = null;
 let __remoteLastError = '';
+// v1.41.25：拉到旧版封套（可能 data 与 keyring 不配套）时，即使账本内容没变，
+// 也要重推一份自洽的封套，把云端那份替换掉 —— 否则另一台设备永远解不开。
+let __remoteNeedRewrite = false;
 // 上一次从远端读到的内容指纹（也是成功推送后的内容），用来避免重复回推
 let __remoteSeenFingerprint = null;
 
@@ -3380,6 +3386,10 @@ async function remotePullAndMerge() {
         if (trimmed.charAt(0) === '{' && trimmed.indexOf(ENC_MAGIC) >= 0) {
             try { raw = JSON.parse(trimmed); } catch (e) { raw = null; }
         }
+        // 新版封套都带 knownKeyrings；没有的就是旧版写的，其中有一批是错位的。
+        // 标记一下，这次拉完强制重写，用户不用再手动去 Mac 记一笔触发同步。
+        if (raw !== null && LedgerCrypto.looksEncrypted(raw) && !Array.isArray(raw.knownKeyrings))
+            __remoteNeedRewrite = true;
         remoteData = raw !== null && LedgerCrypto.looksEncrypted(raw)
             ? await resolveCloudPayload(raw)
             : await decodeSyncPayload(file.content);
@@ -3404,7 +3414,7 @@ async function remotePush() {
     // 远端已经是这份内容就别再写了：否则两台设备会每 60 秒互相回推一份
     // 一模一样的数据，还会不停刷 Gist 的 revision 历史
     const mine = fingerprintOfPayload(payload);
-    if (__remoteSeenFingerprint && mine === __remoteSeenFingerprint) {
+    if (!__remoteNeedRewrite && __remoteSeenFingerprint && mine === __remoteSeenFingerprint) {
         __remoteLastError = '';
         return true;
     }
@@ -3427,6 +3437,7 @@ async function remotePush() {
     if (r.networkError) { __remoteLastError = '网络不通'; return false; }
     if (r.status !== 200) { __remoteLastError = remoteErrorText(r.status); return false; }
     __remoteLastError = '';
+    __remoteNeedRewrite = false;      // 云端那份已换成自洽的新封套
     __remoteSeenFingerprint = mine;
     __lastPushedFingerprint = syncFingerprint();
     remoteSyncCfg.lastSyncAt = Date.now();

@@ -23,12 +23,20 @@ const ENC_MAGIC = 'BKE1';
 // 存 ArrayBuffer 就只是普通数据，WebKit 不会再去找钥匙串。
 // ⚠️ 旧的 'master' 记录永远不要读（一读就会再弹窗），也不要去删它，留着不碍事。
 const CRYPTO_MASTER_RAW_KEY = 'master-raw';
+// v1.41.25：把「见过的钥匙说明」留在本机。两台设备各自 setup 过会有两把主钥匙，
+// 旧版还会写出「数据用 A 加密、说明却指向 B」的错位封套 —— 只认封套里那份说明
+// 就永远解不开。多留几份候选，重启之后也照样能解开历史封套。
+const CRYPTO_KNOWN_KEYRINGS_KEY = 'bookkeeping_app_crypto_keyrings';
+const MAX_KNOWN_KEYRINGS = 6;
 const PBKDF2_PASS_ITER = 310000;      // 口令熵低，多迭代
 const PBKDF2_CODE_ITER = 100000;      // 恢复码本身约 100 bit，够用且解锁更快
 const REC_ALPHABET = '3456789ABCDEFGHJKLMNPQRSTUVWXYZ';   // 去掉易混的 0O1I
 
 const LedgerCrypto = (() => {
     let cachedKey = null;             // 解锁后的主密钥（内存）
+    // v1.41.25：这把主钥匙是从哪份 keyring 解出来的。加密时必须把「同一份」
+    // keyring 写进封套，否则数据用 A 加密、说明指向 B，谁都解不开。
+    let cachedKeyring = null;
     let dbPromise = null;
 
     // ---- 小工具 ----
@@ -121,6 +129,23 @@ const LedgerCrypto = (() => {
     }
     function clearState() { try { localStorage.removeItem(CRYPTO_STATE_KEY); } catch (e) { /* 清不掉就算了 */ } }
 
+    // ---- v1.41.25：见过的 keyring（只存钥匙说明，不含任何账本数据）----
+    // keyring 里本来就只有「被口令/恢复码包住的主钥匙」，和 CRYPTO_STATE_KEY
+    // 是同一类信息，多存几份不扩大泄露面；不进同步载荷。
+    function readKnownKeyrings() {
+        try {
+            const arr = JSON.parse(localStorage.getItem(CRYPTO_KNOWN_KEYRINGS_KEY) || '[]');
+            return Array.isArray(arr) ? arr.filter(k => k && k.pass && k.pass.data) : [];
+        } catch (e) { return []; }
+    }
+    function rememberKeyring(kr) {
+        if (!kr || !kr.pass || !kr.pass.data) return;
+        const list = readKnownKeyrings();
+        if (list.some(k => k.pass.data === kr.pass.data)) return;
+        const next = [kr].concat(list).slice(0, MAX_KNOWN_KEYRINGS);
+        try { localStorage.setItem(CRYPTO_KNOWN_KEYRINGS_KEY, JSON.stringify(next)); } catch (e) {}
+    }
+
     // ---- 密钥派生与包裹 ----
     async function deriveKek(secret, saltB64, iterations) {
         const base = await crypto.subtle.importKey('raw', te.encode(normalizeSecret(secret)), 'PBKDF2', false, ['deriveKey']);
@@ -185,13 +210,13 @@ const LedgerCrypto = (() => {
     async function hasLocalKey() {
         if (cachedKey) return true;
         const k = await loadMaster();          // 只读 master-raw，绝不碰旧的 'master'
-        if (k) { cachedKey = k; return true; }
+        if (k) { cachedKey = k; cachedKeyring = keyring(); return true; }
         return false;
     }
-    async function lock() { cachedKey = null; }
+    async function lock() { cachedKey = null; cachedKeyring = null; }
     // 只忘掉本机密钥、保留加密设置：下次要口令或恢复码才能解锁
     async function forgetLocalKey() {
-        cachedKey = null;
+        cachedKey = null; cachedKeyring = null;
         try { await idbDel(CRYPTO_MASTER_RAW_KEY); } catch (e) { /* 删不掉也只是占地方 */ }
         return true;
     }
@@ -215,6 +240,8 @@ const LedgerCrypto = (() => {
         };
         await saveMaster(masterKey);
         cachedKey = masterKey;
+        cachedKeyring = kr;
+        rememberKeyring(kr);
         const st = { on: true, keyring: kr };
         if (!writeState(st)) throw new Error('本机存储写入失败，加密未能开启');
         return { recoveryCode: code, keyring: kr };
@@ -236,6 +263,8 @@ const LedgerCrypto = (() => {
             try {
                 const k = await unwrapMaster(wrap, pair[1]);
                 cachedKey = k;
+                cachedKeyring = kring;         // v1.41.25：记住这把钥匙对应哪份说明
+                rememberKeyring(kring);
                 await saveMaster(k);           // 存不下也能用，只是下次还要输
                 return true;
             } catch (e) { /* 换下一个 */ }
@@ -244,44 +273,67 @@ const LedgerCrypto = (() => {
     }
 
     // ---- 加解密 ----
+    // v1.41.25：封套里的 keyring 必须和真正用来加密的那把主钥匙配套。
+    // 以前固定写「本机 keyring」，但 decryptEnvelope 解开别台设备的封套时会把
+    // 内存里的主钥匙换成对方那把 —— 下一次推送就写成 data=A、keyring=B 的坏封套，
+    // 之后无论输多少次口令都只能得到 B，永远解不开（iOS 报 OperationError）。
     async function encryptString(text, kr) {
-        const kring = kr || keyring();
+        const kring = kr || cachedKeyring || keyring();
         if (!kring) throw new Error('还没开启加密');
         let key = cachedKey;
-        if (!key) { const k = await loadMaster(); if (!k) throw new Error('需要口令或恢复码才能加密'); key = k; }
-        cachedKey = key;
+        if (!key) {
+            const k = await loadMaster();
+            if (!k) throw new Error('需要口令或恢复码才能加密');
+            key = k; cachedKey = k; cachedKeyring = kring;
+        }
+        rememberKeyring(kring);
         const iv = crypto.getRandomValues(new Uint8Array(12));
         const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, te.encode(text));
-        return { enc: ENC_MAGIC, v: 1, iv: b64(iv), data: b64(ct), keyring: { v: kring.v, alg: 'AES-GCM', pass: kring.pass, recovery: kring.recovery, hint: kring.hint } };
+        return { enc: ENC_MAGIC, v: 1, iv: b64(iv), data: b64(ct),
+            keyring: { v: kring.v, alg: 'AES-GCM', pass: kring.pass, recovery: kring.recovery, hint: kring.hint },
+            // 随封套带上见过的其它钥匙说明：本机 localStorage 被清过也还有候选可用。
+            // 里面只有被口令/恢复码包住的主钥匙，不含任何账本内容。
+            knownKeyrings: readKnownKeyrings().slice(0, MAX_KNOWN_KEYRINGS) };
     }
 
-    // 封套 → 明文。优先用本机主密钥；密钥不对时用口令重新解并覆盖本机缓存
+    // 封套 → 明文。先用本机缓存钥匙；不行就用口令把「封套说明 + 本机说明 +
+    // 见过的说明」逐个解开去试 —— 历史错位封套靠这一步才能救回来。
     async function decryptEnvelope(env, secret) {
         if (!env || env.enc !== ENC_MAGIC) throw new Error('不是加密文件');
-        const kr = env.keyring || keyring();
-        if (!kr) throw new Error('缺少密钥信息');
         const doDecrypt = async (k) => td.decode(
             await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(env.iv) }, k, unb64(env.data)));
+
         let key = cachedKey;
         if (!key) {
             const stored = await loadMaster();
-            if (stored) key = cachedKey = stored;
+            if (stored) { key = cachedKey = stored; cachedKeyring = keyring(); }
         }
-        if (!key) {
-            if (!secret) throw new Error('NEED_SECRET');
-            await unlock(secret, kr);
-            return await doDecrypt(cachedKey);
+        if (key) {
+            try {
+                const plain = await doDecrypt(key);
+                rememberKeyring(env.keyring);
+                return plain;
+            } catch (e) { /* 换下面的候选钥匙 */ }
         }
-        try {
-            return await doDecrypt(key);
-        } catch (e) {
-            // 本机有密钥但开不了这份数据 —— 多半是两台设备各自点了"开启加密"，
-            // 于是有两把随机主密钥，同一个口令也互相打不开。
-            // 要用口令重新解出真正的主密钥并覆盖本机缓存，而不是报"需要口令"就完事。
-            if (!secret) throw new Error('WRONG_KEY');
-            await unlock(secret, kr);
-            return await doDecrypt(cachedKey);
+        if (!secret) throw new Error(key ? 'WRONG_KEY' : 'NEED_SECRET');
+
+        const candidates = [];
+        const push = (k) => {
+            if (k && k.pass && k.pass.data && !candidates.some(x => x.pass.data === k.pass.data)) candidates.push(k);
+        };
+        push(env.keyring); push(keyring()); readKnownKeyrings().forEach(push);
+        if (Array.isArray(env.knownKeyrings)) env.knownKeyrings.forEach(push);
+        let unwrapped = false, lastErr = null;
+        for (const kr of candidates) {
+            try { await unlock(secret, kr); }
+            catch (e) { lastErr = e; continue; }
+            unwrapped = true;
+            try { return await doDecrypt(cachedKey); }
+            catch (e) { lastErr = e; }
         }
+        // 一份说明都解不开 = 口令真的不对；解开过却都解不出数据 = 钥匙对不上
+        if (!unwrapped && lastErr) throw lastErr;
+        throw new Error('WRONG_KEY');
     }
 
     function looksEncrypted(obj) { return !!(obj && typeof obj === 'object' && obj.enc === ENC_MAGIC); }
@@ -301,6 +353,7 @@ const LedgerCrypto = (() => {
         kr.hint = String(newPassphrase).slice(0, 2) + '***';
         const st = readState(); st.keyring = kr; st.updatedAt = new Date().toISOString();
         writeState(st);
+        cachedKeyring = kr; rememberKeyring(kr);
         return true;
     }
     async function rotateRecoveryCode(currentSecret) {
@@ -316,13 +369,15 @@ const LedgerCrypto = (() => {
         kr.recovery = await wrapMaster(key, code, PBKDF2_CODE_ITER);
         const st = readState(); st.keyring = kr; st.updatedAt = new Date().toISOString();
         writeState(st);
+        cachedKeyring = kr; rememberKeyring(kr);
         return code;
     }
 
     // ---- 关闭：调用方负责先把数据退回明文 ----
     async function disable() {
-        cachedKey = null;
+        cachedKey = null; cachedKeyring = null;
         try { await idbDel(CRYPTO_MASTER_RAW_KEY); } catch (e) { /* 删不掉也只是占地方 */ }
+        try { localStorage.removeItem(CRYPTO_KNOWN_KEYRINGS_KEY); } catch (e) {}
         clearState();
         return true;
     }
@@ -332,7 +387,7 @@ const LedgerCrypto = (() => {
         setup, unlock, encryptString, decryptEnvelope, looksEncrypted,
         changePassphrase, rotateRecoveryCode, disable,
         makeRecoveryCode, formatRecoveryCode, normalizeRecoveryCode,
-        hint, keyring, readState,
+        hint, keyring, readState, readKnownKeyrings,
         ITER_PASS: PBKDF2_PASS_ITER, ITER_CODE: PBKDF2_CODE_ITER, MAGIC: ENC_MAGIC,
     };
 })();

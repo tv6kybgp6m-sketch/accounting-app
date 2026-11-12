@@ -1384,10 +1384,129 @@ async function run() {
         const webkitOut = JSON.parse(webkitFail);
         ok('两次都解不开时重试过一次，状态栏换成人话而不是那句英文',
             webkitOut[0] === null && webkitOut[1] === 2 &&
-            webkitOut[2].indexOf('加密钥匙对不上') >= 0 &&
+            webkitOut[2].indexOf('加密钥匙没对齐') >= 0 &&
             webkitOut[2].indexOf('operating') < 0 && webkitOut[2].indexOf('operation-specific') < 0 &&
             webkitOut[2].indexOf('和 Mac 相同的加密口令') >= 0,
             webkitOut);
+
+        // ---------- 33) v1.41.25：两台设备主钥匙不同也不该写出「错位封套」 ----------
+        stage = '33';
+        const vm = require('vm');
+        const nodeCrypto = require('crypto');
+        const lc33 = fs.readFileSync(path.join(REPO, 'js', 'ledger-crypto.js'), 'utf8');
+        const app33 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        ok('加密时把「同一把钥匙的说明」写进封套，不再固定用本机 keyring',
+            /const kring = kr \|\| cachedKeyring \|\| keyring\(\);/.test(lc33) &&
+            lc33.indexOf('cachedKeyring = kring') >= 0 &&
+            lc33.indexOf('knownKeyrings: readKnownKeyrings()') >= 0);
+        ok('解密按多份候选逐个试，能救回历史错位封套',
+            /push\(env\.keyring\); push\(keyring\(\)\); readKnownKeyrings\(\)\.forEach\(push\);/.test(lc33) &&
+            lc33.indexOf('env.knownKeyrings.forEach(push)') >= 0 &&
+            lc33.indexOf('let unwrapped = false') >= 0);
+        ok('见过的钥匙说明只留本机，不进云同步载荷',
+            app33.indexOf('bookkeeping_app_crypto_keyrings') < 0 &&
+            lc33.indexOf("CRYPTO_KNOWN_KEYRINGS_KEY = 'bookkeeping_app_crypto_keyrings'") >= 0);
+        ok('问到一次口令就写回本次会话，切后台后不必反复问',
+            /await LedgerCrypto\.unlock\(secret, kr\);[\s\S]{0,260}?__sessionSecret = secret;/.test(app33));
+
+        ok('拉到旧版封套会自动标脏并强制重推一次（内容没变也推），把云端坏封套换掉',
+            /if \(raw !== null && LedgerCrypto\.looksEncrypted\(raw\) && !Array\.isArray\(raw\.knownKeyrings\)\)\s*\n\s*__remoteNeedRewrite = true;/.test(app33) &&
+            app33.indexOf('if (!__remoteNeedRewrite && __remoteSeenFingerprint && mine === __remoteSeenFingerprint)') >= 0 &&
+            app33.indexOf('__remoteNeedRewrite = false;') >= 0);
+        const rewriteFlow = await ev(`(async function(){
+            var oldApi = window.gistApi, oldFp = window.fingerprintOfPayload,
+                oldEnabled = LedgerCrypto.isEnabled, oldNeed = __remoteNeedRewrite,
+                oldSeen = __remoteSeenFingerprint, oldLast = __lastPushedFingerprint;
+            var calls = 0;
+            window.gistApi = function(){ calls++; return Promise.resolve({ status: 200, body: {} }); };
+            window.fingerprintOfPayload = function(){ return 'fixed-fp'; };
+            LedgerCrypto.isEnabled = function(){ return false; };
+            __remoteSeenFingerprint = 'fixed-fp';
+            __remoteNeedRewrite = false;
+            var skipped = await remotePush();
+            var afterSkip = calls;
+            __remoteNeedRewrite = true;
+            var forced = await remotePush();
+            var afterForce = calls;
+            __remoteNeedRewrite = oldNeed; __remoteSeenFingerprint = oldSeen; __lastPushedFingerprint = oldLast;
+            window.gistApi = oldApi; window.fingerprintOfPayload = oldFp; LedgerCrypto.isEnabled = oldEnabled;
+            return JSON.stringify([skipped, afterSkip, forced, afterForce]);
+        })()`);
+        ok('内容相同：平时跳过推送，标脏后确实强制写了一次云端',
+            rewriteFlow === '[true,0,true,1]', rewriteFlow);
+
+        // 真 crypto 回归：两台设备各自 setup（两把随机主钥匙 + 同一个口令），
+        // 全程假字符串，绝不加载账本、不联网。
+        function dev33() {
+            const store = new Map();
+            const localStorage = {
+                getItem: k => (store.has(k) ? store.get(k) : null),
+                setItem: (k, v) => store.set(k, String(v)),
+                removeItem: k => store.delete(k),
+                clear: () => store.clear(),
+            };
+            const indexedDB = { open() { const r = {}; setTimeout(() => r.onerror && r.onerror(new Error('no idb')), 0); return r; } };
+            const box = {
+                window: { crypto: nodeCrypto.webcrypto, localStorage, indexedDB },
+                localStorage, indexedDB, crypto: nodeCrypto.webcrypto,
+                btoa: x => Buffer.from(x, 'binary').toString('base64'),
+                atob: x => Buffer.from(x, 'base64').toString('binary'),
+                TextEncoder, TextDecoder, setTimeout, clearTimeout, console,
+                Date, Promise, Error, Uint8Array, ArrayBuffer, JSON, Set, Map,
+            };
+            const ctx = vm.createContext(box);
+            vm.runInContext(lc33, ctx, { filename: 'ledger-crypto.js' });
+            return { C: vm.runInContext('LedgerCrypto', ctx), store };
+        }
+        const reboot33 = (from) => {
+            const d = dev33();
+            for (const [k, v] of from.store) d.store.set(k, v);
+            return d;
+        };
+        const t33 = await (async () => {
+            const PASS = 'same-password-2026';
+            const mac = dev33(), phone = dev33();
+            const krA = (await mac.C.setup(PASS)).keyring;
+            const krB = (await phone.C.setup(PASS)).keyring;
+            const twoKeys = krA.pass.data !== krB.pass.data;
+
+            // 手机解开 Mac 的封套后，再推的封套必须「data 与 keyring 同一把钥匙」
+            const envMac = await mac.C.encryptString('Mac 的数据');
+            await phone.C.decryptEnvelope(envMac, PASS);
+            const envPhone = await phone.C.encryptString('手机记的一笔账');
+            const stillMismatched = envPhone.keyring.pass.data === krB.pass.data;
+            const phoneReboot = reboot33(phone);
+            await phoneReboot.C.unlock(PASS, phoneReboot.C.keyring());
+            let selfRead = '';
+            try { selfRead = await phoneReboot.C.decryptEnvelope(envPhone, PASS); } catch (e) { selfRead = 'ERR ' + (e && e.message); }
+
+            // 旧版写坏的封套（data 用 A、keyring 写 B）也必须能救回
+            const bad = Object.assign({}, envPhone, {
+                keyring: { v: krB.v, alg: 'AES-GCM', pass: krB.pass, recovery: krB.recovery, hint: krB.hint },
+                knownKeyrings: undefined,
+            });
+            const phone2 = reboot33(phone);
+            await phone2.C.unlock(PASS, phone2.C.keyring());
+            let legacy = '';
+            try { legacy = await phone2.C.decryptEnvelope(bad, PASS); } catch (e) { legacy = 'ERR ' + (e && e.message); }
+
+            // 救回之后推的新封套，Mac 重启后也能解开
+            const fresh = await phone2.C.encryptString('修好之后推的新数据');
+            const macReboot = reboot33(mac);
+            await macReboot.C.unlock(PASS, macReboot.C.keyring());
+            let other = '';
+            try { other = await macReboot.C.decryptEnvelope(fresh, PASS); } catch (e) { other = 'ERR ' + (e && e.message); }
+            return { twoKeys, stillMismatched, selfRead, legacy, other,
+                known: phone.C.readKnownKeyrings().length };
+        })();
+        ok('两台设备同口令也确实是两把主钥匙，本机记住了见过的钥匙说明',
+            t33.twoKeys && t33.known >= 2, { known: t33.known });
+        ok('解开别台设备的数据后再推，封套不再错位；自己重启后照样解得开',
+            !t33.stillMismatched && t33.selfRead === '手机记的一笔账', t33.selfRead);
+        ok('云端现存的旧版错位封套，重启后也能用同一口令解开',
+            t33.legacy === '手机记的一笔账', t33.legacy);
+        ok('救回之后推的新封套，另一台设备重启后也能解开（不再需要 Mac 先推一次）',
+            t33.other === '修好之后推的新数据', t33.other);
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
