@@ -1508,6 +1508,67 @@ async function run() {
         ok('救回之后推的新封套，另一台设备重启后也能解开（不再需要 Mac 先推一次）',
             t33.other === '修好之后推的新数据', t33.other);
 
+        // ---------- 34) v1.41.26：同步失败全局提醒 + 账户编辑弹窗统一尺寸 ----------
+        stage = '34';
+        const html34 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+        const css34 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const app34 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        ok('添加账户弹窗里那段「账户不再分资产还是负债」说明已删除',
+            html34.indexOf('账户不再分资产还是负债') < 0 &&
+            html34.indexOf('欠款填「负债」列就行') < 0);
+        ok('弹窗内输入框统一 46px / 16px，同类文字统一一档，且只作用于这个弹窗',
+            /#accountEditModal \.modal-body \.text-input \{\s*height: 46px; min-height: 46px; padding: 0 12px;\s*font-size: 16px; box-sizing: border-box;/.test(css34) &&
+            css34.indexOf('#accountEditModal .acct-edit-pair .settings-label') >= 0 &&
+            css34.indexOf('#accountEditModal .switch-row { font-size: 14px;') >= 0 &&
+            css34.indexOf('#accountEditModal .switch-row .sr-hint { font-size: 12px;') >= 0 &&
+            css34.indexOf('#accountEditModal .acct-member-pick { font-size: 14px;') >= 0);
+        ok('同步失败提醒挂进同步周期收尾和切页面入口，任何页面都能弹出来',
+            /function maybeAlertSyncIssue\(force\)/.test(app34) &&
+            app34.indexOf('maybeAlertSyncIssue(reason === \'manual\');') >= 0 &&
+            /function switchView\(viewName\) \{\s*\n\s*maybeAlertSyncIssue\(false\);/.test(app34) &&
+            app34.indexOf("showToast('云同步没成功：' + __remoteLastError, 'error', 6000)") >= 0);
+        ok('同一条错误 10 分钟内不重复弹，手动同步必弹',
+            app34.indexOf('const quiet = !force && __remoteAlertedError === __remoteLastError') >= 0 &&
+            app34.indexOf('10 * 60 * 1000') >= 0);
+        ok('提示条能停留 6 秒，长文案不会撑出屏幕',
+            app34.indexOf("function showToast(message, type = 'success', duration = 2500)") >= 0 &&
+            app34.indexOf('}, duration);') >= 0 &&
+            /\.toast \{[\s\S]{0,220}max-width: min\(92vw, 520px\);/.test(css34));
+
+        // 运行时：假错误 + 假的「已配置」，全程不碰真实账本 / 不联网
+        const alertFlow = await ev(`(function(){
+            var oldReady = window.remoteSyncReady, oldErr = __remoteLastError,
+                oldAlerted = __remoteAlertedError, oldAt = __remoteAlertedAt;
+            var box = document.getElementById('toastContainer');
+            window.remoteSyncReady = function(){ return true; };
+            box.innerHTML = '';
+            __remoteLastError = '云端数据解不开'; __remoteAlertedError = ''; __remoteAlertedAt = 0;
+            maybeAlertSyncIssue(true);
+            var first = box.querySelectorAll('.toast.error').length;
+            var text = (box.querySelector('.toast.error') || {}).textContent || '';
+            maybeAlertSyncIssue(false);
+            var afterRepeat = box.querySelectorAll('.toast.error').length;
+            __remoteLastError = '网络不通'; maybeAlertSyncIssue(false);
+            var afterChange = box.querySelectorAll('.toast.error').length;
+            __remoteLastError = ''; maybeAlertSyncIssue(false);
+            __remoteLastError = '云端数据解不开'; maybeAlertSyncIssue(false);
+            var afterRecover = box.querySelectorAll('.toast.error').length;
+            box.innerHTML = '';
+            __remoteLastError = oldErr; __remoteAlertedError = oldAlerted; __remoteAlertedAt = oldAt;
+            window.remoteSyncReady = oldReady;
+            return JSON.stringify([first, text.indexOf('云同步没成功：云端数据解不开') >= 0,
+                afterRepeat, afterChange, afterRecover]);
+        })()`);
+        const alertOut = JSON.parse(alertFlow);
+        ok('有错就弹、同样错误不重复弹、错误变了或恢复后再错会再弹',
+            alertOut[0] === 1 && alertOut[1] === true &&
+            alertOut[2] === 1 && alertOut[3] === 2 && alertOut[4] === 3,
+            alertOut);
+        ok('删掉说明后，添加账户弹窗该有的字段一个没少',
+            ['acctEditName', 'acctEditGroup', 'acctEditCurrency', 'acctEditMembers',
+                'acctEditEarns', 'acctEditMulti', 'acctEditIcons', 'acctEditColors']
+                .every(id => html34.indexOf('id="' + id + '"') >= 0));
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

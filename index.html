@@ -1299,8 +1299,6 @@
                     <!-- v1.39.94：账户属于哪些家庭成员（每个家庭成员的账户可以不一样） -->
                     <label class="settings-label">属于哪些家庭成员</label>
                     <div class="acct-member-picker" id="acctEditMembers"></div>
-                    <div class="settings-sublabel">账户不再分资产还是负债 —— 一个账户里可以同时有活期、定期、货基、股基、黄金和信用卡欠款，
-                        记账时资产填对应的类别列、欠款填「负债」列就行。</div>
                     <label class="switch-row">
                         <input type="checkbox" id="acctEditEarns">
                         <span>这个账户会有收益<span class="sr-hint">关掉后不会出现在记账单的收益那一列里；本月已录过的仍然能改</span></span>
@@ -1500,7 +1498,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.25').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.26').catch(() => {});
             });
         }
     </script>

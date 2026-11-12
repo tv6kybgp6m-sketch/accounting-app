@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.25';
+const APP_VERSION = '1.41.26';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -3271,6 +3271,10 @@ let __remoteVisibilityHooked = false;
 let __remoteBusy = false;
 let __lastPushedFingerprint = null;
 let __remoteLastError = '';
+// v1.41.26：同步没成功时不能只写在设置页里，用户在别的页面根本发现不了。
+// 记下上次弹过的错误和时刻，后台每 60 秒轮询时别反复骚扰。
+let __remoteAlertedError = '';
+let __remoteAlertedAt = 0;
 // v1.41.25：拉到旧版封套（可能 data 与 keyring 不配套）时，即使账本内容没变，
 // 也要重推一份自洽的封套，把云端那份替换掉 —— 否则另一台设备永远解不开。
 let __remoteNeedRewrite = false;
@@ -3465,7 +3469,22 @@ async function remoteSyncCycle(reason) {
     } finally {
         __remoteBusy = false;
         updateRemoteSyncUI();
+        maybeAlertSyncIssue(reason === 'manual');
     }
+}
+
+// v1.41.26：同步没成功时在任何页面都弹一条（跟「已经是最新版本」同一个位置）。
+// 后台轮询每 60 秒跑一次，同一条错误 10 分钟内只弹一次；手动点「立即同步」必弹。
+// 切页面时也会顺带检查一次，避免启动时那条提示错过了就再也看不到。
+function maybeAlertSyncIssue(force) {
+    if (!__remoteLastError) { __remoteAlertedError = ''; return; }
+    if (!remoteSyncReady()) return;
+    const now = Date.now();
+    const quiet = !force && __remoteAlertedError === __remoteLastError && (now - __remoteAlertedAt) < 10 * 60 * 1000;
+    if (quiet) return;
+    __remoteAlertedError = __remoteLastError;
+    __remoteAlertedAt = now;
+    showToast('云同步没成功：' + __remoteLastError, 'error', 6000);
 }
 
 // 本地数据有改动后延迟推送（复用 saveState 的调用点）
@@ -3998,7 +4017,7 @@ function getCategoryById(id) {
     return state.categories.find(c => c.id === id);
 }
 
-function showToast(message, type = 'success') {
+function showToast(message, type = 'success', duration = 2500) {
     const container = document.getElementById('toastContainer');
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
@@ -4010,7 +4029,7 @@ function showToast(message, type = 'success') {
     setTimeout(() => {
         toast.classList.add('fade-out');
         setTimeout(() => toast.remove(), 300);
-    }, 2500);
+    }, duration);
 }
 
 // ---- Navigation ----
@@ -4032,6 +4051,7 @@ function resetReportEntryDefaults() {
 }
 
 function switchView(viewName) {
+    maybeAlertSyncIssue(false);   // v1.41.26：同步还挂着错误时，切到任何页面都提醒一次
     if (viewName === 'reports') resetReportEntryDefaults();
     // v1.41.5：这三个页面的金额眼睛，每次「点进来」都回到闭着（隐私默认）。
     // 只在切视图时重置；页面内部刷新（存完一笔、同步回来、翻月份）不重置，

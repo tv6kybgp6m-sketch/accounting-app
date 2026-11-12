@@ -2570,6 +2570,9 @@ body.cat-dragging {
     color: var(--bg-content);
     padding: 10px 20px;
     border-radius: var(--radius-md);
+    /* v1.41.26：同步失败那句比较长，别把提示条撑出屏幕 */
+    max-width: min(92vw, 520px);
+    line-height: 1.5;
     font-size: 14px;
     font-weight: 500;
     box-shadow: var(--shadow-md);
@@ -5700,3 +5703,24 @@ body.app-locked .fab-add { display: none !important; }
         box-shadow: 0 -6px 10px -8px rgba(0, 0, 0, .35);
     }
 }
+
+/* v1.41.26：添加 / 编辑账户弹窗里字段多、字号杂，统一成一套尺寸。
+   输入框跟「记一笔借出」一样 46px / 16px（手机不会自动缩放），同类文字同一档。
+   全部 scoped 到 #accountEditModal，别的弹窗和页面一点不动。 */
+#accountEditModal .modal-body > .settings-label,
+#accountEditModal .acct-edit-pair .settings-label {
+    display: block; font-size: 14px; line-height: 1.4; margin: 0 0 8px;
+}
+#accountEditModal .modal-body .text-input {
+    height: 46px; min-height: 46px; padding: 0 12px;
+    font-size: 16px; box-sizing: border-box;
+}
+#accountEditModal .modal-body > .text-input { margin-bottom: 14px; }
+#accountEditModal .acct-edit-pair { gap: 10px; margin-bottom: 14px; }
+#accountEditModal .acct-member-picker { margin: 0 0 14px; }
+#accountEditModal .acct-member-pick { font-size: 14px; }
+#accountEditModal .acct-member-pick input { width: 16px; height: 16px; accent-color: var(--accent); }
+#accountEditModal .switch-row { font-size: 14px; margin: 0 0 14px; }
+#accountEditModal .switch-row .sr-hint { font-size: 12px; line-height: 1.5; }
+#accountEditModal .icon-picker,
+#accountEditModal .color-picker { margin-bottom: 14px; }
