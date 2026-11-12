@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.29';
+const APP_VERSION = '1.41.30';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -10971,11 +10971,7 @@ function renderMonthlyEntry() {
         ${summaryRows}
         ${rows}
         ${lendingRow}
-    </div></div>`
-        // v1.39.75：底部这两块按用户要求删掉——常用渠道快捷键 chip、以及「一行=…一列=…」那段说明。
-        // 加行 / 加列两个按钮已在顶部「本人」那一行常驻，说明文字用户早就看熟了。
-        // 手机上没有光标、也没有 hover，拖拽得靠长按，必须显式说一句，否则没人猜得到
-        + `<div class="mw-sort-hint">按住<b>账户名</b>或<b>列头</b>约半秒，就能拖动调整这一行 / 这一列的顺序。灰色带 🔒 的格是「锁住」状态（只读，框里的数照样计入资产负债）；点右上角小锁能打开填写——只开你常用的渠道，不容易填错。</div>`;
+    </div></div>`;
     bindMonthlyEntry();
     syncMwSticky(list);
     fitMonthlyColWidths();
@@ -11862,7 +11858,10 @@ function renderMonthlySelfCheck() {
     });
 
     const fmt = v => formatCurrency(Math.round(v * 100) / 100);
-    const open = el.classList.contains('msc-open');
+    // v1.41.30：桌面（宽屏）默认展开明细，填完一眼能看到核对结果；手机默认收起（省空间）。
+    // 一旦用户手动点过收起/展开，记下来，之后重算不再强制改回，尊重他的选择。
+    const userSet = el.classList.contains('msc-user-set');
+    const open = userSet ? el.classList.contains('msc-open') : (window.innerWidth > 640);
     const hasIssue = !!(st.check || missing.length || maybeTopUp.length);
     // 紧凑一行：净资产 + 总资产/负债 + 状态旗标；点开才展开明细（默认收起，省空间、手机也清爽）
     let html = `<div class="msc-summary" onclick="toggleMonthlySelfCheck()">
@@ -11896,6 +11895,7 @@ function renderMonthlySelfCheck() {
 function toggleMonthlySelfCheck() {
     const el = document.getElementById('monthlySelfCheck');
     if (!el) return;
+    el.classList.add('msc-user-set');
     el.classList.toggle('msc-open');
     renderMonthlySelfCheck();
 }

@@ -1143,9 +1143,6 @@
                             <i class="fa-solid fa-rotate-left"></i> 撤销这次填写</button>
                     </div>
                     <div id="monthlyEntryList" class="balance-entry-list"></div>
-                    <button class="add-account-inline" onclick="openAccountsModal()">
-                        <i class="fa-solid fa-plus"></i> 添加账户
-                    </button>
                 </div>
                 <div class="modal-footer">
                     <div id="monthlySelfCheck" class="monthly-selfcheck msc-footer"></div>
@@ -1492,7 +1489,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.29').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.30').catch(() => {});
             });
         }
     </script>

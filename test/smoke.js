@@ -1220,8 +1220,8 @@ async function run() {
             css30.indexOf('bottom: calc(67px + env(safe-area-inset-bottom, 0px));') >= 0 &&
             css30.indexOf('padding-bottom: calc(143px + env(safe-area-inset-bottom, 0px));') >= 0 &&
             css30.indexOf('calc(74px + env(safe-area-inset-bottom') < 0);
-        ok('小红点改成跟下面的图标同一条竖直线',
-            /\.nav-item \.nav-dot \{[\s\S]{0,220}?left: 50%;[\s\S]{0,140}?transform: translateX\(-50%\);/.test(css30));
+        ok('小红点贴在图标右侧、竖向上与图标居中对齐（不再悬空在图标上方）',
+            /\.nav-item \.nav-dot \{[\s\S]{0,240}?top: 50%;[\s\S]{0,160}?transform: translate\(calc\(-50% \+ 12px\), -50%\);/.test(css30));
         ok('探针元素真的在 DOM 里、且对读屏隐藏',
             ev(`!!document.getElementById('statusBarProbe')`) &&
             ev(`document.getElementById('statusBarProbe').getAttribute('aria-hidden')`) === 'true');
