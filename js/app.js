@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.31';
+const APP_VERSION = '1.41.32';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -16057,10 +16057,13 @@ function renderReturnMissing(info) {
     box.classList.remove('hidden');
 }
 
-// ---- 手机端：左边缘滑动返回（v1.41.31） ----
+// ---- 手机端：左边缘滑动返回（v1.41.32） ----
 // 微信式交互：从屏幕最左边按住往右滑，弹窗跟手平移，松手滑过阈值就关掉。
 // 关闭一律走该弹窗自己的 .modal-close 按钮逻辑（= 和现在点 X 完全一样），不另写一套。
-// 录入类弹窗（记一笔）若已填内容，滑掉前先 confirm 一句「放弃未保存的填写？」，防误滑丢数据。
+// v1.41.32：滑动过程中弹窗保持不透明（不再淡出透出下一层页面）；删除各弹窗「取消」按钮，只留 X。
+// 录入类弹窗（记一笔 / 月度账单）只有"真填了内容"才在滑掉前 confirm「放弃未保存的填写？」：
+//   - 记一笔：金额非 0/非空 或 备注非空 才算有内容（仅选了分类不算，避免系统默认带出分类时误弹）。
+//   - 月度账单：本会话真敲过字且任一格有非空值才算有内容。
 // 用 Pointer Events 实现：触屏和桌面鼠标都能触发（桌面用鼠标从最左边缘拖也能试），关闭逻辑不变。
 (function bindEdgeSwipeBack() {
     const EDGE = 18;   // 起手点离左边缘 ≤ 此值才算「边缘手势」
@@ -16082,10 +16085,23 @@ function renderReturnMissing(info) {
     }
     function modalHasInput(modal) {
         if (modal.id === 'transactionModal') {
+            // 「有内容」= 真填了金额或备注；只选了分类（可能是系统默认带出的）不算「记录数据」
             const amt = (document.getElementById('amountInput') || {}).value || '';
             const note = (document.getElementById('noteInput') || {}).value || '';
             if ((amt.trim() && amt.trim() !== '0') || note.trim()) return true;
-            if (typeof state !== 'undefined' && state.selectedCategoryId) return true;
+        } else if (modal.id === 'monthlyModal') {
+            return monthlyModalHasInput(modal);
+        }
+        return false;
+    }
+    // 月度账单：本会话真敲过字、且当前任一格有非空值，才算「有内容」需提醒放弃
+    function monthlyModalHasInput(modal) {
+        if (typeof monthlyDirty !== 'undefined' && !monthlyDirty) return false;
+        const sel = 'input[data-bal], input[data-ret], input[data-flow-in], input[data-wallet-total]';
+        const inputs = modal.querySelectorAll(sel);
+        for (const inp of inputs) {
+            const v = (inp.value || '').trim();
+            if (v && v !== '0') return true;
         }
         return false;
     }
@@ -16122,7 +16138,6 @@ function renderReturnMissing(info) {
         const p = panelOf(ctx.modal);
         p.style.transition = 'none';
         p.style.transform = 'translateX(' + dx + 'px)';
-        ctx.modal.style.opacity = String(Math.max(0.25, 1 - dx / 320));
     }
 
     function onUp(e) {
@@ -16132,8 +16147,6 @@ function renderReturnMissing(info) {
         const p = panelOf(modal);
         p.style.transition = 'transform .2s ease';
         p.style.transform = '';
-        modal.style.transition = 'opacity .2s ease';
-        modal.style.opacity = '';
         const commit = ctx.started && dx >= DIST;
         ctx = null;
         if (!commit) return;

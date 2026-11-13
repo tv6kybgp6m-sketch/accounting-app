@@ -927,9 +927,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="modal-footer txn-footer">
-                    <button class="secondary-btn" onclick="closeTransactionModal()">取消</button>
-                    <button class="secondary-btn" onclick="saveTransaction({reopen:true})"><i class="fa-solid fa-forward"></i> 再记一笔</button>
+                <div class="modal-footer txn-footer">                    <button class="secondary-btn" onclick="saveTransaction({reopen:true})"><i class="fa-solid fa-forward"></i> 再记一笔</button>
                     <button class="primary-btn" onclick="saveTransaction()"><i class="fa-solid fa-check"></i> 保存</button>
                 </div>
             </div>
@@ -960,9 +958,7 @@
                         <div class="color-picker" id="colorPicker"></div>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button class="secondary-btn" onclick="closeCategoryModal()">取消</button>
-                    <button class="primary-btn" onclick="saveCategory()">保存</button>
+                <div class="modal-footer">                    <button class="primary-btn" onclick="saveCategory()">保存</button>
                 </div>
             </div>
         </div>
@@ -975,9 +971,7 @@
                     <div class="action-sheet-title" id="catSheetTitle"></div>
                 </div>
                 <button class="action-sheet-btn" onclick="catSheetEdit()"><i class="fa-solid fa-pen"></i> 编辑分类</button>
-                <button class="action-sheet-btn action-sheet-danger" onclick="catSheetDelete()"><i class="fa-solid fa-trash-can"></i> 删除分类</button>
-                <button class="action-sheet-cancel" onclick="closeCatActionSheet()">取消</button>
-            </div>
+                <button class="action-sheet-btn action-sheet-danger" onclick="catSheetDelete()"><i class="fa-solid fa-trash-can"></i> 删除分类</button>            </div>
         </div>
 
         <!-- Payment Method Action Sheet（与分类面板同款：点一下才出操作） -->
@@ -989,9 +983,7 @@
                 </div>
                 <button class="action-sheet-btn" id="pmSheetDefaultBtn" onclick="pmSheetSetDefault()"><i class="fa-solid fa-star"></i> 设为默认</button>
                 <button class="action-sheet-btn" onclick="pmSheetRename()"><i class="fa-solid fa-pen"></i> 编辑名称</button>
-                <button class="action-sheet-btn action-sheet-danger" onclick="pmSheetDelete()"><i class="fa-solid fa-trash-can"></i> 删除</button>
-                <button class="action-sheet-cancel" onclick="closePmActionSheet()">取消</button>
-            </div>
+                <button class="action-sheet-btn action-sheet-danger" onclick="pmSheetDelete()"><i class="fa-solid fa-trash-can"></i> 删除</button>            </div>
         </div>
 
         <!-- 月度结账：排除"无余额账户" -->
@@ -1002,9 +994,7 @@
                     <div class="action-sheet-title">排除无余额账户</div>
                 </div>
                 <div class="action-sheet-note">确认这些账户真的没有余额？排除后不再当作待办，并会同步到其他设备。</div>
-                <div id="excludeBalanceList"></div>
-                <button class="action-sheet-cancel" onclick="closeExcludeBalanceSheet()">取消</button>
-            </div>
+                <div id="excludeBalanceList"></div>            </div>
         </div>
 
         <!-- 四笔钱：设置目标 -->
@@ -1027,9 +1017,7 @@
                         <label>长期投资目标金额</label>
                         <div class="rs-inline"><span class="ft-cur">¥</span><input type="number" class="text-input" id="ft_growth" inputmode="decimal" placeholder="0"></div>
                     </div>
-                    <div class="modal-footer">
-                        <button class="secondary-btn" onclick="closeFundTargetModal()">取消</button>
-                        <button class="primary-btn" onclick="saveFundTargetModal()">保存</button>
+                    <div class="modal-footer">                        <button class="primary-btn" onclick="saveFundTargetModal()">保存</button>
                     </div>
                 </div>
             </div>
@@ -1055,9 +1043,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button class="secondary-btn" onclick="closeBudgetModal()">取消</button>
-                    <button class="primary-btn" onclick="saveBudget()">保存</button>
+                <div class="modal-footer">                    <button class="primary-btn" onclick="saveBudget()">保存</button>
                 </div>
             </div>
         </div>
@@ -1146,9 +1132,7 @@
                 </div>
                 <div class="modal-footer">
                     <div id="monthlySelfCheck" class="monthly-selfcheck msc-footer"></div>
-                    <div class="footer-btns">
-                        <button class="secondary-btn" onclick="closeMonthlyModal()">取消</button>
-                        <button class="primary-btn" onclick="saveMonthly()"><i class="fa-solid fa-check"></i> 保存</button>
+                    <div class="footer-btns">                        <button class="primary-btn" onclick="saveMonthly()"><i class="fa-solid fa-check"></i> 保存</button>
                     </div>
                 </div>
             </div>
@@ -1303,9 +1287,7 @@
                     <div class="icon-picker" id="acctEditIcons"></div>
                     <label class="settings-label">颜色</label>
                     <div class="color-picker" id="acctEditColors"></div>
-                    <div class="acct-edit-actions">
-                        <button class="secondary-btn" onclick="closeAccountEdit()">取消</button>
-                        <button class="primary-btn" onclick="saveAccountEdit()"><i class="fa-solid fa-check"></i> 保存</button>
+                    <div class="acct-edit-actions">                        <button class="primary-btn" onclick="saveAccountEdit()"><i class="fa-solid fa-check"></i> 保存</button>
                     </div>
                 </div>
             </div>
@@ -1383,9 +1365,7 @@
                     <div class="secret-error hidden" id="secretError"></div>
                     <label class="secret-peek"><input type="checkbox" id="secretPeek"> 显示输入内容</label>
                 </div>
-                <div class="modal-footer">
-                    <button class="secondary-btn" onclick="closeSecretModal(null)">取消</button>
-                    <button class="primary-btn" onclick="submitSecretModal()"><i class="fa-solid fa-lock-open"></i> 确定</button>
+                <div class="modal-footer">                    <button class="primary-btn" onclick="submitSecretModal()"><i class="fa-solid fa-lock-open"></i> 确定</button>
                 </div>
             </div>
         </div>
@@ -1421,9 +1401,7 @@
                     </div>
                     <div class="secret-error hidden" id="encSetupError"></div>
                 </div>
-                <div class="modal-footer">
-                    <button class="secondary-btn" onclick="closeEncSetup()">取消</button>
-                    <button class="primary-btn" id="encSetupNext" onclick="encSetupAdvance()">下一步</button>
+                <div class="modal-footer">                    <button class="primary-btn" id="encSetupNext" onclick="encSetupAdvance()">下一步</button>
                 </div>
             </div>
         </div>
@@ -1489,7 +1467,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.31').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.32').catch(() => {});
             });
         }
     </script>
@@ -1513,9 +1491,7 @@
                         <div class="form-group"><label>借款时间</label><input type="date" class="text-input" id="lendingDate"></div>
                         <div class="form-group"><label>大概还款时间（可不填）</label><input type="date" class="text-input" id="lendingDue"></div>
                     </div>
-                    <div class="scope-foot">
-                        <button class="secondary-btn" onclick="closeLendingModal()">取消</button>
-                        <button class="primary-btn" onclick="saveLending()">保存</button>
+                    <div class="scope-foot">                        <button class="primary-btn" onclick="saveLending()">保存</button>
                     </div>
                 </div>
             </div>
@@ -1588,9 +1564,7 @@
                 <p class="modal-tip">每个资产类别归到哪一类由你自己定：固定资产 / 流动资产 / 长期投资 / 其他投资。改完立刻影响<b>净资产桥</b>里的「固定资产」拆分与导出。<b>负债永远是负债</b>，不参与归类。</p>
                 <div id="classTagRows"></div>
             </div>
-            <div class="modal-footer">
-                <button class="secondary-btn" onclick="closeClassTagModal()">取消</button>
-                <button class="primary-btn" onclick="saveClassTagModal()">保存</button>
+            <div class="modal-footer">                <button class="primary-btn" onclick="saveClassTagModal()">保存</button>
             </div>
         </div>
     </div>
