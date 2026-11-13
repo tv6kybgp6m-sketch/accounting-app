@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.43';
+const APP_VERSION = '1.41.44';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -582,6 +582,10 @@ function saveStateNow() {
         accounts: state.accounts,
         balances: state.balances,
         returns: state.returns,
+        // v1.41.44：借出款台账和手写回顾以前只进同步载荷、没进本机这份，
+        // 断网 / 关同步时本机刷新就看不到。两份都补上（同步按 updatedAt 较新胜，不会打架）。
+        lendings: state.lendings,
+        reviews: state.reviews,
         fundTargets: state.fundTargets,
         insuranceMembers: state.insuranceMembers,
         insuranceMemberAddedAt: state.insuranceMemberAddedAt,
@@ -3788,6 +3792,9 @@ function loadState() {
             ensureAccountOrder();
             state.balances = Array.isArray(data.balances) ? data.balances : [];
             state.returns = Array.isArray(data.returns) ? data.returns : [];
+            // v1.41.44：本机那份也要读回来（旧账本没这两个键 → 空，随后 ensureArrayFields 兜底）
+            state.lendings = Array.isArray(data.lendings) ? data.lendings : [];
+            state.reviews = (data.reviews && typeof data.reviews === 'object') ? data.reviews : {};
             state.purgeSampleDone = !!data.purgeSampleDone;
             // 资产归类：现金/货币基金/定期存款/股票基金/黄金/其他 各自归到
             // 固定资产 / 流动资产 / 长期投资 / 其他投资，由用户自己定；负债单独算
@@ -16129,9 +16136,10 @@ function renderReviewModal() {
     const kind = reviewTab === 'year' ? 'yearly' : 'monthly';
     const key = reviewTab === 'year' ? year : month;
     const saved = (state.reviews && state.reviews[kind] && state.reviews[kind][key]) || null;
-    if (gv('reviewText')) gv('reviewText').value = saved ? (saved.text || '') : '';
+    const alive = saved && !saved.deletedAt ? saved : null;   // 墓碑只用来告诉另一台设备「这期删过了」
+    if (gv('reviewText')) gv('reviewText').value = alive ? (alive.text || '') : '';
     if (gv('reviewTextLabel')) gv('reviewTextLabel').textContent = reviewTab === 'year' ? '这一年想记的话' : '这个月想记的话';
-    if (gv('reviewSaved')) gv('reviewSaved').textContent = saved && saved.updatedAt ? '已保存过' : '';
+    if (gv('reviewSaved')) gv('reviewSaved').textContent = alive && alive.updatedAt ? '已保存过' : '';
     renderReviewHistory(kind);
 }
 function saveReviewText() {
@@ -16141,8 +16149,14 @@ function saveReviewText() {
     const text = String((document.getElementById('reviewText') || {}).value || '').trim();
     if (!state.reviews || typeof state.reviews !== 'object') state.reviews = { monthly: {}, yearly: {} };
     if (!state.reviews[kind] || typeof state.reviews[kind] !== 'object') state.reviews[kind] = {};
-    if (!text) delete state.reviews[kind][key];
-    else state.reviews[kind][key] = { text, updatedAt: Date.now() };
+    const now = Date.now();
+    if (!text) {
+        // v1.41.44：本机也开始存回顾了，直接 delete 会让「已清空」在重启后复活，
+        // 也传不到另一台设备。留一条带 deletedAt 的墓碑，同步按 updatedAt 较新胜自然覆盖。
+        if (state.reviews[kind][key]) state.reviews[kind][key] = { text: '', updatedAt: now, deletedAt: now };
+    } else {
+        state.reviews[kind][key] = { text, updatedAt: now };
+    }
     saveState();
     const hint = document.getElementById('reviewSaved');
     if (hint) hint.textContent = text ? '已保存' : '已清空';

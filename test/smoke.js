@@ -1005,6 +1005,23 @@ async function run() {
         ok('回顾历史空态「还没写过 / 随时能翻」那句已删',
             appSrc.indexOf('写过的会留在这里') < 0);
 
+        // v1.41.44：本机开始存回顾 → 清空必须留墓碑，否则重启后 / 另一台设备上会「复活」
+        ev(`reviewTab='month'; reviewMonth='2026-10';
+            document.getElementById('reviewText').value=''; saveReviewText();`);
+        ok('清空某期回顾留一条「删过」墓碑，不是直接抹掉',
+            ev(`!!(state.reviews.monthly['2026-10'] && state.reviews.monthly['2026-10'].deletedAt)`));
+        ok('重新打开这一期：输入框空、不显示「已保存过」、历史里也没有那段话',
+            ev(`renderReviewModal(); document.getElementById('reviewText').value`) === '' &&
+            ev(`document.getElementById('reviewSaved').textContent`) === '' &&
+            ev(`document.getElementById('reviewHistory').innerHTML`).indexOf('10 月装修花了 9 万') < 0);
+        ok('另一台设备的旧文字盖不掉本机较新的墓碑（删了就是删了）',
+            ev(`(function(){mergeRemoteData({data:{reviews:{monthly:{'2026-10':{text:'旧文字',updatedAt:1}}}}});
+                var v=state.reviews.monthly['2026-10'];return !!v && !!v.deletedAt;})()`));
+        ok('之后重新写这一期，文字能盖掉墓碑',
+            ev(`(function(){document.getElementById('reviewText').value='重新写的话';saveReviewText();
+                var v=state.reviews.monthly['2026-10'];return v.text==='重新写的话' && !v.deletedAt;})()`));
+        ev(`document.getElementById('reviewText').value='10 月装修花了 9 万'; saveReviewText();`);
+
         ev(`renderReturnMissing({month:'2026-10'});`);
         ok('收益率缺料清单能跑、且不改任何账本数据',
             ev(`!!document.getElementById('retMissingCard')`) && ev(`state.balances.length`) === _balBefore);
@@ -1615,6 +1632,25 @@ async function run() {
         ok('自检进 footer 后手机端 safe-area 兜底仍在',
             /#monthlyModal \.modal-footer \{\s*flex-direction: column;/.test(css34) &&
             css34.indexOf('#monthlyModal .modal-footer { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }') >= 0);
+
+        // ---------- 36) v1.41.44：手写回顾 / 借出款台账本机落盘 + 重启读回 ----------
+        stage = '36';
+        ev(`reviewTab='month'; reviewMonth='2026-10';
+            document.getElementById('reviewText').value='重启后还应该在'; saveReviewText();
+            if(!state.lendings.length) state.lendings.push({id:'__probe_lend',person:'探针',amount:1,lendDate:'2026-01-01',updatedAt:Date.now()});
+            saveStateNow();`);
+        ok('本机那份账本里真的存了手写回顾和借出款台账（不再只靠云端）',
+            ev(`(function(){var raw=localStorage.getItem(STORAGE_KEY);if(!raw)return false;
+                var d=JSON.parse(unpackFromStorage(raw));
+                return !!(d.reviews && d.reviews.monthly['2026-10'] && d.reviews.monthly['2026-10'].text==='重启后还应该在'
+                    && Array.isArray(d.lendings) && d.lendings.length>0);})()`));
+        ok('模拟重启：清空内存后 loadState() 能把这两份读回来',
+            ev(`(function(){state.reviews={monthly:{},yearly:{}};state.lendings=[];
+                loadState();
+                return !!(state.reviews.monthly['2026-10'] && state.reviews.monthly['2026-10'].text==='重启后还应该在'
+                    && state.lendings.length>0);})()`));
+        ok('同步载荷里也有这两份（本机清单与云端清单一致）',
+            ev(`(function(){var d=buildSyncPayload().data;return !!d.reviews && Array.isArray(d.lendings);})()`));
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {

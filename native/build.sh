@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 bash ./minify.sh || echo "（minify 跳过，使用已提交的 js/app.min.js）"
 
 APP_NAME=Bookkeeping
-VERSION=1.41.43
+VERSION=1.41.44
 APP_DIR="dist/$APP_NAME.app"
 CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
