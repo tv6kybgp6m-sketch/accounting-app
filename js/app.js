@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.38';
+const APP_VERSION = '1.41.39';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -290,6 +290,7 @@ let state = {
     balanceMonth: null,
     balanceMetric: 'asset',
     balanceChartType: 'line',
+    balanceDim: 'cat',
     balanceGran: null,
     settings: { currency: '¥', theme: 'light', defaultPaymentMethod: '微信', defaultView: 'transactions', autoOpenAdd: false },
     currentView: 'transactions',
@@ -7939,7 +7940,7 @@ function updateBalanceToggleStates() {
         card.classList.toggle('active', card.dataset.balMetric === state.balanceMetric);
     });
     document.querySelectorAll('#view-balance [data-bal-chart]').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.balChart === state.balanceChartType);
+        btn.classList.toggle('active', btn.dataset.balChart === state.balanceChartType && (btn.dataset.balDim || 'cat') === (state.balanceDim || 'cat'));
     });
     document.querySelectorAll('#view-balance [data-bal-gran]').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.balGran === balanceActiveGran());
@@ -8006,10 +8007,13 @@ function renderBalanceStats() {
     }).join('');
 }
 
-function setBalanceChartType(type) {
-    if (state.balanceChartType === type) return;
+function setBalanceChartType(type, dim) {
+    dim = dim || 'cat';
+    if (state.balanceChartType === type && (state.balanceDim || 'cat') === dim) return;
     state.balanceChartType = type;
+    state.balanceDim = dim;
     renderBalanceChart();
+    renderBalanceBreakdown();
 }
 
 function setBalanceGran(gran) {
@@ -8051,7 +8055,6 @@ function renderBalance() {
         : (recorded ? `截至 ${info.month.replace('-', '年')}月` : '该期未记录');
 
     renderBalanceChart();
-    renderBalanceAccountPie(info);
     renderBalanceBreakdown();
     renderBalanceStats();
     renderBalanceMemberBar();
@@ -8563,9 +8566,10 @@ function renderBalanceChart() {
     const metric = state.balanceMetric;
     const meta = BAL_METRICS[metric];
     const chartType = state.balanceChartType;
+    const dim = state.balanceDim || 'cat';
 
     document.getElementById('balChartTitle').textContent =
-        chartType === 'pie' ? `${meta.name}构成占比` : `${meta.name}走势`;
+        chartType === 'pie' ? (dim === 'acct' ? '账户资产构成占比' : `${meta.name}构成占比`) : `${meta.name}走势`;
     const subtitle = document.getElementById('balChartSubtitle');
     const parts = [!info.month ? '尚无数据'
         : (monthHasRecords(info.month) ? `${info.month.replace('-', '年')}月记录` : `${info.month.replace('-', '年')}月未记录`)];
@@ -8587,8 +8591,12 @@ function renderBalanceChart() {
         const ctx = document.getElementById('balanceChart');
         if (!ctx) return;
         bindChartTouchGuard(ctx);
-        if (chartType === 'pie') renderBalancePie(ctx, info);
-        else renderBalanceTrend(ctx, chartType, meta, metric);
+        if (chartType === 'pie') {
+            if (dim === 'acct') renderBalanceAccountPie(ctx, info);
+            else renderBalancePie(ctx, info);
+        } else {
+            renderBalanceTrend(ctx, chartType, meta, metric);
+        }
     });
 }
 
@@ -8779,13 +8787,10 @@ function renderBalancePie(ctx, info) {
     charts.balance.$centerText = { label: '', value: '' };
 }
 
-function renderBalanceAccountPie(info) {
-    const canvas = document.getElementById('balanceAccountPie');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (typeof Chart === 'undefined') { loadChartLib().then(() => renderBalanceAccountPie(info)).catch(() => {}); return; }
-    if (charts.balanceAccountPie) { charts.balanceAccountPie.destroy(); charts.balanceAccountPie = null; }
-    // 按账户汇总资产（不含负债类），每个账户一块；借出款单独算一块
+function renderBalanceAccountPie(ctx, info) {
+    if (typeof Chart === 'undefined') { loadChartLib().then(() => renderBalanceAccountPie(ctx, info)).catch(() => {}); return; }
+    if (charts.balance) { charts.balance.destroy(); charts.balance = null; }
+    // 按账户汇总资产（不含负债类），每个账户一块；借出款单独算一块。画进资产负债页主图（#balanceChart）。
     const map = accountAssetsAtMonth(info.month);
     const entries = [];
     balAccounts().forEach(a => {
@@ -8801,16 +8806,9 @@ function renderBalanceAccountPie(info) {
     const gross = top.reduce((s, e) => s + e.signed, 0);
     const labels = top.map(e => e.label);
     const colors = top.map(e => e.id === '__others__' ? PIE_OTHERS_COLOR : (e.color || '#8e8e8e'));
-    const empty = document.getElementById('balanceAccountPieEmpty');
-    const wrap = document.getElementById('balAccountPieWrap');
-    if (!entries.length || gross <= 0) {
-        if (empty) { empty.textContent = '该期没有可统计的资产数据'; empty.classList.remove('hidden'); }
-        if (wrap) wrap.classList.add('hidden');
-        return;
-    }
-    if (empty) empty.classList.add('hidden');
-    if (wrap) wrap.classList.remove('hidden');
-    charts.balanceAccountPie = new Chart(ctx, {
+    if (!entries.length || gross <= 0) { balanceShowEmpty('该期没有可统计的资产数据'); return; }
+    balanceHideEmpty();
+    charts.balance = new Chart(ctx, {
         type: 'doughnut',
         data: { labels, datasets: [{ data: top.map(e => e.signed), backgroundColor: colors, borderWidth: 0, hoverOffset: 10, radius: (ctx.parentElement ? ctx.parentElement.clientWidth : 999) < 520 ? '68%' : '100%' }] },
         plugins: [pieLabelPlugin, doughnutTotalPlugin],
@@ -8844,39 +8842,41 @@ function renderBalanceAccountPie(info) {
             },
         },
     });
-    charts.balanceAccountPie.$centerText = { label: '', value: '' };
+    charts.balance.$centerText = { label: '', value: '' };
 }
 
 function renderBalanceBreakdown() {
     const container = document.getElementById('balBreakdownList');
     if (!container) return;
     const info = balancePeriodInfo();
+    const metric = state.balanceMetric;
     const titleEl = document.getElementById('balBreakdownTitle');
-    // v1.41.38：明细列表改为「按账户」展示（账户资产构成占比饼图下方的下一个模块），
-    // 直接看每个账户占多少、排第几，点账户看它的历史余额。
-    if (titleEl) titleEl.textContent = '账户资产明细（按金额）';
+    const dim = state.balanceDim || 'cat';
 
-    const map = accountAssetsAtMonth(info.month);
-    const items = [];
-    balAccounts().forEach(a => {
-        const v = map[a.id] || 0;
-        if (v > 0) items.push({ id: a.id, name: a.name, color: a.color, icon: a.icon, v });
-    });
-    if (map[LENDING_ACCOUNT_ID] > 0) {
-        const lv = lendingVirtualAccount();
-        items.push({ id: LENDING_ACCOUNT_ID, name: lv.name, color: lv.color, icon: lv.icon, v: map[LENDING_ACCOUNT_ID] });
-    }
-    items.sort((a, b) => b.v - a.v);
-    const grand = items.reduce((s, x) => s + x.v, 0);
-    const top = items.length ? items[0].v : 1;
-
-    let html = '';
-    items.forEach(it => {
-        const pct = grand ? (it.v / grand) * 100 : 0;
-        const click = it.id === LENDING_ACCOUNT_ID
-            ? `openLendingDetail('${_esc(info.month || '')}')`
-            : `openAccountHistoryForAccount('${_esc(it.id)}', '${_esc(it.name)}')`;
-        html += `
+    // v1.41.39：账户维度切换（资产负债页主图第 4 个饼图按钮）联动到这里 ——
+    // dim=acct 时按账户展示资产明细；否则沿用「按类别」（跟随总资产/总负债/净资产口径）。
+    if (dim === 'acct') {
+        if (titleEl) titleEl.textContent = '账户资产明细（按金额）';
+        const map = accountAssetsAtMonth(info.month);
+        const items = [];
+        balAccounts().forEach(a => {
+            const v = map[a.id] || 0;
+            if (v > 0) items.push({ id: a.id, name: a.name, color: a.color, icon: a.icon, v });
+        });
+        if (map[LENDING_ACCOUNT_ID] > 0) {
+            const lv = lendingVirtualAccount();
+            items.push({ id: LENDING_ACCOUNT_ID, name: lv.name, color: lv.color, icon: lv.icon, v: map[LENDING_ACCOUNT_ID] });
+        }
+        items.sort((a, b) => b.v - a.v);
+        const grand = items.reduce((s, x) => s + x.v, 0);
+        const top = items.length ? items[0].v : 1;
+        let html = '';
+        items.forEach(it => {
+            const pct = grand ? (it.v / grand) * 100 : 0;
+            const click = it.id === LENDING_ACCOUNT_ID
+                ? `openLendingDetail('${_esc(info.month || '')}')`
+                : `openAccountHistoryForAccount('${_esc(it.id)}', '${_esc(it.name)}')`;
+            html += `
         <div class="breakdown-item" onclick="${click}">
             <div class="breakdown-icon" style="background:${it.color}22;color:${it.color}">
                 <i class="fa-solid ${it.icon || 'fa-building-columns'}"></i>
@@ -8887,6 +8887,52 @@ function renderBalanceBreakdown() {
                     <span class="breakdown-amount">${maskMoney(it.v)}<em>${pct.toFixed(1)}%</em></span>
                 </div>
                 <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (it.v / top) * 100)}%;background:${it.color}"></div></div>
+            </div>
+        </div>`;
+        });
+        container.innerHTML = html || '<div class="breakdown-empty">该期还没有余额记录</div>';
+        return;
+    }
+
+    // 默认（dim=cat）：按类别（跟随口径）
+    if (titleEl) {
+        titleEl.textContent = (metric === 'liability' ? '负债构成（按类别）'
+            : metric === 'net' ? '净资产构成（按类别）' : '资产构成（按类别）');
+    }
+    const cat = monthHasRecords(info.month) ? balancesByCat(info.month) : {};
+    const lendTotal = Number(cat[LENDING_CAT_KEY] || 0);
+    const grandAsset = sheetAssetCats().reduce((s, c) => s + (cat[c.key] || 0), 0) + lendTotal;
+    const grandLiab = sheetLiabCats().reduce((s, c) => s + (cat[c.key] || 0), 0);
+    const grand = metric === 'liability' ? grandLiab : (metric === 'asset' ? grandAsset : grandAsset + grandLiab);
+    const liabKeys = new Set(sheetLiabCats().map(c => c.key));
+    const items = sheetAssetCats().concat(sheetLiabCats())
+        .map(c => ({ c, v: cat[c.key] || 0 }))
+        .filter(x => x.v > 0);
+    if (lendTotal > 0) items.push({
+        c: { key: LENDING_CAT_KEY, label: '借出款', color: '#8e8e93', icon: 'fa-hand-holding-dollar' },
+        v: lendTotal
+    });
+    items.sort((a, b) => b.v - a.v);
+    const top = items.length ? items[0].v : 1;
+
+    let html = '';
+    items.forEach(({ c, v }) => {
+        const pct = grand ? (v / grand) * 100 : 0;
+        const defIcon = liabKeys.has(c.key) ? 'fa-credit-card' : 'fa-chart-pie';
+        const click = c.key === LENDING_CAT_KEY
+            ? `openLendingDetail('${_esc(info.month || '')}')`
+            : `openAccountHistoryForPeriod('${info.month}','${_esc(c.label)}')`;
+        html += `
+        <div class="breakdown-item" onclick="${click}">
+            <div class="breakdown-icon" style="background:${c.color}22;color:${c.color}">
+                <i class="fa-solid ${c.icon || defIcon}"></i>
+            </div>
+            <div class="breakdown-main">
+                <div class="breakdown-head">
+                    <span class="breakdown-name">${_esc(c.label)}</span>
+                    <span class="breakdown-amount">${maskMoney(v)}<em>${pct.toFixed(1)}%</em></span>
+                </div>
+                <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (v / top) * 100)}%;background:${c.color}"></div></div>
             </div>
         </div>`;
     });
@@ -11511,16 +11557,36 @@ function mwAddAccount(raw) {
     openAccountEdit(null, String(raw || '').trim());
 }
 
-// v1.41.38：填月度盘点时，聚焦某一格 → 只高亮「正在输入的那一格」（不再做整行整列十字），
-// 防填错行 / 列。淡黄底。网格用 CSS grid + display:contents 的行，定位到 .mw-c / .mw-rowname。
+// v1.41.39：填月度盘点聚焦某格 → 从「账户名」横亮到该列、从「表头」竖亮到该行，都停在该格
+// （不继续往后亮），形成指向输入格的「L」，直观看所在行列。淡黄底。
+// 网格用 CSS grid + display:contents 的行；表头 .mw-h 与每行 .mw-c 同序，列用下标对齐。
 function highlightMonthlyCell(input) {
     clearMonthlyCell();
+    const grid = document.querySelector('.mw-grid');
+    if (!grid) return;
     const cell = input.closest('.mw-c') || input.closest('.mw-rowname');
-    if (!cell) return;
-    cell.classList.add('mw-cell-hl');
+    const row = input.closest('.mw-tr');
+    if (!cell || !row) return;
+    const rows = Array.from(grid.querySelectorAll('.mw-tr'));
+    const ri = rows.indexOf(row);
+    const kids = Array.from(row.children);
+    const ci = kids.indexOf(cell);
+    if (ci < 0) return;
+    const heads = Array.from(grid.querySelectorAll('.mw-h'));
+    // 横：本行从账户名(下标0) 亮到聚焦列(含)，聚焦格单独标
+    kids.forEach((k, kIdx) => {
+        if (kIdx <= ci) k.classList.add(kIdx === ci ? 'mw-focus-hl' : 'mw-row-hl');
+    });
+    // 竖：本列从表头(顶) 亮到聚焦行(含)，但聚焦格已由上面标过
+    for (let r = 0; r <= ri; r++) {
+        const t = r === 0 ? heads[ci] : rows[r].children[ci];
+        if (t && r !== ri) t.classList.add('mw-col-hl');
+    }
 }
 function clearMonthlyCell() {
-    document.querySelectorAll('.mw-cell-hl').forEach(el => el.classList.remove('mw-cell-hl'));
+    document.querySelectorAll('.mw-row-hl, .mw-col-hl, .mw-focus-hl').forEach(el => {
+        el.classList.remove('mw-row-hl', 'mw-col-hl', 'mw-focus-hl');
+    });
 }
 
 function bindMonthlyEntry() {
@@ -11530,7 +11596,7 @@ function bindMonthlyEntry() {
     // 锁住的、只读的全跳过，不然按几十次 Tab 才到下一格能填的。
     if (!list.dataset.tabBound) {
         list.dataset.tabBound = '1';
-        // v1.41.38：聚焦格子 → 只高亮正在输入的那一格（淡黄）；失焦清除。用 focusin/out 冒泡，
+        // v1.41.39：聚焦格子 → 从账户名横亮到该列、从表头竖亮到该行（都停在该格，不继续往后）；失焦清除。用 focusin/out 冒泡，
         // 监听器只挂一次（list 元素稳定，内部 .mw-grid 每次重画也不影响）。
         if (!list.dataset.crosshairBound) {
             list.dataset.crosshairBound = '1';
@@ -12589,7 +12655,7 @@ function initBalanceListeners() {
         });
     });
     document.querySelectorAll('#view-balance [data-bal-chart]').forEach(btn => {
-        btn.addEventListener('click', () => setBalanceChartType(btn.dataset.balChart));
+        btn.addEventListener('click', () => setBalanceChartType(btn.dataset.balChart, btn.dataset.balDim || 'cat'));
     });
     document.querySelectorAll('#view-balance [data-bal-gran]').forEach(btn => {
         btn.addEventListener('click', () => setBalanceGran(btn.dataset.balGran));

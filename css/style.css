@@ -1198,6 +1198,21 @@ body.native-shell .sidebar {
     box-shadow: var(--shadow-sm);
 }
 
+/* v1.41.39：账户维度切换按钮（按账户看占比）——和「按类别」饼图区分，加一个"账"角标 */
+.type-ico-acct { position: relative; }
+.type-ico-acct::after {
+    content: '账';
+    position: absolute;
+    right: 1px;
+    bottom: -2px;
+    font-size: 8px;
+    line-height: 1;
+    font-family: var(--font-ui, sans-serif);
+    color: var(--accent-solid);
+    font-weight: 700;
+}
+.type-ico-acct.active::after { color: var(--text-on-accent); }
+
 /* 折线/柱状趋势图：手机上允许"手指横向拖动读数"。
    touch-action: pan-y 表示纵向滚动仍然交给页面（照常能滚），
    横向手势留给图表自己处理 —— 不加的话，手指一横着划就是整页跟着动，
@@ -5468,12 +5483,20 @@ table.bill-stats {
     .mw-col-input { width: 34px; font-size: 11px !important; padding: 1px 2px !important; }
 }
 
-/* v1.41.38：填月度盘点聚焦 → 只高亮正在输入的那一格（不再做整行整列十字），淡黄。
-   数据格内有 <input class="text-input"> 不透明底，连同输入框一起染才能看见；!important 压过
-   hover 灰底(0,4,0) 与负债红底。 */
-.mw-grid .mw-c.mw-cell-hl,
-.mw-grid .mw-rowname.mw-cell-hl { background: rgba(255, 214, 64, .30); }
-.mw-grid .mw-c.mw-cell-hl .text-input { background: rgba(255, 214, 64, .50) !important; }
+/* v1.41.39：填月度盘点聚焦 → 从账户名横亮到该列、从表头竖亮到该行，都停在输入格（不继续往后亮），
+   形成指向输入格的「L」，淡黄。数据格内 <input class="text-input"> 不透明底，连同输入框一起染；
+   !important 压过 hover 灰底(0,4,0) 与负债红底。 */
+.mw-grid .mw-c.mw-row-hl,
+.mw-grid .mw-rowname.mw-row-hl,
+.mw-grid .mw-c.mw-col-hl,
+.mw-grid .mw-h.mw-col-hl { background: rgba(255, 214, 64, .30); }
+/* 聚焦格：行列交点，略深一点，明确指向 */
+.mw-grid .mw-c.mw-focus-hl,
+.mw-grid .mw-rowname.mw-focus-hl { background: rgba(255, 214, 64, .48); }
+/* 带输入框的格子：连同输入框一起染，否则被输入框不透明底盖住 */
+.mw-grid .mw-c.mw-row-hl .text-input,
+.mw-grid .mw-c.mw-col-hl .text-input { background: rgba(255, 214, 64, .50) !important; }
+.mw-grid .mw-c.mw-focus-hl .text-input { background: rgba(255, 214, 64, .64) !important; }
 
 /* ===== Excel 查看（不导入）预览弹窗 ===== */
 .excel-preview-modal { max-width: 720px; width: 92%; }

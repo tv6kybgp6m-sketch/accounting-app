@@ -413,7 +413,8 @@
                                 <div class="drill-toggle chart-type-toggle">
                                     <button class="type-ico-btn" data-bal-chart="line" title="折线图"><i class="fa-solid fa-chart-simple"></i></button>
                                     <button class="type-ico-btn" data-bal-chart="bar" title="柱状图"><i class="fa-solid fa-chart-column"></i></button>
-                                    <button class="type-ico-btn" data-bal-chart="pie" title="饼图"><i class="fa-solid fa-chart-pie"></i></button>
+                                    <button class="type-ico-btn" data-bal-chart="pie" title="饼图（按类别）"><i class="fa-solid fa-chart-pie"></i></button>
+                                    <button class="type-ico-btn type-ico-acct" data-bal-chart="pie" data-bal-dim="acct" title="账户资产构成占比（按账户）"><i class="fa-solid fa-chart-pie"></i></button>
                                 </div>
                             </div>
                         </div>
@@ -422,18 +423,6 @@
                         </div>
                     <div class="drill-chart-empty hidden" id="balanceChartEmpty"></div>
                 </div>
-                    <div class="chart-card" id="balAccountPieCard">
-                        <div class="chart-header">
-                            <div class="drill-title-wrap">
-                                <h3>账户资产构成占比</h3>
-                                <span class="chart-subtitle">哪个账户资产多，一目了然</span>
-                            </div>
-                        </div>
-                        <div class="chart-container" id="balAccountPieWrap">
-                            <canvas id="balanceAccountPie"></canvas>
-                        </div>
-                        <div class="drill-chart-empty hidden" id="balanceAccountPieEmpty"></div>
-                    </div>
                     <div class="chart-card">
                         <div class="chart-header">
                             <div class="drill-title-wrap">
@@ -1481,7 +1470,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.38').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.39').catch(() => {});
             });
         }
     </script>
