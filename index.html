@@ -839,7 +839,7 @@
                         <button class="modal-icon-btn" id="deleteTxnBtn" onclick="deleteTransactionFromModal()" style="display:none" title="删除">
                             <i class="fa-solid fa-trash"></i>
                         </button>
-                        <button class="modal-close" onclick="closeTransactionModal()" title="关闭"><i class="fa-solid fa-xmark"></i></button>
+                        <button class="modal-close" onclick="confirmCloseTransactionModal()" title="关闭"><i class="fa-solid fa-xmark"></i></button>
                     </div>
                 </div>
                 <div class="modal-body">
@@ -1084,7 +1084,7 @@
                         <span class="mw-viewtag" id="mwViewTag" style="display:none">（只读查看）</span>
                         <button class="secondary-btn" id="mwEditBtn" onclick="toggleMonthlyViewMode()" style="display:none"><i class="fa-solid fa-pen"></i> <span id="mwEditBtnLabel">编辑</span></button>
                     </div>
-                    <button class="modal-close" onclick="closeMonthlyModal()"><i class="fa-solid fa-xmark"></i></button>
+                    <button class="modal-close" onclick="confirmCloseMonthlyModal()"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="modal-body">
                     <div class="bal-entry-head">
@@ -1467,7 +1467,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.32').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.33').catch(() => {});
             });
         }
     </script>

@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.32';
+const APP_VERSION = '1.41.33';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -4618,6 +4618,34 @@ function closeTransactionModal() {
     document.getElementById('transactionModal').classList.add('hidden');
     state.editingTransactionId = null;
     state.selectedCategoryId = null;
+}
+
+// ---- 滑动返回 / 点 X：共用「有无未保存内容」判断（记一笔 / 月度账单）----
+// 两者同源：滑掉前、点 X 关前，只要真填了内容就 confirm「放弃未保存的填写？」，没内容直接走。
+function transactionHasUnsavedContent() {
+    const amt = (document.getElementById('amountInput') || {}).value || '';
+    const note = (document.getElementById('noteInput') || {}).value || '';
+    return (amt.trim() && amt.trim() !== '0') || note.trim();
+}
+function monthlyHasUnsavedContent() {
+    if (typeof monthlyDirty !== 'undefined' && !monthlyDirty) return false;
+    const modal = document.getElementById('monthlyModal');
+    if (!modal) return false;
+    const sel = 'input[data-bal], input[data-ret], input[data-flow-in], input[data-wallet-total]';
+    const inputs = modal.querySelectorAll(sel);
+    for (const inp of inputs) {
+        const v = (inp.value || '').trim();
+        if (v && v !== '0') return true;
+    }
+    return false;
+}
+function confirmCloseTransactionModal() {
+    if (transactionHasUnsavedContent() && !window.confirm('放弃未保存的填写？')) return;
+    closeTransactionModal();
+}
+function confirmCloseMonthlyModal() {
+    if (monthlyHasUnsavedContent() && !window.confirm('放弃未保存的填写？')) return;
+    closeMonthlyModal();
 }
 
 // v1.39.78：数字键盘按压反馈（JS 兜底）
@@ -16057,19 +16085,22 @@ function renderReturnMissing(info) {
     box.classList.remove('hidden');
 }
 
-// ---- 手机端：左边缘滑动返回（v1.41.32） ----
+// ---- 手机端：左边缘滑动返回（v1.41.33） ----
 // 微信式交互：从屏幕最左边按住往右滑，弹窗跟手平移，松手滑过阈值就关掉。
 // 关闭一律走该弹窗自己的 .modal-close 按钮逻辑（= 和现在点 X 完全一样），不另写一套。
-// v1.41.32：滑动过程中弹窗保持不透明（不再淡出透出下一层页面）；删除各弹窗「取消」按钮，只留 X。
-// 录入类弹窗（记一笔 / 月度账单）只有"真填了内容"才在滑掉前 confirm「放弃未保存的填写？」：
-//   - 记一笔：金额非 0/非空 或 备注非空 才算有内容（仅选了分类不算，避免系统默认带出分类时误弹）。
-//   - 月度账单：本会话真敲过字且任一格有非空值才算有内容。
+// v1.41.32：删除各弹窗「取消」按钮，只留 X。
+// v1.41.33：
+//   1) 翻书效果 —— 面板本身始终不透明，但拖动的"遮罩"随位移渐隐，面板滑走后露出下一层页面；
+//      关掉时面板继续滑出右侧 + 遮罩淡出（不再整块淡出透出，也不会盖死底层）。
+//   2) 记一笔 / 月度账单：滑掉前、点 X 关前，共用同一套「有无未保存内容」判断，有才 confirm
+//      「放弃未保存的填写？」，没内容直接走（仅选分类不算有内容；月度需本会话真敲过字且某格非空）。
 // 用 Pointer Events 实现：触屏和桌面鼠标都能触发（桌面用鼠标从最左边缘拖也能试），关闭逻辑不变。
 (function bindEdgeSwipeBack() {
     const EDGE = 18;   // 起手点离左边缘 ≤ 此值才算「边缘手势」
     const DIST = 56;   // 松手时横向位移 ≥ 此值才提交关闭
     const MIN = 8;     // 先移动这么多 px 才判定方向
     let ctx = null;
+    let baseRGB = '0,0,0', baseAlpha = 0.5;   // 遮罩底色，拖动时按位移淡出（翻书效果）
 
     function topModal() {
         const all = document.querySelectorAll('.modal-overlay:not(.hidden)');
@@ -16084,26 +16115,31 @@ function renderReturnMissing(info) {
         return function () { modal.classList.add('hidden'); };
     }
     function modalHasInput(modal) {
-        if (modal.id === 'transactionModal') {
-            // 「有内容」= 真填了金额或备注；只选了分类（可能是系统默认带出的）不算「记录数据」
-            const amt = (document.getElementById('amountInput') || {}).value || '';
-            const note = (document.getElementById('noteInput') || {}).value || '';
-            if ((amt.trim() && amt.trim() !== '0') || note.trim()) return true;
-        } else if (modal.id === 'monthlyModal') {
-            return monthlyModalHasInput(modal);
-        }
+        // 共用「有无未保存内容」判断（与点 X 走同一套），避免两套逻辑分叉
+        if (modal.id === 'transactionModal') return transactionHasUnsavedContent();
+        if (modal.id === 'monthlyModal') return monthlyHasUnsavedContent();
         return false;
     }
-    // 月度账单：本会话真敲过字、且当前任一格有非空值，才算「有内容」需提醒放弃
-    function monthlyModalHasInput(modal) {
-        if (typeof monthlyDirty !== 'undefined' && !monthlyDirty) return false;
-        const sel = 'input[data-bal], input[data-ret], input[data-flow-in], input[data-wallet-total]';
-        const inputs = modal.querySelectorAll(sel);
-        for (const inp of inputs) {
-            const v = (inp.value || '').trim();
-            if (v && v !== '0') return true;
-        }
-        return false;
+    function captureBaseDim(modal) {
+        const bg = getComputedStyle(modal).backgroundColor || '';
+        const m = /rgba?\(([^)]+)\)/.exec(bg);
+        if (m) {
+            const p = m[1].split(',').map(s => s.trim());
+            baseRGB = p[0] + ',' + p[1] + ',' + p[2];
+            baseAlpha = p.length > 3 ? parseFloat(p[3]) : 1;
+        } else { baseRGB = '0,0,0'; baseAlpha = 0.5; }
+    }
+    function setDim(modal, fade) {
+        // 只改遮罩（背景 + 模糊），面板本身始终不透明 —— 翻书效果：面板滑走后露出下一层页面
+        const a = (baseAlpha * fade).toFixed(3);
+        modal.style.background = 'rgba(' + baseRGB + ',' + a + ')';
+        const blur = (4 * fade).toFixed(2);
+        modal.style.backdropFilter = 'blur(' + blur + 'px)';
+        modal.style.webkitBackdropFilter = 'blur(' + blur + 'px)';
+    }
+    function cleanupDim(panel, modal) {
+        panel.style.transition = ''; panel.style.transform = '';
+        modal.style.transition = ''; modal.style.background = ''; modal.style.backdropFilter = ''; modal.style.webkitBackdropFilter = '';
     }
 
     function onDown(e) {
@@ -16112,6 +16148,7 @@ function renderReturnMissing(info) {
         if (e.clientX > EDGE) return;                             // 必须从最左边缘起手
         const modal = topModal();
         if (!modal) return;
+        captureBaseDim(modal);
         // 起手点落在可横向滚动的元素上（月度账单表格 / 图表）时不抢手势
         let n = e.target;
         while (n && n.nodeType === 1 && n !== modal) {
@@ -16138,6 +16175,8 @@ function renderReturnMissing(info) {
         const p = panelOf(ctx.modal);
         p.style.transition = 'none';
         p.style.transform = 'translateX(' + dx + 'px)';
+        // 遮罩随拖动渐隐：面板越往右，露出的下一层页面越多（翻书）
+        setDim(ctx.modal, Math.max(0, 1 - dx / 260));
     }
 
     function onUp(e) {
@@ -16145,13 +16184,28 @@ function renderReturnMissing(info) {
         const dx = ctx.dx;
         const modal = ctx.modal;
         const p = panelOf(modal);
-        p.style.transition = 'transform .2s ease';
-        p.style.transform = '';
         const commit = ctx.started && dx >= DIST;
         ctx = null;
-        if (!commit) return;
-        if (modalHasInput(modal) && !window.confirm('放弃未保存的填写？')) return;
-        closeOf(modal)();
+        if (!commit) { animateBack(p, modal); return; }
+        if (modalHasInput(modal) && !window.confirm('放弃未保存的填写？')) { animateBack(p, modal); return; }
+        // 提交关闭：面板继续滑出右侧 + 遮罩淡出，露出下一层（翻书收尾）
+        p.style.transition = 'transform .22s ease';
+        p.style.transform = 'translateX(120%)';
+        modal.style.transition = 'background .22s ease, backdrop-filter .22s ease, -webkit-backdrop-filter .22s ease';
+        setDim(modal, 0);
+        setTimeout(() => {
+            if (modal.id === 'transactionModal') closeTransactionModal();
+            else if (modal.id === 'monthlyModal') closeMonthlyModal();
+            else closeOf(modal)();
+            cleanupDim(p, modal);
+        }, 240);
+    }
+    function animateBack(panel, modal) {
+        panel.style.transition = 'transform .22s ease';
+        panel.style.transform = '';
+        modal.style.transition = 'background .22s ease, backdrop-filter .22s ease, -webkit-backdrop-filter .22s ease';
+        setDim(modal, 1);
+        setTimeout(() => cleanupDim(panel, modal), 240);
     }
 
     document.addEventListener('pointerdown', onDown, { passive: true });
