@@ -1652,6 +1652,42 @@ async function run() {
         ok('同步载荷里也有这两份（本机清单与云端清单一致）',
             ev(`(function(){var d=buildSyncPayload().data;return !!d.reviews && Array.isArray(d.lendings);})()`));
 
+        // ---------- 37) v1.41.45：取「今天」一律按设备本地日期（凌晨 0–8 点不再写成昨天）----------
+        stage = '37';
+        const app37 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        const _probeUTC = new Date(2026, 10, 14, 0, 30, 0).toISOString().slice(0, 10);
+        ok('探针时刻本地已是 11-14 00:30，但世界时仍是 11-13（用例真覆盖跨天窗口）',
+            _probeUTC === '2026-11-13', _probeUTC);
+        const _at = (y, mo, d) => JSON.parse(ev(`(function(){var real=Date.now;try{
+            Date.now=function(){return new Date(${y},${mo - 1},${d},0,30,0).getTime();};
+            return JSON.stringify({today:todayStr(),month:getCurrentMonthKey(),imp:normalizeImportDate('')});
+            }finally{Date.now=real;}})()`));
+        const _p1 = _at(2026, 11, 14);
+        ok('凌晨 00:30：记一笔默认日期 = 本地 11-14（旧写法会给 11-13）', _p1.today === '2026-11-14', _p1);
+        ok('凌晨 00:30：当前月份仍是 2026-11（往返抵消，行为不变）', _p1.month === '2026-11', _p1);
+        ok('导入日期留空时的兜底也跟着用本地今天', _p1.imp === '2026-11-14', _p1);
+        const _p2 = _at(2026, 12, 1);
+        ok('跨月 12-01 00:30：日期与月份都落在 12 月', _p2.today === '2026-12-01' && _p2.month === '2026-12', _p2);
+        const _p3 = _at(2027, 1, 1);
+        ok('跨年 2027-01-01 00:30：不退回 2026-12-31 / 2026-12',
+            _p3.today === '2027-01-01' && _p3.month === '2027-01', _p3);
+        ok('时间栏仍读设备本地时钟（getHours / getMinutes 没被改掉）',
+            app37.indexOf('d.getHours()') >= 0 && app37.indexOf('d.getMinutes()') >= 0);
+        ok('全库不再用「世界时字符串切前 10 位」当今天',
+            app37.indexOf('new Date().toISOString().slice(0, 10)') < 0 &&
+            app37.indexOf('formatDateFull(new Date().toISOString())') < 0);
+        ok('备份文件名与 Excel 文件名都改走设备本地日期 _ymd(Date.now())',
+            /const stamp = _ymd\(Date\.now\(\)\)/.test(app37) &&
+            /记账本-\$\{_ymd\(Date\.now\(\)\)\}/.test(app37));
+        ok('Excel 日期序列号仍按 UTC 还原（故意保留，没被这次改动带走）',
+            ev(`normalizeImportDate(45000)`) === (() => {
+                const dd = new Date(Math.round((45000 - 25569) * 86400000));
+                const p = n => String(n).padStart(2, '0');
+                return `${dd.getUTCFullYear()}-${p(dd.getUTCMonth() + 1)}-${p(dd.getUTCDate())}`;
+            })());
+        ok('getMonthKey 解析已存日期没被改坏（2026-11-14 → 2026-11）',
+            ev(`getMonthKey('2026-11-14')`) === '2026-11');
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

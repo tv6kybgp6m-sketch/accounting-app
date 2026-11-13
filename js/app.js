@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.44';
+const APP_VERSION = '1.41.45';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -2050,7 +2050,7 @@ const ICLOUD_SYNC_FILENAME = 'bookkeeping-sync.json';
 async function exportSyncJSON(filename, toastText) {
     const syncData = buildSyncPayload();
     syncData.deviceName = isElectron() ? 'Mac-backup' : 'browser-backup';
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = _ymd(Date.now());   // v1.41.45：备份文件名按设备本地日期，凌晨别写成昨天
     const name = filename || `记账本-备份-${stamp}.json`;
     let text = JSON.stringify(syncData, null, 2);
     let encrypted = false;
@@ -3978,8 +3978,10 @@ function formatDateFull(dateStr) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// v1.41.45：取「今天」一律按设备本地年月日。旧写法用 toISOString()（世界时），
+// 在 UTC+8 的 00:00–07:59 会返回前一天；复用项目里已有的本地日期函数 _ymd。
 function todayStr() {
-    return formatDateFull(new Date().toISOString());
+    return _ymd(Date.now());
 }
 
 function nowTimeStr() {
@@ -3998,7 +4000,7 @@ function getMonthLabel(monthKey) {
 }
 
 function getCurrentMonthKey() {
-    return getMonthKey(new Date().toISOString());
+    return _ymd(Date.now()).slice(0, 7);   // v1.41.45：每月 1 号凌晨别退回上个月
 }
 
 function getDaysInMonth(year, month) {
@@ -7178,7 +7180,7 @@ async function exportData() {
 
         // Use XLSX.write to generate binary, then hand it to the save path
         const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-        const baseName = `记账本-${formatDateFull(new Date().toISOString())}`;
+        const baseName = `记账本-${_ymd(Date.now())}`;   // v1.41.45：Excel 文件名按设备本地日期
 
         // 导出统一为普通 .xlsx（Excel / WPS / Numbers 直接打开，不再包成 .xlsx.enc）。
         // 若本机开启了加密，导出前必须再确认一次加密口令（与账本加密同一把密码），
