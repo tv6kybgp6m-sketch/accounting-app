@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.33';
+const APP_VERSION = '1.41.34';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -6621,7 +6621,7 @@ function saveCategory() {
 }
 
 // 拖拽把分类 fromId 放到 toId 的位置（只在同一类型收入/支出内部重排）。
-// 与「记月度账单」「账户管理」用同一套拖拽观感。
+// 与「月度资产」「账户管理」用同一套拖拽观感。
 function reorderCategory(fromId, toId) {
     if (!fromId || !toId || fromId === toId) return;
     const fromCat = state.categories.find(c => c.id === fromId);
@@ -9484,7 +9484,7 @@ function markHistoryModalReturnsTone(on) {
 const YEAR_MIN = 2015;
 
 // 「上个月」的年月：今天 10 月 → 2026-09；今天 1 月 → 去年 12 月。
-// 资产负债 / 投资收益 / 记月度账单都按这个口径取默认月份——当月还没记，要到下个月才记。
+// 资产负债 / 投资收益 / 月度资产都按这个口径取默认月份——当月还没记，要到下个月才记。
 function prevMonthYM() {
     const now = new Date();
     let y = now.getFullYear(), m = now.getMonth(); // getMonth() 0 基：今天 10 月 → m=9 → 上月即 9（9 月）
@@ -9978,7 +9978,7 @@ function nextMonthOf(month) {
     return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
 }
 
-// ==================== 记月度账单：余额 + 收益 + 净入金，按钱包分节 ====================
+// ==================== 月度资产：余额 + 收益 + 净入金，按钱包分节 ====================
 // 一个支付宝里同时有活期、基金、定期、花呗；以前要在「记余额」和「记收益」两个弹窗里
 // 来回填，同一个账户填两遍。这里合成一屏：一行一个账户，横向把它的数一次填完。
 // 「钱包」只是录入和显示时的分组，不是记账实体 —— 余额、收益仍然一条一个账户，
@@ -10698,7 +10698,7 @@ function removeCurrency(code) {
     if (canUndo) showUndoToast('币种「' + def.label + '」');
 }
 
-// 「记月度账单」默认打开的月份 = 当前页面正在看的那个月。
+// 「月度资产」默认打开的月份 = 当前页面正在看的那个月。
 // 以前统一取「最后一个有余额的月份」，导致用户在资产负债页明明看的是 8 月、
 // 点开弹窗却是 9 月，填的收益被存到了 9 月 —— 回到投资收益页点 8 月怎么点都找不到。
 function balanceViewMonth() {
@@ -12393,7 +12393,7 @@ function renderAccountManageList() {
                     <button class="bh-delete${n ? ' bh-blocked' : ''}" onclick="deleteAccountFromList('${a.id}')" title="${n ? '还有 ' + n + ' 条记录，得先清掉才能删' : '删除'}"><i class="fa-solid ${n ? 'fa-lock' : 'fa-trash'}"></i></button>
                 </div>`; }).join('') || '<div class="breakdown-empty">暂无账户，点上面「＋ 新增账户」添加</div>'}</div>`;
 
-    // 账户行拖拽排序：和「记月度账单」里的行拖拽同一套观感 —— 整行卡片跟手 + 落点高亮线。
+    // 账户行拖拽排序：和「月度资产」里的行拖拽同一套观感 —— 整行卡片跟手 + 落点高亮线。
     // 用账户名当拖动手柄；拖完调 reorderMonthlyAccount（它会重排 order 并重画两处列表）。
     box.querySelectorAll('.account-row').forEach(row => {
         const handle = row.querySelector('.ar-name');
@@ -13885,7 +13885,7 @@ function portfolioMonthStats(month, ids, draft, memberOverride) {
                 flowOf[id] = Number(d.flow) || 0; flowKnownOf[id] = true;
             }
         }
-        // 「记月度账单」里余额和收益是同一屏填的，草稿也得能覆盖期末市值，
+        // 「月度资产」里余额和收益是同一屏填的，草稿也得能覆盖期末市值，
         // 否则刚改完余额、角标还按老余额算率，看着就是错的。
         if ('balance' in d && d.balance !== '' && d.balance !== null && d.balance !== undefined) {
             curMap[id] = Number(d.balance) || 0;
@@ -13976,7 +13976,7 @@ function irrReasonText(reason) {
 
 // IRR 缺失时补一句「怎么才能算出来」（只读提示，不替用户写数）
 function irrHintText(reason) {
-    if (reason === 'no-flow') return ' 资金加权要靠「净入金」算：在记月度账单时把净入金填上就能出数。';
+    if (reason === 'no-flow') return ' 资金加权要靠「净入金」算：在月度资产时把净入金填上就能出数。';
     if (reason === 'no-opening') return ' 资金加权还需要上个月的余额。';
     return '';
 }
@@ -15902,7 +15902,7 @@ function renderLendingCard() {
     const sub = document.getElementById('lendingSub');
     if (!list.length) {
         if (sub) sub.textContent = '';
-        box.innerHTML = '<div class="lend-empty">还没有借出款。别人欠你的钱记在这里，填一次就每个月自动并进总资产，不用在「记月度账单」里重复填。</div>';
+        box.innerHTML = '<div class="lend-empty">还没有借出款。别人欠你的钱记在这里，填一次就每个月自动并进总资产，不用在「月度资产」里重复填。</div>';
         return;
     }
     const open = list.filter(l => !l.repaidAt);

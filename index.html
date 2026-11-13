@@ -348,7 +348,7 @@
                                 <i class="fa-solid fa-building-columns"></i> 账户
                             </button>
                             <button class="primary-btn" onclick="openBalanceModal()">
-                                <i class="fa-solid fa-plus"></i> 记月度账单
+                                月度资产
                             </button>
                         </div>
                     </div>
@@ -502,7 +502,7 @@
                                 <i class="fa-solid fa-filter"></i> 口径
                             </button>
                             <button class="primary-btn" onclick="openReturnModal()">
-                                <i class="fa-solid fa-plus"></i> 记月度账单
+                                月度资产
                             </button>
                         </div>
                     </div>
@@ -1077,7 +1077,7 @@
             <div class="modal balance-modal">
                 <div class="modal-header">
                     <div class="drill-title-wrap">
-                        <h2>记月度账单</h2>
+                        <h2>月度资产</h2>
                     </div>
                     <div class="bal-entry-mode">
                         <span class="mw-chkcount" id="mwChkCount" hidden>已核对 0 / 0</span>
@@ -1112,7 +1112,7 @@
                         <!-- v1.39.74：加行 / 加列从表格最底下挪到「本人」这一行，抬头就能点 -->
                         <!-- v1.39.76：去掉文字里的「＋」——按钮本身就有边框，再加个加号显得啰嗦 -->
                         <div class="form-group mw-addbtns">
-                            <button type="button" class="btn-mini primary" id="mwAddAccountBtn"
+                            <button type="button" class="btn-mini" id="mwAddAccountBtn"
                                     title="加一行：放钱的地方（支付宝 / 微信 / 工商银行 / 摩根…）">增加账户</button>
                             <button type="button" class="btn-mini" id="mwAddColBtn"
                                     title="新增资产列或负债列">增加列</button>
@@ -1263,9 +1263,11 @@
                     <button class="modal-close" onclick="closeAccountEdit()"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="modal-body">
-                    <label class="settings-label">名称</label>
-                    <input type="text" class="text-input" id="acctEditName" placeholder="账户名称">
                     <div class="acct-edit-pair">
+                        <div>
+                            <label class="settings-label">名称</label>
+                            <input type="text" class="text-input" id="acctEditName" placeholder="账户名称">
+                        </div>
                         <div>
                             <label class="settings-label">分类</label>
                             <select class="text-input" id="acctEditGroup"></select>
@@ -1281,7 +1283,7 @@
                     <!-- v1.39.90：多币种账户 -->
                     <label class="switch-row">
                         <input type="checkbox" id="acctEditMulti">
-                        <span>多币种账户<span class="sr-hint">这个账户里有美元 / 港币时打开；记月度账单选「其他币种」时，它才会按币种分成几行分别记账</span></span>
+                        <span>多币种账户<span class="sr-hint">这个账户里有美元 / 港币时打开；月度资产选「其他币种」时，它才会按币种分成几行分别记账</span></span>
                     </label>
                     <label class="settings-label">图标</label>
                     <div class="icon-picker" id="acctEditIcons"></div>
@@ -1467,7 +1469,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.33').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.34').catch(() => {});
             });
         }
     </script>

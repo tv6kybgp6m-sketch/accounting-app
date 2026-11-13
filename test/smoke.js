@@ -930,8 +930,8 @@ async function run() {
         ev(`renderLendingCard();`);
         ok('一笔借出款都没有时，资产负债页的「借出款」卡片也看得见',
             ev(`!document.getElementById('lendingCard').classList.contains('hidden')`));
-        ok('空状态有说明文字，并讲清不用在「记月度账单」里重复填',
-            ev(`document.getElementById('lendingList').innerHTML`).indexOf('记月度账单') >= 0);
+        ok('空状态有说明文字，并讲清不用在「月度资产」里重复填',
+            ev(`document.getElementById('lendingList').innerHTML`).indexOf('月度资产') >= 0);
         ok('空状态下「记一笔借出」按钮就在，点了能打开登记弹窗',
             ev(`!!document.querySelector('#lendingCard button[onclick^="openLendingModal"]')`) &&
             ev(`(function(){ openLendingModal();
@@ -1578,7 +1578,7 @@ async function run() {
         ok('收益率角标只给「算收益率」的账户：普通账户填余额不再冒「本金未知」',
             app34.indexOf('const investIds = new Set(investmentAccountIds());') >= 0 &&
             app34.indexOf('if (!investIds.has(id)) return;') >= 0);
-        ok('记月度账单标题旁的「成员 · 年月」副标题已删干净',
+        ok('月度资产标题旁的「成员 · 年月」副标题已删干净',
             html34.indexOf('monthlyModalSub') < 0 &&
             app34.indexOf('monthlyModalSub') < 0);
         ok('录入自检挪到弹窗底部（取消/保存上方）：紧凑一行、明细默认收起、可展开',
