@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.30';
+const APP_VERSION = '1.41.31';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -16056,6 +16056,96 @@ function renderReturnMissing(info) {
     box.innerHTML = html;
     box.classList.remove('hidden');
 }
+
+// ---- 手机端：左边缘滑动返回（v1.41.31） ----
+// 微信式交互：从屏幕最左边按住往右滑，弹窗跟手平移，松手滑过阈值就关掉。
+// 关闭一律走该弹窗自己的 .modal-close 按钮逻辑（= 和现在点 X 完全一样），不另写一套。
+// 录入类弹窗（记一笔）若已填内容，滑掉前先 confirm 一句「放弃未保存的填写？」，防误滑丢数据。
+// 用 Pointer Events 实现：触屏和桌面鼠标都能触发（桌面用鼠标从最左边缘拖也能试），关闭逻辑不变。
+(function bindEdgeSwipeBack() {
+    const EDGE = 18;   // 起手点离左边缘 ≤ 此值才算「边缘手势」
+    const DIST = 56;   // 松手时横向位移 ≥ 此值才提交关闭
+    const MIN = 8;     // 先移动这么多 px 才判定方向
+    let ctx = null;
+
+    function topModal() {
+        const all = document.querySelectorAll('.modal-overlay:not(.hidden)');
+        return all.length ? all[all.length - 1] : null;
+    }
+    function panelOf(modal) {
+        return modal.querySelector('.modal') || modal.firstElementChild || modal;
+    }
+    function closeOf(modal) {
+        const btn = modal.querySelector('.modal-close');
+        if (btn && typeof btn.onclick === 'function') return btn.onclick;
+        return function () { modal.classList.add('hidden'); };
+    }
+    function modalHasInput(modal) {
+        if (modal.id === 'transactionModal') {
+            const amt = (document.getElementById('amountInput') || {}).value || '';
+            const note = (document.getElementById('noteInput') || {}).value || '';
+            if ((amt.trim() && amt.trim() !== '0') || note.trim()) return true;
+            if (typeof state !== 'undefined' && state.selectedCategoryId) return true;
+        }
+        return false;
+    }
+
+    function onDown(e) {
+        if (!e.isPrimary) return;
+        if (e.pointerType === 'mouse' && e.button !== 0) return;   // 仅鼠标左键
+        if (e.clientX > EDGE) return;                             // 必须从最左边缘起手
+        const modal = topModal();
+        if (!modal) return;
+        // 起手点落在可横向滚动的元素上（月度账单表格 / 图表）时不抢手势
+        let n = e.target;
+        while (n && n.nodeType === 1 && n !== modal) {
+            const cs = getComputedStyle(n);
+            if ((cs.overflowX === 'auto' || cs.overflowX === 'scroll') && n.scrollWidth > n.clientWidth + 1) return;
+            n = n.parentElement;
+        }
+        ctx = { x: e.clientX, y: e.clientY, modal: modal, started: false, dx: 0, id: e.pointerId };
+        try { e.target.setPointerCapture(e.pointerId); } catch (err) {}
+    }
+
+    function onMove(e) {
+        if (!ctx || e.pointerId !== ctx.id) return;
+        const dx = e.clientX - ctx.x;
+        const dy = e.clientY - ctx.y;
+        if (!ctx.started) {
+            if (Math.abs(dx) < MIN && Math.abs(dy) < MIN) return;
+            if (Math.abs(dy) > Math.abs(dx)) { ctx = null; return; }   // 纵向 -> 当普通滚动，放弃手势
+            ctx.started = true;
+        }
+        if (dx <= 0) { ctx.dx = 0; return; }          // 只允许往右滑
+        ctx.dx = dx;
+        e.preventDefault();                           // 跟手期间锁掉纵向滚动 / 文本选择
+        const p = panelOf(ctx.modal);
+        p.style.transition = 'none';
+        p.style.transform = 'translateX(' + dx + 'px)';
+        ctx.modal.style.opacity = String(Math.max(0.25, 1 - dx / 320));
+    }
+
+    function onUp(e) {
+        if (!ctx || e.pointerId !== ctx.id) return;
+        const dx = ctx.dx;
+        const modal = ctx.modal;
+        const p = panelOf(modal);
+        p.style.transition = 'transform .2s ease';
+        p.style.transform = '';
+        modal.style.transition = 'opacity .2s ease';
+        modal.style.opacity = '';
+        const commit = ctx.started && dx >= DIST;
+        ctx = null;
+        if (!commit) return;
+        if (modalHasInput(modal) && !window.confirm('放弃未保存的填写？')) return;
+        closeOf(modal)();
+    }
+
+    document.addEventListener('pointerdown', onDown, { passive: true });
+    document.addEventListener('pointermove', onMove, { passive: false });
+    document.addEventListener('pointerup', onUp, { passive: true });
+    document.addEventListener('pointercancel', onUp, { passive: true });
+})();
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
