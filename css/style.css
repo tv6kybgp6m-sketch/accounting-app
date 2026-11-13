@@ -5060,8 +5060,6 @@ table.bill-stats {
     border-bottom: 1px solid var(--divider);
 }
 .mw-tr[data-mw-account]:hover .mw-rowname { background: var(--bg-card-hover); }
-/* 账户名后面那个小圆点，加一圈淡描边，不再是孤零零的一个点 */
-.mw-acct-dot { box-shadow: 0 0 0 2px var(--bg-content); border-radius: 50%; }
 /* 小计 / 对账那一列单独一层底 + 一条竖线，跟左边的录入区分开 */
 .mw-c.mw-sumcol {
     background: rgba(10, 122, 255, .04);
@@ -5274,7 +5272,9 @@ table.bill-stats {
 
 /* ---- 月度账单：视觉美化（v1.39.3） ---- */
 /* 账户行首 / 列头的小色点：用账户和资产类别各自的颜色，整张表立刻有了色彩层次 */
-.mw-acct-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(0, 0, 0, .04); }
+/* v1.41.34：月度资产每行账户名前的图标（取代原来的小圆点）—— 用账户自己的色，
+   既保住颜色识别又多了形状识别，数据零新增。列头的小色点 .mw-col-dot 保留。 */
+.mw-acct-icon { flex: none; width: 15px; text-align: center; font-size: 13px; line-height: 1; }
 .mw-col-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
 
 /* 网格整体做成卡片：圆角 + 细边 + 轻阴影，不再是裸的白底方块。
@@ -5467,6 +5467,12 @@ table.bill-stats {
     /* 账户名列只剩 36px，改名输入框同步收窄，不然改名字时弹的框会顶到邻居 */
     .mw-col-input { width: 34px; font-size: 11px !important; padding: 1px 2px !important; }
 }
+
+/* v1.41.34：填月度资产时聚焦某格 → 整行 + 整列高亮（防填错行/列）。
+   .mw-tr 是 display:contents，高亮只能落到每个网格项（.mw-c / .mw-h / .mw-rowname）上。 */
+.mw-grid .mw-row-hl { background: rgba(10, 122, 255, .07); }
+.mw-grid .mw-col-hl { background: rgba(255, 176, 32, .14); }
+.mw-grid .mw-row-hl.mw-col-hl { background: rgba(10, 122, 255, .17); }
 
 /* ===== Excel 查看（不导入）预览弹窗 ===== */
 .excel-preview-modal { max-width: 720px; width: 92%; }

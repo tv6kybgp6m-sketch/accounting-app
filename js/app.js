@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.34';
+const APP_VERSION = '1.41.35';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -10935,7 +10935,7 @@ function renderMonthlyEntry() {
         const badge = `<span class="mw-cur-badge" title="这一行记的是${_esc(currencyLabel(cur))}">${_esc(currencySymbol(cur) || currencyLabel(cur))}</span>`;
         return `        <div class="mw-tr" data-mw-account="${a.id}" data-mw-cur="${cur}" style="--rowc:${_esc(a.color)}">
             <div class="mw-rowname" draggable="true" title="按住拖动可调整这一行（账户）的顺序">
-                <span class="mw-acct-dot" style="background:${_esc(a.color)}"></span>
+                <span class="mw-acct-icon" style="color:${_esc(a.color)}"><i class="fa-solid ${_esc(a.icon || 'fa-wallet')}"></i></span>
                 <span class="mw-name" data-rename="${a.id}"
                     title="点一下这里改名">${_esc(a.name)}</span>
                 ${badge}
@@ -11439,6 +11439,32 @@ function mwAddAccount(raw) {
     openAccountEdit(null, String(raw || '').trim());
 }
 
+// v1.41.34：填月度资产时，聚焦某一格 → 高亮整行 + 整列（像 Excel 选中单元格），
+// 防止把数填错行 / 列。网格用 CSS grid + display:contents 的行，所有行的子元素顺序一致，
+// 所以"列"直接用子元素下标对齐（表头 .mw-h 与每行 .mw-c 同序）。
+function highlightMonthlyCrosshair(input) {
+    clearMonthlyCrosshair();
+    const cell = input.closest('.mw-c') || input.closest('.mw-rowname');
+    const row = input.closest('.mw-tr');
+    const grid = document.querySelector('.mw-grid');
+    if (!cell || !row || !grid) return;
+    const kids = Array.from(row.children);
+    const ci = kids.indexOf(cell);
+    if (ci < 0) return;
+    kids.forEach(k => k.classList.add('mw-row-hl'));
+    grid.querySelectorAll('.mw-h').forEach((h, i) => { if (i === ci) h.classList.add('mw-col-hl'); });
+    grid.querySelectorAll('.mw-tr').forEach(tr => {
+        const ch = tr.children[ci];
+        if (ch) ch.classList.add('mw-col-hl');
+    });
+}
+function clearMonthlyCrosshair() {
+    document.querySelectorAll('.mw-row-hl, .mw-col-hl').forEach(el => {
+        el.classList.remove('mw-row-hl');
+        el.classList.remove('mw-col-hl');
+    });
+}
+
 function bindMonthlyEntry() {
     const list = document.getElementById('monthlyEntryList');
     if (!list) return;
@@ -11446,6 +11472,17 @@ function bindMonthlyEntry() {
     // 锁住的、只读的全跳过，不然按几十次 Tab 才到下一格能填的。
     if (!list.dataset.tabBound) {
         list.dataset.tabBound = '1';
+        // v1.41.34：聚焦格子 → 高亮整行 + 整列；失焦清除。用 focusin/out 冒泡，
+        // 监听器只挂一次（list 元素稳定，内部 .mw-grid 每次重画也不影响）。
+        if (!list.dataset.crosshairBound) {
+            list.dataset.crosshairBound = '1';
+            list.addEventListener('focusin', e => {
+                if (e.target && e.target.tagName === 'INPUT') highlightMonthlyCrosshair(e.target);
+            });
+            list.addEventListener('focusout', e => {
+                if (e.target && e.target.tagName === 'INPUT') clearMonthlyCrosshair();
+            });
+        }
         list.addEventListener('keydown', e => {
             if (e.key !== 'Tab') return;
             const cells = Array.prototype.filter.call(
