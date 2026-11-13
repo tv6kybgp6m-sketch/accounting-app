@@ -5051,6 +5051,9 @@ table.bill-stats {
     /* v1.41.41：所有录入格顶部统一留的「收益率角标带」高度。收益格放角标、其它格空着，
        于是每一行的输入框都从同一条水平线开始，不会一高一低。 */
     --mw-badge-h: 12px;
+    /* v1.41.42：留带以下「内容区」的统一高度。账户名列和录入格都用这个高度，
+       两者各自把内容垂直居中 → 网格整行居中后必然齐平。 */
+    --mw-cell-h: 25px;
     grid-template-columns: var(--mw-name-w) repeat(var(--mw-cols, 7), minmax(72px, 1fr)) var(--mw-sum-w, 156px);
     gap: 1px 4px; align-items: center;
     width: 100%;
@@ -5231,12 +5234,19 @@ table.bill-stats {
    用 padding-top 而不是 ::before 撑带：这样多币种账户（收益格压根没有角标元素）、
    空角标（普通账户）也都照样留带，不会出现某一格少一条带又跑上去。
    ⚠️ .mw-grid 是 align-items:center，格子高度＝自身内容高度，所以只有每格结构一致才能真正齐平。
-   小计列 .mw-sumcol 是「小计数字＋对账框＋差额」三件套，结构本就不同，不参与这条带。 */
+   小计列 .mw-sumcol 是「小计数字＋对账框＋差额」三件套，结构本就不同，不参与这条带。
+   v1.41.42：账户名列也共用同一条留带 + 同一个 min-height（= 留带 + --mw-cell-h 内容区）。
+   两个格子总高相同、内容各在内容区垂直居中，整行被 align-items:center 居中后必然严格齐平
+   —— 修掉「账户名比右边填数据的位置高一点」。 */
+.mw-grid .mw-tr[data-mw-account] .mw-rowname,
+.mw-grid .mw-tr[data-mw-account] .mw-c:not(.mw-sumcol) {
+    min-height: calc(var(--mw-badge-h) + var(--mw-cell-h));
+    padding-top: var(--mw-badge-h);
+}
 .mw-grid .mw-tr[data-mw-account] .mw-c:not(.mw-sumcol) {
     flex-direction: column;
     justify-content: center;
     align-items: stretch;
-    padding-top: var(--mw-badge-h);
 }
 /* 收益角标填进这条留白带里：只占顶部那条带，碰不到下面的输入框。
    空角标直接隐藏即可 —— 带是 padding 撑的，不会因为角标消失而塌掉。 */
@@ -5344,7 +5354,9 @@ table.bill-stats {
 /* v1.39.35：月度账单「账户 × 渠道」开关。锁定的格不能填，灰显 + 斜纹；
    右上角小锁按钮点开 / 锁定。所有渠道都保留，哪个账户真在那个渠道有钱时再打开。 */
 .mw-lockbtn {
-    position: absolute; top: 1px; right: 2px; z-index: 3;
+    /* v1.41.42：格子顶部现在留了一条「角标带」，锁必须跟着下移到输入框那一行里，
+       否则会飘在格子上方、跟上一行挨着，容易按错。 */
+    position: absolute; top: calc(var(--mw-badge-h, 12px) + 1px); right: 2px; z-index: 3;
     display: flex; align-items: center; justify-content: center;
     width: 16px; height: 16px; padding: 0; margin: 0; border: none; border-radius: var(--radius-sm);
     background: transparent; cursor: pointer; font-size: 10px; line-height: 16px;
@@ -5481,6 +5493,8 @@ table.bill-stats {
         width: auto; min-width: max-content;
         /* v1.41.41：窄屏把「角标留白带」压到 10px，别把好不容易压下来的行距又撑回去 */
         --mw-badge-h: 10px;
+        /* v1.41.42：窄屏输入框本身也矮，内容区跟着收，账户名列才会和它齐平又不撑高行距 */
+        --mw-cell-h: 17px;
         /* 三段的宽度都是桌面端的 50%：账户名列 132→66、每一格 133→66、小计列 156→78。
            中间那列必须是固定 66px 而不是 minmax(66px,1fr)：容器 min-width:max-content，
            1fr 会被金额输入框的固有宽度顶回 133px（这个坑踩过一次）。 */
