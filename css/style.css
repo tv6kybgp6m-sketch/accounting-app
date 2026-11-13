@@ -3386,7 +3386,7 @@ body.cat-dragging {
     .be-input { width: 116px; }
     .bal-group-tag { display: none; }
     #view-balance .breakdown-amount { font-size: 12px; }
-    /* v1.41.28：手机上月度资产等弹窗底部「取消 / 保存」常被居中 + 底部安全区吃掉。
+    /* v1.41.28：手机上月度盘点等弹窗底部「取消 / 保存」常被居中 + 底部安全区吃掉。
        改成竖排三段：头脚固定、中间滚动，整窗高度受视口约束，按钮永远看得见。
        先给 100vh 兜底（无 dvh/env 支持时也能用），再用 dvh 版覆盖（精确避开安全区）。 */
     .balance-modal {
@@ -4181,7 +4181,7 @@ table.bill-stats {
 }
 .acct-move:hover:not(:disabled) { background: var(--accent-light); color: var(--accent-text); }
 .acct-move:disabled { opacity: .3; cursor: default; }
-/* 账户行拖拽排序（与「月度资产」同一套观感）：名字当手柄，拖时整行变淡 + 落点高亮线 */
+/* 账户行拖拽排序（与「月度盘点」同一套观感）：名字当手柄，拖时整行变淡 + 落点高亮线 */
 .account-row .ar-name { cursor: grab; }
 .account-row .ar-name:active { cursor: grabbing; }
 .account-row.dragging { opacity: .4; }
@@ -5009,10 +5009,10 @@ table.bill-stats {
     .sr-sub, .scope-head span:last-child { display: none; }
 }
 
-/* ---- 月度资产：行=钱包、列=账户的一张网格表 ----
+/* ---- 月度盘点：行=钱包、列=账户的一张网格表 ----
    用 CSS grid 而不是 <table>：表格布局会把行高交给"最高的那个格子"，
    收益/净入金那种多出来的格子一叠加，整行就被撑到 180 多像素，怎么调都不对。 */
-/* 月度资产的弹窗要装下一整张横表：默认 460px 的弹窗宽度根本放不下，
+/* 月度盘点的弹窗要装下一整张横表：默认 460px 的弹窗宽度根本放不下，
    一放不下就变成左右拉滚动条，录一行要来回拖，所以这个弹窗单独加宽到 1100px。
    ⚠️ 弹窗大小是用户明确要保住的（v1.39.24 回退）：只压缩行距，不改弹窗和列宽。
    列宽变窄交给 JS 的 fitMonthlyColWidths()：平时是 CSS 给的固定/等分宽，
@@ -5272,7 +5272,7 @@ table.bill-stats {
 
 /* ---- 月度账单：视觉美化（v1.39.3） ---- */
 /* 账户行首 / 列头的小色点：用账户和资产类别各自的颜色，整张表立刻有了色彩层次 */
-/* v1.41.34：月度资产每行账户名前的图标（取代原来的小圆点）—— 用账户自己的色，
+/* v1.41.34：月度盘点每行账户名前的图标（取代原来的小圆点）—— 用账户自己的色，
    既保住颜色识别又多了形状识别，数据零新增。列头的小色点 .mw-col-dot 保留。 */
 .mw-acct-icon { flex: none; width: 15px; text-align: center; font-size: 13px; line-height: 1; }
 .mw-col-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
@@ -5468,11 +5468,17 @@ table.bill-stats {
     .mw-col-input { width: 34px; font-size: 11px !important; padding: 1px 2px !important; }
 }
 
-/* v1.41.34：填月度资产时聚焦某格 → 整行 + 整列高亮（防填错行/列）。
+/* v1.41.35 修正：行 / 列高亮必须压过 .mw-tr:hover 的底色（hover 是 0,3,0，会盖掉 0,2,0 的行高亮，
+   导致"只有列亮、行不亮"）。这里把高亮选择器提为 0,3,0 并放在 hover 规则之后，确保聚焦行一定可见。 */
+/* v1.41.34：填月度盘点时聚焦某格 → 整行 + 整列高亮（防填错行/列）。
    .mw-tr 是 display:contents，高亮只能落到每个网格项（.mw-c / .mw-h / .mw-rowname）上。 */
-.mw-grid .mw-row-hl { background: rgba(10, 122, 255, .07); }
-.mw-grid .mw-col-hl { background: rgba(255, 176, 32, .14); }
-.mw-grid .mw-row-hl.mw-col-hl { background: rgba(10, 122, 255, .17); }
+.mw-grid .mw-c.mw-row-hl,
+.mw-grid .mw-rowname.mw-row-hl { background: rgba(10, 122, 255, .08); }
+.mw-grid .mw-c.mw-col-hl,
+.mw-grid .mw-rowname.mw-col-hl,
+.mw-grid .mw-h.mw-col-hl { background: rgba(255, 176, 32, .15); }
+.mw-grid .mw-c.mw-row-hl.mw-col-hl,
+.mw-grid .mw-rowname.mw-row-hl.mw-col-hl { background: rgba(10, 122, 255, .18); }
 
 /* ===== Excel 查看（不导入）预览弹窗 ===== */
 .excel-preview-modal { max-width: 720px; width: 92%; }
@@ -5631,7 +5637,7 @@ body.app-locked .fab-add { display: none !important; }
 
 /* ===== v1.41.21：手机端同一行的筛选 / 操作按钮高度拉齐 =====
    之前「月报·年报·全部」「全部·支出·收入」是 4~6px 内边距的小胶囊，
-   旁边的日期 / 账户 / 口径 / 月度资产却用 7~8px 内边距，换行后高矮差一截。
+   旁边的日期 / 账户 / 口径 / 月度盘点却用 7~8px 内边距，换行后高矮差一截。
    统一外框 32px：胶囊内部按钮 26px + 容器 padding 3px×2，旁边独立按钮直接 32px。
    ⚠️ 只 scoped 手机端且带 .view-header / .filter-bar 前缀，桌面和弹窗里的按钮一个都不动。 */
 @media (max-width: 640px) {

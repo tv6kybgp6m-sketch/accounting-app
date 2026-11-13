@@ -348,7 +348,7 @@
                                 <i class="fa-solid fa-building-columns"></i> 账户
                             </button>
                             <button class="primary-btn" onclick="openBalanceModal()">
-                                月度资产
+                                记月度盘点
                             </button>
                         </div>
                     </div>
@@ -502,7 +502,7 @@
                                 <i class="fa-solid fa-filter"></i> 口径
                             </button>
                             <button class="primary-btn" onclick="openReturnModal()">
-                                月度资产
+                                记月度盘点
                             </button>
                         </div>
                     </div>
@@ -1077,7 +1077,7 @@
             <div class="modal balance-modal">
                 <div class="modal-header">
                     <div class="drill-title-wrap">
-                        <h2>月度资产</h2>
+                        <h2>月度盘点</h2>
                     </div>
                     <div class="bal-entry-mode">
                         <span class="mw-chkcount" id="mwChkCount" hidden>已核对 0 / 0</span>
@@ -1283,7 +1283,7 @@
                     <!-- v1.39.90：多币种账户 -->
                     <label class="switch-row">
                         <input type="checkbox" id="acctEditMulti">
-                        <span>多币种账户<span class="sr-hint">这个账户里有美元 / 港币时打开；月度资产选「其他币种」时，它才会按币种分成几行分别记账</span></span>
+                        <span>多币种账户<span class="sr-hint">这个账户里有美元 / 港币时打开；月度盘点选「其他币种」时，它才会按币种分成几行分别记账</span></span>
                     </label>
                     <label class="settings-label">图标</label>
                     <div class="icon-picker" id="acctEditIcons"></div>
@@ -1469,7 +1469,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.35').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.36').catch(() => {});
             });
         }
     </script>
