@@ -5048,6 +5048,9 @@ table.bill-stats {
        空间整份吃掉，资产类别列跟着变宽，金额更好读。手机上不动（见 4333 行那条 media query）：
        手机第一列本来就只有 66px，再缩到 46px 账户名只剩两个字的空，反而看不清。 */
     --mw-name-w: 92px;
+    /* v1.41.41：所有录入格顶部统一留的「收益率角标带」高度。收益格放角标、其它格空着，
+       于是每一行的输入框都从同一条水平线开始，不会一高一低。 */
+    --mw-badge-h: 12px;
     grid-template-columns: var(--mw-name-w) repeat(var(--mw-cols, 7), minmax(72px, 1fr)) var(--mw-sum-w, 156px);
     gap: 1px 4px; align-items: center;
     width: 100%;
@@ -5222,14 +5225,27 @@ table.bill-stats {
 .mw-stack { flex-direction: column; gap: 3px; align-items: stretch; padding: 3px 0; }
 .mw-stack .be-rate { display: block; font-size: 9px; text-align: center; min-height: 11px; line-height: 11px; }
 .mw-liab { color: var(--expense-text); }
-/* 收益格：收益率/本金未知 角标绝对定位浮在格子上沿，不占布局高度；
-   输入框与同排其它列一样在单元格里垂直居中，不再被角标往下顶（修 v1.41.40「收益列下沉」） */
-.mw-c.mw-ret { padding: 0; }
+/* v1.41.41：恢复「角标在上、输入框在下」的分离布局，并让所有录入格顶部都留一条等高带。
+   收益格 ─ 带里显示收益率/本金未知；其它格 ─ 带空着。于是每一格都是「同样高的带 + 输入框」，
+   所有输入框落在同一水平线，且角标不再压住输入框，输入的数字不会再缺上面一截。
+   用 padding-top 而不是 ::before 撑带：这样多币种账户（收益格压根没有角标元素）、
+   空角标（普通账户）也都照样留带，不会出现某一格少一条带又跑上去。
+   ⚠️ .mw-grid 是 align-items:center，格子高度＝自身内容高度，所以只有每格结构一致才能真正齐平。
+   小计列 .mw-sumcol 是「小计数字＋对账框＋差额」三件套，结构本就不同，不参与这条带。 */
+.mw-grid .mw-tr[data-mw-account] .mw-c:not(.mw-sumcol) {
+    flex-direction: column;
+    justify-content: center;
+    align-items: stretch;
+    padding-top: var(--mw-badge-h);
+}
+/* 收益角标填进这条留白带里：只占顶部那条带，碰不到下面的输入框。
+   空角标直接隐藏即可 —— 带是 padding 撑的，不会因为角标消失而塌掉。 */
 .mw-c.mw-ret .be-rate {
-    position: absolute; top: 1px; left: 0; right: 0;
-    display: block; width: 100%; margin: 0; padding: 0 4px;
-    line-height: 11px; font-size: 9px; text-align: center; min-height: 0;
-    pointer-events: none; z-index: 2;
+    position: absolute; top: 0; left: 0; right: 0;
+    display: block; width: 100%; height: var(--mw-badge-h);
+    margin: 0; padding: 0 4px;
+    line-height: var(--mw-badge-h); font-size: 9px; text-align: center;
+    min-height: 0; pointer-events: none; z-index: 2;
 }
 .mw-c.mw-ret .be-rate:empty { display: none; }
 .mw-c.mw-ret input { width: 100%; }
@@ -5463,6 +5479,8 @@ table.bill-stats {
        66px ≈ 原来每格 133px 的一半，这样一格能看清 6~7 位数字。 */
     .mw-grid {
         width: auto; min-width: max-content;
+        /* v1.41.41：窄屏把「角标留白带」压到 10px，别把好不容易压下来的行距又撑回去 */
+        --mw-badge-h: 10px;
         /* 三段的宽度都是桌面端的 50%：账户名列 132→66、每一格 133→66、小计列 156→78。
            中间那列必须是固定 66px 而不是 minmax(66px,1fr)：容器 min-width:max-content，
            1fr 会被金额输入框的固有宽度顶回 133px（这个坑踩过一次）。 */
