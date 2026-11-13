@@ -5468,22 +5468,12 @@ table.bill-stats {
     .mw-col-input { width: 34px; font-size: 11px !important; padding: 1px 2px !important; }
 }
 
-/* v1.41.37 修正：数据行的格子被内部 <input class="text-input"> 的不透明底盖住，只染 .mw-c 单元格
-   在"带输入框"的格子上看不见；且输入框有 .mw-tr:hover 灰底(0,4,0) 会盖。所以高亮要连同格子里的
-   输入框一起染，并用 !important 压过 hover 灰底与负债红底。行=蓝、列=琥珀、交叉=深蓝。 */
-/* v1.41.34：填月度盘点时聚焦某格 → 整行 + 整列高亮（防填错行/列）。
-   .mw-tr 是 display:contents，高亮只能落到每个网格项（.mw-c / .mw-h / .mw-rowname）上。 */
-.mw-grid .mw-c.mw-row-hl,
-.mw-grid .mw-rowname.mw-row-hl { background: rgba(10, 122, 255, .08); }
-.mw-grid .mw-c.mw-col-hl,
-.mw-grid .mw-rowname.mw-col-hl,
-.mw-grid .mw-h.mw-col-hl { background: rgba(255, 176, 32, .15); }
-.mw-grid .mw-c.mw-row-hl.mw-col-hl,
-.mw-grid .mw-rowname.mw-row-hl.mw-col-hl { background: rgba(10, 122, 255, .18); }
-/* 带输入框的格子：连同输入框一起染，否则被输入框不透明底盖住 → 行/列高亮看不见 */
-.mw-grid .mw-c.mw-row-hl .text-input { background: rgba(10, 122, 255, .16) !important; }
-.mw-grid .mw-c.mw-col-hl .text-input { background: rgba(255, 176, 32, .26) !important; }
-.mw-grid .mw-c.mw-row-hl.mw-col-hl .text-input { background: rgba(10, 122, 255, .30) !important; }
+/* v1.41.38：填月度盘点聚焦 → 只高亮正在输入的那一格（不再做整行整列十字），淡黄。
+   数据格内有 <input class="text-input"> 不透明底，连同输入框一起染才能看见；!important 压过
+   hover 灰底(0,4,0) 与负债红底。 */
+.mw-grid .mw-c.mw-cell-hl,
+.mw-grid .mw-rowname.mw-cell-hl { background: rgba(255, 214, 64, .30); }
+.mw-grid .mw-c.mw-cell-hl .text-input { background: rgba(255, 214, 64, .50) !important; }
 
 /* ===== Excel 查看（不导入）预览弹窗 ===== */
 .excel-preview-modal { max-width: 720px; width: 92%; }

@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.37';
+const APP_VERSION = '1.41.38';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -7791,6 +7791,20 @@ function balancesAtMonth(month, member = state.balanceOwner) {
     return map;
 }
 
+// 某月各账户的「资产」合计（不含负债类），供「账户资产构成占比」饼图与按账户明细用。
+function accountAssetsAtMonth(month, member = state.balanceOwner) {
+    const map = {};
+    if (!month) return map;
+    state.balances
+        .filter(b => b.month === month && (member === 'all' || b.member === member) && !isLiabCat(balanceCatOf(b)))
+        .forEach(b => { map[b.accountId] = (map[b.accountId] || 0) + Math.abs(Number(b.amount) || 0); });
+    if (lendingVisibleFor(member)) {
+        const v = lendingOutstandingAt(month);
+        if (v) map[LENDING_ACCOUNT_ID] = (map[LENDING_ACCOUNT_ID] || 0) + v;
+    }
+    return map;
+}
+
 // 录入表格用：把每一格（账户 × 类别）的数原样取出来，负债类也是正数
 function balanceCellsAtMonth(month, member = state.balanceOwner) {
     const cells = {};
@@ -8037,6 +8051,7 @@ function renderBalance() {
         : (recorded ? `截至 ${info.month.replace('-', '年')}月` : '该期未记录');
 
     renderBalanceChart();
+    renderBalanceAccountPie(info);
     renderBalanceBreakdown();
     renderBalanceStats();
     renderBalanceMemberBar();
@@ -8764,57 +8779,114 @@ function renderBalancePie(ctx, info) {
     charts.balance.$centerText = { label: '', value: '' };
 }
 
+function renderBalanceAccountPie(info) {
+    const canvas = document.getElementById('balanceAccountPie');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (typeof Chart === 'undefined') { loadChartLib().then(() => renderBalanceAccountPie(info)).catch(() => {}); return; }
+    if (charts.balanceAccountPie) { charts.balanceAccountPie.destroy(); charts.balanceAccountPie = null; }
+    // 按账户汇总资产（不含负债类），每个账户一块；借出款单独算一块
+    const map = accountAssetsAtMonth(info.month);
+    const entries = [];
+    balAccounts().forEach(a => {
+        const v = map[a.id] || 0;
+        if (v > 0) entries.push({ id: a.id, label: a.name, color: a.color, signed: v, amount: v });
+    });
+    if (map[LENDING_ACCOUNT_ID] > 0) {
+        const lv = lendingVirtualAccount();
+        entries.push({ id: LENDING_ACCOUNT_ID, label: lv.name, color: lv.color, signed: map[LENDING_ACCOUNT_ID], amount: map[LENDING_ACCOUNT_ID] });
+    }
+    entries.sort((x, y) => y.signed - x.signed);
+    const top = topPieEntries(entries);
+    const gross = top.reduce((s, e) => s + e.signed, 0);
+    const labels = top.map(e => e.label);
+    const colors = top.map(e => e.id === '__others__' ? PIE_OTHERS_COLOR : (e.color || '#8e8e8e'));
+    const empty = document.getElementById('balanceAccountPieEmpty');
+    const wrap = document.getElementById('balAccountPieWrap');
+    if (!entries.length || gross <= 0) {
+        if (empty) { empty.textContent = '该期没有可统计的资产数据'; empty.classList.remove('hidden'); }
+        if (wrap) wrap.classList.add('hidden');
+        return;
+    }
+    if (empty) empty.classList.add('hidden');
+    if (wrap) wrap.classList.remove('hidden');
+    charts.balanceAccountPie = new Chart(ctx, {
+        type: 'doughnut',
+        data: { labels, datasets: [{ data: top.map(e => e.signed), backgroundColor: colors, borderWidth: 0, hoverOffset: 10, radius: (ctx.parentElement ? ctx.parentElement.clientWidth : 999) < 520 ? '68%' : '100%' }] },
+        plugins: [pieLabelPlugin, doughnutTotalPlugin],
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '52%',
+            layout: { padding: { left: 28, right: 28, top: 10, bottom: 10 } },
+            onClick: (evt, elements) => {
+                if (!elements || !elements.length) return;
+                const e = top[elements[0].index];
+                if (!e) return;
+                if (e.id === LENDING_ACCOUNT_ID) openLendingDetail(info.month || '');
+                else if (e.ids && e.ids.length === 1) openAccountHistoryForAccount(e.ids[0], e.label);
+                else openAccountHistoryForPeriod(info.month, '其余账户');
+            },
+            onHover: (evt, elements) => {
+                const target = evt.native && evt.native.target;
+                if (target) target.style.cursor = (elements && elements.length) ? 'pointer' : 'default';
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: (c) => {
+                            const pct = gross ? ((c.raw / gross) * 100).toFixed(1) : '0.0';
+                            return `${c.label}: ${maskMoney(c.raw)} (${pct}%)`;
+                        },
+                    },
+                },
+            },
+        },
+    });
+    charts.balanceAccountPie.$centerText = { label: '', value: '' };
+}
+
 function renderBalanceBreakdown() {
     const container = document.getElementById('balBreakdownList');
     if (!container) return;
     const info = balancePeriodInfo();
-    const metric = state.balanceMetric;
     const titleEl = document.getElementById('balBreakdownTitle');
-    // 标题得跟着模式走（v1.39.29）：以前写死"资产构成"，切到负债 / 净资产看时名不副实。
-    if (titleEl) {
-        titleEl.textContent = (metric === 'liability' ? '负债构成（按类别）'
-            : metric === 'net' ? '净资产构成（按类别）' : '资产构成（按类别）');
-    }
+    // v1.41.38：明细列表改为「按账户」展示（账户资产构成占比饼图下方的下一个模块），
+    // 直接看每个账户占多少、排第几，点账户看它的历史余额。
+    if (titleEl) titleEl.textContent = '账户资产明细（按金额）';
 
-    const cat = monthHasRecords(info.month) ? balancesByCat(info.month) : {};
-    // 直接按用户指定的 6 类资产统计：现金 / 货币基金 / 定期存款 / 股票基金 / 黄金 / 其他
-    // v1.41.17：借出款单独成一类，不混在「其他」里，占比也单独算。
-    const lendTotal = Number(cat[LENDING_CAT_KEY] || 0);
-    const grandAsset = sheetAssetCats().reduce((s, c) => s + (cat[c.key] || 0), 0) + lendTotal;
-    const grandLiab = sheetLiabCats().reduce((s, c) => s + (cat[c.key] || 0), 0);
-    const grand = metric === 'liability' ? grandLiab : (metric === 'asset' ? grandAsset : grandAsset + grandLiab);
-
-    // v1.41.6：资产构成（按类别）按金额从多到少排列，不再按默认列顺序。
-    // 原本资产、负债各自按固定列顺序渲染；现在合并后统一按金额降序，占比最高的排最上。
-    const liabKeys = new Set(sheetLiabCats().map(c => c.key));
-    const items = sheetAssetCats().concat(sheetLiabCats())
-        .map(c => ({ c, v: cat[c.key] || 0 }))
-        .filter(x => x.v > 0);
-    if (lendTotal > 0) items.push({
-        c: { key: LENDING_CAT_KEY, label: '借出款', color: '#8e8e93', icon: 'fa-hand-holding-dollar' },
-        v: lendTotal
+    const map = accountAssetsAtMonth(info.month);
+    const items = [];
+    balAccounts().forEach(a => {
+        const v = map[a.id] || 0;
+        if (v > 0) items.push({ id: a.id, name: a.name, color: a.color, icon: a.icon, v });
     });
+    if (map[LENDING_ACCOUNT_ID] > 0) {
+        const lv = lendingVirtualAccount();
+        items.push({ id: LENDING_ACCOUNT_ID, name: lv.name, color: lv.color, icon: lv.icon, v: map[LENDING_ACCOUNT_ID] });
+    }
     items.sort((a, b) => b.v - a.v);
+    const grand = items.reduce((s, x) => s + x.v, 0);
     const top = items.length ? items[0].v : 1;
 
     let html = '';
-    items.forEach(({ c, v }) => {
-        const pct = grand ? (v / grand) * 100 : 0;
-        const defIcon = liabKeys.has(c.key) ? 'fa-credit-card' : 'fa-chart-pie';
-        const click = c.key === LENDING_CAT_KEY
+    items.forEach(it => {
+        const pct = grand ? (it.v / grand) * 100 : 0;
+        const click = it.id === LENDING_ACCOUNT_ID
             ? `openLendingDetail('${_esc(info.month || '')}')`
-            : `openAccountHistoryForPeriod('${info.month}','${_esc(c.label)}')`;
+            : `openAccountHistoryForAccount('${_esc(it.id)}', '${_esc(it.name)}')`;
         html += `
         <div class="breakdown-item" onclick="${click}">
-            <div class="breakdown-icon" style="background:${c.color}22;color:${c.color}">
-                <i class="fa-solid ${c.icon || defIcon}"></i>
+            <div class="breakdown-icon" style="background:${it.color}22;color:${it.color}">
+                <i class="fa-solid ${it.icon || 'fa-building-columns'}"></i>
             </div>
             <div class="breakdown-main">
                 <div class="breakdown-head">
-                    <span class="breakdown-name">${_esc(c.label)}</span>
-                    <span class="breakdown-amount">${maskMoney(v)}<em>${pct.toFixed(1)}%</em></span>
+                    <span class="breakdown-name">${_esc(it.name)}</span>
+                    <span class="breakdown-amount">${maskMoney(it.v)}<em>${pct.toFixed(1)}%</em></span>
                 </div>
-                <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (v / top) * 100)}%;background:${c.color}"></div></div>
+                <div class="breakdown-bar"><div class="breakdown-fill" style="width:${Math.max(3, (it.v / top) * 100)}%;background:${it.color}"></div></div>
             </div>
         </div>`;
     });
@@ -11439,30 +11511,16 @@ function mwAddAccount(raw) {
     openAccountEdit(null, String(raw || '').trim());
 }
 
-// v1.41.34：填月度盘点时，聚焦某一格 → 高亮整行 + 整列（像 Excel 选中单元格），
-// 防止把数填错行 / 列。网格用 CSS grid + display:contents 的行，所有行的子元素顺序一致，
-// 所以"列"直接用子元素下标对齐（表头 .mw-h 与每行 .mw-c 同序）。
-function highlightMonthlyCrosshair(input) {
-    clearMonthlyCrosshair();
+// v1.41.38：填月度盘点时，聚焦某一格 → 只高亮「正在输入的那一格」（不再做整行整列十字），
+// 防填错行 / 列。淡黄底。网格用 CSS grid + display:contents 的行，定位到 .mw-c / .mw-rowname。
+function highlightMonthlyCell(input) {
+    clearMonthlyCell();
     const cell = input.closest('.mw-c') || input.closest('.mw-rowname');
-    const row = input.closest('.mw-tr');
-    const grid = document.querySelector('.mw-grid');
-    if (!cell || !row || !grid) return;
-    const kids = Array.from(row.children);
-    const ci = kids.indexOf(cell);
-    if (ci < 0) return;
-    kids.forEach(k => k.classList.add('mw-row-hl'));
-    grid.querySelectorAll('.mw-h').forEach((h, i) => { if (i === ci) h.classList.add('mw-col-hl'); });
-    grid.querySelectorAll('.mw-tr').forEach(tr => {
-        const ch = tr.children[ci];
-        if (ch) ch.classList.add('mw-col-hl');
-    });
+    if (!cell) return;
+    cell.classList.add('mw-cell-hl');
 }
-function clearMonthlyCrosshair() {
-    document.querySelectorAll('.mw-row-hl, .mw-col-hl').forEach(el => {
-        el.classList.remove('mw-row-hl');
-        el.classList.remove('mw-col-hl');
-    });
+function clearMonthlyCell() {
+    document.querySelectorAll('.mw-cell-hl').forEach(el => el.classList.remove('mw-cell-hl'));
 }
 
 function bindMonthlyEntry() {
@@ -11472,15 +11530,15 @@ function bindMonthlyEntry() {
     // 锁住的、只读的全跳过，不然按几十次 Tab 才到下一格能填的。
     if (!list.dataset.tabBound) {
         list.dataset.tabBound = '1';
-        // v1.41.34：聚焦格子 → 高亮整行 + 整列；失焦清除。用 focusin/out 冒泡，
+        // v1.41.38：聚焦格子 → 只高亮正在输入的那一格（淡黄）；失焦清除。用 focusin/out 冒泡，
         // 监听器只挂一次（list 元素稳定，内部 .mw-grid 每次重画也不影响）。
         if (!list.dataset.crosshairBound) {
             list.dataset.crosshairBound = '1';
             list.addEventListener('focusin', e => {
-                if (e.target && e.target.tagName === 'INPUT') highlightMonthlyCrosshair(e.target);
+                if (e.target && e.target.tagName === 'INPUT') highlightMonthlyCell(e.target);
             });
             list.addEventListener('focusout', e => {
-                if (e.target && e.target.tagName === 'INPUT') clearMonthlyCrosshair();
+                if (e.target && e.target.tagName === 'INPUT') clearMonthlyCell();
             });
         }
         list.addEventListener('keydown', e => {
