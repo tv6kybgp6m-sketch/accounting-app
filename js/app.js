@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.42';
+const APP_VERSION = '1.41.43';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -16153,7 +16153,7 @@ function renderReviewHistory(kind) {
     if (!box) return;
     const map = (state.reviews && state.reviews[kind]) || {};
     const keys = Object.keys(map).filter(k => map[k] && map[k].text).sort().reverse();
-    if (!keys.length) { box.innerHTML = '<div class="review-empty">还没写过。写过的会留在这里，随时能翻。</div>'; return; }
+    if (!keys.length) { box.innerHTML = ''; return; }
     box.innerHTML = '<div class="review-history-title">以前写的</div>' + keys.slice(0, 24).map(k =>
         `<div class="review-hist-row"><b>${_esc(k)}</b><span>${_esc(map[k].text)}</span></div>`).join('');
 }
@@ -16193,17 +16193,17 @@ function reviewMonthReportHTML(month) {
         <div class="rr-row"><span class="rr-k">分类前五</span><span class="rr-v">${top5 || '这个月没有支出记录'}</span></div>
         <div class="rr-row"><span class="rr-k">家底与投资</span><span class="rr-v">净资产 ${_fmtY(t.net)}（资产 ${_fmtY(t.asset)} / 负债 ${_fmtY(t.liability)}）· 当月投资收益 ${_fmtY(profit)}</span></div>
         <div class="rr-row"><span class="rr-k">记账习惯</span><span class="rr-v">记了 ${days} 天 · 共 ${txns.length} 笔 · ${noNote} 笔没写备注</span></div>
-        <div class="rr-foot">这里只摆事实，不判断该花多少、也不预测下个月。</div>
     </div>`;
 }
 function reviewYearPageHTML(year) {
     const months = [];
     for (let i = 1; i <= 12; i++) months.push(year + '-' + String(i).padStart(2, '0'));
-    let yearExp = 0, yearProfit = 0;
+    let yearExp = 0, yearInc = 0, yearProfit = 0;
     months.forEach(m => {
         state.transactions.forEach(t => {
-            if (getMonthKey(t.date) !== m || t.type !== 'expense') return;
-            yearExp += Number(t.amount) || 0;
+            if (getMonthKey(t.date) !== m) return;
+            if (t.type === 'expense') yearExp += Number(t.amount) || 0;
+            else if (t.type === 'income') yearInc += Number(t.amount) || 0;
         });
         const rm = returnsAtMonth(m, 'all');
         Object.keys(rm).forEach(k => { yearProfit += Number(rm[k]) || 0; });
@@ -16218,6 +16218,7 @@ function reviewYearPageHTML(year) {
         .map(m => `<div class="review-hist-row"><b>${m}</b><span>${_esc(state.reviews.monthly[m].text)}</span></div>`).join('');
     return `<div class="review-report rr-year">
         <div class="rr-big"><span>一年总支出</span><b>${_fmtY(yearExp)}</b></div>
+        <div class="rr-big"><span>一年净结余</span><b>${_fmtY(yearInc - yearExp)}</b></div>
         <div class="rr-big"><span>一年投资收益</span><b>${_fmtY(yearProfit)}</b></div>
         <div class="rr-big"><span>净资产增加</span><b>${delta === null ? '—' : _fmtY(delta)}</b></div>
         <div class="rr-foot">净资产增加按这一年内第一次与最后一次有余额记录的月份相减，不是预测。</div>

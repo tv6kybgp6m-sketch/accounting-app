@@ -5670,7 +5670,8 @@ body.app-locked .fab-add { display: none !important; }
 .rr-v { color: var(--text-primary); }
 .rr-v em { display: block; font-style: normal; color: var(--text-muted); font-size: 12px; }
 .rr-foot { padding: 8px 0 10px; color: var(--text-muted); font-size: 12px; border-top: 1px dashed var(--border); }
-.rr-year { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 14px; }
+/* v1.41.43：年报四项数据排 2×2，别让第 4 个数孤零零掉到第二行 */
+.rr-year { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 14px; }
 .rr-big { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: var(--radius-sm); background: var(--bg-input); }
 .rr-big span { color: var(--text-muted); font-size: 12px; }
 .rr-big b { font-size: 18px; color: var(--text-primary); }

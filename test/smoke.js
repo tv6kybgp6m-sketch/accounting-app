@@ -980,10 +980,30 @@ async function run() {
         ok('手写的月度回顾存下来了',
             ev(`state.reviews.monthly['2026-10'] && state.reviews.monthly['2026-10'].text`) === '10 月装修花了 9 万');
         ev(`reviewTab='year'; renderReviewModal();`);
-        ok('一年一页纸给三个数（总支出 / 投资收益 / 净资产增加）',
-            ev(`document.querySelectorAll('#reviewAuto .rr-big').length`) === 3);
-        ok('一页纸里能翻到这一年写过的月度备注',
+        ok('年报给四个数（总支出 / 净结余 / 投资收益 / 净资产增加）',
+            ev(`document.querySelectorAll('#reviewAuto .rr-big').length`) === 4);
+        ok('年度页签已改叫「年报」',
+            ev(`document.getElementById('reviewTabYear').textContent.trim()`) === '年报');
+        ok('年报里能翻到这一年写过的月度备注',
             ev(`document.getElementById('reviewAuto').innerHTML`).indexOf('10 月装修花了 9 万') >= 0);
+        const _rrBigVal = (label) => ev("(function(){var bs=document.querySelectorAll('#reviewAuto .rr-big');for(var i=0;i<bs.length;i++){if(bs[i].querySelector('span').textContent===" + JSON.stringify(label) + ")return bs[i].querySelector('b').textContent;}return null;})()");
+        const _yrNetFromTxns = ev(`(function(){var inc=0,exp=0;
+            state.transactions.forEach(function(t){if(String(getMonthKey(t.date||'')).slice(0,4)!=='2026')return;
+            var a=Number(t.amount)||0;if(t.type==='income')inc+=a;else if(t.type==='expense')exp+=a;});
+            return inc-exp;})()`);
+        ok('年报「一年净结余」= 全年收入 − 全年支出（跟交易流水一致）',
+            _rrBigVal('一年净结余') === ev(`_fmtY(${_yrNetFromTxns})`),
+            [_rrBigVal('一年净结余'), _yrNetFromTxns]);
+        ev(`state.transactions.push({id:'__probe_exp',type:'expense',amount:3000,date:'2026-06-10',member:'本人'}); renderReviewModal();`);
+        ok('临时多记一笔 3000 支出，净结余正好少 3000（不是写死的数、也不是净资产增加）',
+            _rrBigVal('一年净结余') === ev(`_fmtY(${_yrNetFromTxns} - 3000)`), _rrBigVal('一年净结余'));
+        ev(`state.transactions = state.transactions.filter(function(t){return t.id!=='__probe_exp';}); renderReviewModal();`);
+        ok('回顾弹窗底部不再有「完成」按钮（关窗口走右上角 X）',
+            ev(`!Array.prototype.some.call(document.querySelectorAll('#reviewModal button'),function(b){return b.textContent.trim()==='完成';})`));
+        ok('月报底部「不判断该花多少 / 不预测下个月」那句已删',
+            appSrc.indexOf('也不预测下个月') < 0);
+        ok('回顾历史空态「还没写过 / 随时能翻」那句已删',
+            appSrc.indexOf('写过的会留在这里') < 0);
 
         ev(`renderReturnMissing({month:'2026-10'});`);
         ok('收益率缺料清单能跑、且不改任何账本数据',
