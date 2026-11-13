@@ -5222,9 +5222,15 @@ table.bill-stats {
 .mw-stack { flex-direction: column; gap: 3px; align-items: stretch; padding: 3px 0; }
 .mw-stack .be-rate { display: block; font-size: 9px; text-align: center; min-height: 11px; line-height: 11px; }
 .mw-liab { color: var(--expense-text); }
-/* 收益格：收益率角标移到输入框上方，避免它出现时挤窄输入框；空角标自动隐藏不占位 */
-.mw-c.mw-ret { flex-direction: column; gap: 1px; justify-content: center; padding: 2px 0; }
-.mw-c.mw-ret .be-rate { display: block; width: 100%; margin: 0; padding: 0 4px; line-height: 12px; font-size: 9px; text-align: center; min-height: 0; }
+/* 收益格：收益率/本金未知 角标绝对定位浮在格子上沿，不占布局高度；
+   输入框与同排其它列一样在单元格里垂直居中，不再被角标往下顶（修 v1.41.40「收益列下沉」） */
+.mw-c.mw-ret { padding: 0; }
+.mw-c.mw-ret .be-rate {
+    position: absolute; top: 1px; left: 0; right: 0;
+    display: block; width: 100%; margin: 0; padding: 0 4px;
+    line-height: 11px; font-size: 9px; text-align: center; min-height: 0;
+    pointer-events: none; z-index: 2;
+}
 .mw-c.mw-ret .be-rate:empty { display: none; }
 .mw-c.mw-ret input { width: 100%; }
 /* 行距减 40% 全靠这一列：它是竖着的（小计一行小字 + 对账单总额输入框 + 差额提示），
@@ -5483,20 +5489,20 @@ table.bill-stats {
     .mw-col-input { width: 34px; font-size: 11px !important; padding: 1px 2px !important; }
 }
 
-/* v1.41.39：填月度盘点聚焦 → 从账户名横亮到该列、从表头竖亮到该行，都停在输入格（不继续往后亮），
-   形成指向输入格的「L」，淡黄。数据格内 <input class="text-input"> 不透明底，连同输入框一起染；
-   !important 压过 hover 灰底(0,4,0) 与负债红底。 */
+/* v1.41.40：填月度盘点聚焦 → 从账户名横亮到该列、从表头竖亮到该行，都停在输入格（不继续往后亮），
+   形成指向输入格的「L」，淡黄。L 臂（行列）浅、聚焦格深一点点；
+   !important 压过 hover 灰底(0,4,0) 与负债红底、汇总行底色，确保聚焦时一定可见（不再要移开鼠标才亮）。 */
 .mw-grid .mw-c.mw-row-hl,
 .mw-grid .mw-rowname.mw-row-hl,
 .mw-grid .mw-c.mw-col-hl,
-.mw-grid .mw-h.mw-col-hl { background: rgba(255, 214, 64, .30); }
-/* 聚焦格：行列交点，略深一点，明确指向 */
+.mw-grid .mw-h.mw-col-hl { background: rgba(255, 214, 64, .16) !important; }
+/* 聚焦格：行列交点，比 L 臂深一点点，明确指向 */
 .mw-grid .mw-c.mw-focus-hl,
-.mw-grid .mw-rowname.mw-focus-hl { background: rgba(255, 214, 64, .48); }
+.mw-grid .mw-rowname.mw-focus-hl { background: rgba(255, 214, 64, .55) !important; }
 /* 带输入框的格子：连同输入框一起染，否则被输入框不透明底盖住 */
 .mw-grid .mw-c.mw-row-hl .text-input,
-.mw-grid .mw-c.mw-col-hl .text-input { background: rgba(255, 214, 64, .50) !important; }
-.mw-grid .mw-c.mw-focus-hl .text-input { background: rgba(255, 214, 64, .64) !important; }
+.mw-grid .mw-c.mw-col-hl .text-input { background: rgba(255, 214, 64, .30) !important; }
+.mw-grid .mw-c.mw-focus-hl .text-input { background: rgba(255, 214, 64, .70) !important; }
 
 /* ===== Excel 查看（不导入）预览弹窗 ===== */
 .excel-preview-modal { max-width: 720px; width: 92%; }
