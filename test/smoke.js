@@ -1755,6 +1755,89 @@ async function run() {
         ok('图标按名字存、不是按序号（删选项不会让已有账户/分类错位）',
             appSrc.indexOf('data-icon="${i}"') >= 0 && appSrc.indexOf("onclick=\"selectIcon('${icon}')\"") >= 0);
 
+        // ---------- 39) v1.41.47：Mac 壳里五个页面控件高度统一，手机端零影响 ----------
+        stage = '39';
+        const css39 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const html39 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+        const macBlock = css39.slice(css39.indexOf('/* ===== v1.41.47'));
+        const macCss = macBlock.replace(/\/\*[\s\S]*?\*\//g, '');
+        const macSelectors = macCss.split('}').map(s => s.split('{')[0].trim()).filter(Boolean);
+
+        ok('Mac 标记由 head 首帧脚本按原生壳 UA 挂上（手机不会带这个 class）',
+            html39.indexOf("navigator.userAgent.indexOf('BookkeepingMacApp')") >= 0 &&
+            html39.indexOf("document.documentElement.classList.add('mac-app')") >= 0 &&
+            html39.indexOf("classList.add('mac-app')") < html39.indexOf('<link rel="stylesheet"'));
+        ok('高度规则每一条选择器都以 html.mac-app 开头（不裸改全局按钮）',
+            macSelectors.length >= 5 &&
+            macSelectors.every(s => s.split(',').every(x => x.trim().indexOf('html.mac-app') === 0)) &&
+            macSelectors.every(s => /#view-(transactions|reports|balance|returns|settings)/.test(s)),
+            macSelectors.length);
+        ok('五个页面列出的控件都覆盖到了（含结账清单的恢复 / 看变动明细、外观开关）',
+            ['#view-transactions', '#view-reports', '#view-balance', '#view-returns', '#view-settings']
+                .every(id => macBlock.indexOf(id) >= 0) &&
+            ['.filter-tab', '.search-box', '.period-btn', '.filter-select', '.secondary-btn',
+             '.primary-btn', '.money-eye-btn', '.ci-act', '.ci-exclude', '.theme-toggle',
+             '.theme-btn', '.settings-select', '.ios-toggle'].every(c => macBlock.indexOf(c) >= 0));
+        ok('手机端 v1.41.21 的 32px 口径仍在，没有被这次改动回退',
+            css39.indexOf('v1.41.21：手机端同一行的筛选') >= 0 &&
+            css39.indexOf('--ctrl-h: 32px') >= 0);
+
+        ev(`(function(){
+            var s=document.createElement('style'); s.id='macHeightProbe';
+            s.textContent=${JSON.stringify(macCss)};
+            document.head.appendChild(s);
+            document.documentElement.classList.add('mac-app');
+            var list=document.getElementById('closeList');
+            if(list) list.innerHTML='<div class="close-item"><span class="ci-actions">'+
+                '<button class="ci-act">恢复</button><button class="ci-exclude">排除</button></span></div>';
+        })();`);
+        const h39 = sel => ev(`(function(){var e=document.querySelector(${JSON.stringify(sel)});` +
+            `return e?getComputedStyle(e).height:null;})()`);
+        const mac32 = [
+            '#view-transactions .view-header-right .search-box',
+            '#view-transactions .view-header-right .primary-btn',
+            '#view-transactions .filter-bar .filter-right .filter-select',
+            '#view-reports .view-header .report-controls .filter-select',
+            '#view-reports .view-header .report-controls .secondary-btn',
+            '#view-reports .close-head .secondary-btn',
+            '#view-reports .close-head .filter-select.close-month',
+            '#view-reports .ci-act', '#view-reports .ci-exclude',
+            '#view-balance .view-header .report-controls .filter-select',
+            '#view-balance .view-header .report-controls .secondary-btn',
+            '#view-balance .view-header .report-controls .primary-btn',
+            '#view-balance .view-header .report-controls .money-eye-btn',
+            '#view-returns .view-header .report-controls .filter-select',
+            '#view-returns .view-header .report-controls .secondary-btn',
+            '#view-returns .view-header .report-controls .primary-btn',
+            '#view-returns .view-header .report-controls .money-eye-btn',
+            '#view-settings .settings-sections > .settings-section:first-child .settings-row .theme-toggle',
+            '#view-settings .settings-sections > .settings-section:first-child .settings-row .settings-select',
+            '#view-settings .settings-sections > .settings-section:first-child .settings-row .ios-toggle',
+            '#view-settings .settings-sections > .settings-section:first-child .settings-row > .secondary-btn',
+        ];
+        const mac26 = [
+            '#view-transactions .filter-bar .filter-tabs .filter-tab',
+            '#view-reports .view-header .report-controls .period-btn',
+            '#view-balance .view-header .report-controls .period-btn',
+            '#view-returns .view-header .report-controls .period-btn',
+        ];
+        const vals32 = mac32.map(h39);
+        const vals26 = mac26.map(h39);
+        ok('Mac 上 21 个独立控件（含外观基准）实际计算高度全是 32px',
+            vals32.every(v => v === '32px'), vals32);
+        ok('四组胶囊内部按钮全是 26px（外框 + 3px×2 = 32px）',
+            vals26.every(v => v === '26px'), vals26);
+        ok('外观那一排没有变形：三个主题按钮撑满外观外框的内容高',
+            macBlock.indexOf('.theme-btn {') >= 0 &&
+            /\.theme-btn \{\s*height: 100%;/.test(macBlock));
+
+        ev(`document.documentElement.classList.remove('mac-app');`);
+        const noMacTab = h39('#view-transactions .filter-bar .filter-tabs .filter-tab');
+        const noMacEye = h39('#view-balance .view-header .report-controls .money-eye-btn');
+        ok('去掉 Mac 标记（手机 / 普通浏览器）后一个都不命中，高度恢复原样',
+            noMacTab !== '26px' && noMacEye !== '32px', { tab: noMacTab, eye: noMacEye });
+        ev(`(function(){var s=document.getElementById('macHeightProbe');if(s)s.remove();})();`);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

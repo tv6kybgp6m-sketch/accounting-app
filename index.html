@@ -21,6 +21,11 @@
         // 第一帧之前就把主题定下来：骨架屏、iOS 系统状态栏、标题栏都要是同一个颜色，
         // 否则深色模式启动会先白一下。这里只读一个轻量本机偏好键，不碰账本数据。
         (function () {
+            // v1.41.47：Mac 原生壳把 UA 换成 BookkeepingMacApp/版本号，第一帧前给 <html> 挂个标记，
+            // 供「只在 Mac 生效」的按钮高度规则使用；手机 PWA / 浏览器一律不带这个 class。
+            if (navigator.userAgent.indexOf('BookkeepingMacApp') > -1) {
+                document.documentElement.classList.add('mac-app');
+            }
             try {
                 var c = localStorage.getItem('bookkeeping_theme_choice') || 'light';
                 var dark = c === 'dark' || (c === 'system' && !!window.matchMedia &&
@@ -1470,7 +1475,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.46').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.47').catch(() => {});
             });
         }
     </script>

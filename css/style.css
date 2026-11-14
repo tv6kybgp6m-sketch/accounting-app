@@ -5854,3 +5854,94 @@ body.app-locked .fab-add { display: none !important; }
    支付方式那里本来就用 fa-brands（不带 fa-solid），不受这条影响。 */
 .fa-solid.fa-weixin,
 .fa-solid.fa-alipay { font-family: "Font Awesome 6 Brands"; font-weight: 400; }
+
+/* ===== v1.41.47：Mac 原生壳里把五个页面同一排的控件高度拉齐 =====
+   手机端 v1.41.21 早就统一成 32px 了，Mac 上这些控件还是各自 padding 撑出来的自然高，
+   一排里高矮差 4~10px。这里沿用手机端口径：胶囊外框 32px（内部按钮 26px + 3px×2），
+   旁边独立控件直接 32px。设置页以「外观」那排为准：外观外框 32px，其余控件跟它一样。
+   ⚠️ 每条选择器都带 html.mac-app —— 只有 Mac 原生壳（UA 含 BookkeepingMacApp）会挂这个 class，
+      手机 PWA、横屏手机、桌面浏览器都不受影响；弹窗里的同名按钮不在这些视图内，也不会被误伤。 */
+
+/* ① 胶囊容器：内部按钮 26px，加上容器自带 3px×2 内边距 = 外框 32px */
+html.mac-app #view-transactions .filter-bar .filter-tabs,
+html.mac-app #view-reports .view-header .report-controls .report-period,
+html.mac-app #view-balance .view-header .report-controls .report-period,
+html.mac-app #view-returns .view-header .report-controls .report-period { align-items: center; }
+
+html.mac-app #view-transactions .filter-bar .filter-tabs .filter-tab,
+html.mac-app #view-reports .view-header .report-controls .period-btn,
+html.mac-app #view-balance .view-header .report-controls .period-btn,
+html.mac-app #view-returns .view-header .report-controls .period-btn {
+    height: 26px;
+    padding-top: 0;
+    padding-bottom: 0;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+/* ② 交易记录：搜索 / 记一笔 / 所有月份 */
+html.mac-app #view-transactions .view-header-right .search-box,
+html.mac-app #view-transactions .view-header-right .primary-btn,
+html.mac-app #view-transactions .filter-bar .filter-right .filter-select,
+/* ③ 报表 / 资产负债 / 投资收益：日期轮盘 / 回顾·月报 / 账户 / 口径 / 记月度盘点 / 隐私眼睛 */
+html.mac-app #view-reports .view-header .report-controls .filter-select,
+html.mac-app #view-reports .view-header .report-controls .secondary-btn,
+html.mac-app #view-balance .view-header .report-controls .filter-select,
+html.mac-app #view-balance .view-header .report-controls .secondary-btn,
+html.mac-app #view-balance .view-header .report-controls .primary-btn,
+html.mac-app #view-balance .view-header .report-controls .money-eye-btn,
+html.mac-app #view-returns .view-header .report-controls .filter-select,
+html.mac-app #view-returns .view-header .report-controls .secondary-btn,
+html.mac-app #view-returns .view-header .report-controls .primary-btn,
+html.mac-app #view-returns .view-header .report-controls .money-eye-btn,
+/* ④ 报表页月度结账清单：重新检查 / 恢复 / 看变动明细（连同一排的排除、月份下拉） */
+html.mac-app #view-reports .close-head .secondary-btn,
+html.mac-app #view-reports .close-head .filter-select.close-month,
+html.mac-app #view-reports .ci-act,
+html.mac-app #view-reports .ci-exclude {
+    height: 32px;
+    min-height: 32px;
+    padding-top: 0;
+    padding-bottom: 0;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+/* ⑤ 设置页「通用」前六行：外观那排定 32px，其余控件跟它一个高 */
+html.mac-app #view-settings .settings-sections > .settings-section:first-child .settings-row .theme-toggle {
+    height: 32px;
+    box-sizing: border-box;
+    align-items: stretch;
+}
+html.mac-app #view-settings .settings-sections > .settings-section:first-child .settings-row .theme-btn {
+    height: 100%;
+    padding-top: 0;
+    padding-bottom: 0;
+    box-sizing: border-box;
+    line-height: 1;
+}
+html.mac-app #view-settings .settings-sections > .settings-section:first-child .settings-row .settings-select,
+html.mac-app #view-settings .settings-sections > .settings-section:first-child .settings-row > .secondary-btn {
+    height: 32px;
+    min-height: 32px;
+    padding-top: 0;
+    padding-bottom: 0;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    white-space: nowrap;
+}
+html.mac-app #view-settings .settings-sections > .settings-section:first-child .settings-row .ios-toggle {
+    height: 32px;
+    box-sizing: border-box;
+}
