@@ -5945,3 +5945,82 @@ html.mac-app #view-settings .settings-sections > .settings-section:first-child .
     height: 32px;
     box-sizing: border-box;
 }
+
+/* ===== v1.41.48：手机端把剩下的按钮也拉到 32px，外观不再换行 =====
+   顶部那排（月报·年报·全部 / 日期 / 账户 / 口径 / 月度盘点）v1.41.21 已经统一成 32px，
+   这次补的是页面内容里漏掉的：月度结账清单的按钮、资产负债 「设置归类」、设置页通用六行。
+   ⚠️ 整块都在 @media (max-width: 640px) 里，且不带 html.mac-app —— Mac 上一条都不命中，
+      上一版 v1.41.47 的 Mac 专属规则原样保留。 */
+@media (max-width: 640px) {
+    /* ① 报表分析：重新检查 / 恢复 / 看变动明细（连同同排的排除、月份下拉） */
+    #view-reports .close-head .secondary-btn,
+    #view-reports .close-head .filter-select.close-month,
+    #view-reports .ci-act,
+    #view-reports .ci-exclude,
+    /* ② 资产负债：账户明细卡片头里的「设置归类」 */
+    #view-balance .chart-header .chart-header-btn {
+        height: 32px;
+        min-height: 32px;
+        padding-top: 0;
+        padding-bottom: 0;
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+        white-space: nowrap;
+    }
+
+    /* ③ 设置页「通用」六行：以外观那排的高度为准，其余控件跟它一样高 */
+    #view-settings .settings-sections > .settings-section:first-child .settings-row .settings-select,
+    #view-settings .settings-sections > .settings-section:first-child .settings-row > .secondary-btn {
+        height: 32px;
+        min-height: 32px;
+        padding-top: 0;
+        padding-bottom: 0;
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+        white-space: nowrap;
+    }
+    #view-settings .settings-sections > .settings-section:first-child .settings-row .ios-toggle {
+        height: 32px;
+        box-sizing: border-box;
+    }
+
+    /* ④ 外观：三档按钮直接跟在「外观」文字后面，不再另起一行。
+       v1.41.20 曾因怕三档挤成两行改成上下排布；改成让按钮组占满剩余宽度、
+       三档平分 + 禁止换行，宽度就够了（375px 屏每档约 100px，「跟随系统」也放得下）。 */
+    #view-settings .settings-row.theme-row {
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+    }
+    #view-settings .settings-row.theme-row > .settings-label {
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
+    #view-settings .settings-row.theme-row .theme-toggle {
+        flex: 1 1 auto;
+        min-width: 0;
+        width: auto;
+        height: 32px;
+        box-sizing: border-box;
+        align-items: stretch;
+    }
+    #view-settings .settings-row.theme-row .theme-btn {
+        flex: 1 1 0;
+        min-width: 0;
+        height: 100%;
+        padding-top: 0;
+        padding-bottom: 0;
+        box-sizing: border-box;
+        justify-content: center;
+        white-space: nowrap;
+        line-height: 1;
+    }
+}

@@ -1759,7 +1759,8 @@ async function run() {
         stage = '39';
         const css39 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
         const html39 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
-        const macBlock = css39.slice(css39.indexOf('/* ===== v1.41.47'));
+        const macEnd39 = css39.indexOf('/* ===== v1.41.48');
+        const macBlock = css39.slice(css39.indexOf('/* ===== v1.41.47'), macEnd39 > 0 ? macEnd39 : css39.length);
         const macCss = macBlock.replace(/\/\*[\s\S]*?\*\//g, '');
         const macSelectors = macCss.split('}').map(s => s.split('{')[0].trim()).filter(Boolean);
 
@@ -1837,6 +1838,74 @@ async function run() {
         ok('去掉 Mac 标记（手机 / 普通浏览器）后一个都不命中，高度恢复原样',
             noMacTab !== '26px' && noMacEye !== '32px', { tab: noMacTab, eye: noMacEye });
         ev(`(function(){var s=document.getElementById('macHeightProbe');if(s)s.remove();})();`);
+
+        // ---------- 40) v1.41.48：手机端补齐按钮高度 + 外观不换行，Mac 零影响 ----------
+        stage = '40';
+        const css40 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const phoneBlock = css40.slice(css40.indexOf('/* ===== v1.41.48'));
+        const macBlock40 = css40.slice(css40.indexOf('/* ===== v1.41.47'), css40.indexOf('/* ===== v1.41.48'));
+        const mediaAt = phoneBlock.indexOf('@media (max-width: 640px) {');
+        const phoneCss = mediaAt >= 0
+            ? phoneBlock.slice(phoneBlock.indexOf('{', mediaAt) + 1, phoneBlock.lastIndexOf('}')).replace(/\/\*[\s\S]*?\*\//g, '')
+            : '';
+
+        ok('手机规则整块包在 @media (max-width:640px) 里，且不带 html.mac-app（Mac 不命中）',
+            mediaAt >= 0 && phoneCss.length > 200 &&
+            phoneCss.indexOf('html.mac-app') < 0 &&
+            phoneBlock.lastIndexOf('}') > mediaAt);
+        ok('上一版 Mac 专属规则原样保留，没被手机改动覆盖',
+            macBlock40.indexOf('html.mac-app') >= 0 &&
+            (macBlock40.match(/html\.mac-app/g) || []).length >= 29 &&
+            macBlock40.indexOf('height: 32px') >= 0);
+        ok('漏掉的内容区按钮都补上了（结账清单 / 设置归类 / 设置六行 / 外观不换行）',
+            ['.close-head .secondary-btn', '.filter-select.close-month', '.ci-act', '.ci-exclude',
+             '.chart-header-btn', '.settings-select', '.ios-toggle', '.theme-toggle',
+             '.settings-row.theme-row', 'flex-direction: row', 'flex-wrap: nowrap']
+                .every(s => phoneBlock.indexOf(s) >= 0));
+        ok('手机端 v1.41.21 顶部那排的 32px 口径仍在',
+            css40.indexOf('v1.41.21：手机端同一行的筛选') >= 0 && css40.indexOf('--ctrl-h: 32px') >= 0);
+
+        ev(`(function(){
+            var s=document.createElement('style'); s.id='phoneHeightProbe';
+            s.textContent=${JSON.stringify(phoneCss)};
+            document.head.appendChild(s);
+            var list=document.getElementById('closeList');
+            if(list) list.innerHTML='<div class="close-item"><span class="ci-actions">'+
+                '<button class="ci-act">恢复</button><button class="ci-exclude">排除</button></span></div>';
+        })();`);
+        const h40 = sel => ev(`(function(){var e=document.querySelector(${JSON.stringify(sel)});` +
+            `return e?getComputedStyle(e).height:null;})()`);
+        const content32 = [
+            '#view-reports .close-head .secondary-btn',
+            '#view-reports .close-head .filter-select.close-month',
+            '#view-reports .ci-act',
+            '#view-reports .ci-exclude',
+            '#view-balance .chart-header .chart-header-btn',
+        ];
+        const vals40 = content32.map(h40);
+        ok('报表页结账清单 4 个按钮 + 资产负债「设置归类」实际高度全是 32px',
+            vals40.every(v => v === '32px'), vals40);
+        const six40 = ev(`(function(){
+            var pre='#view-settings .settings-sections > .settings-section:first-child .settings-row ';
+            var sel=[pre+'.theme-toggle', pre+'.settings-select', pre+'.ios-toggle', pre+'> .secondary-btn'].join(',');
+            return JSON.stringify(Array.from(document.querySelectorAll(sel)).map(function(n){return getComputedStyle(n).height;}));
+        })()`);
+        const sixVals = JSON.parse(six40 || '[]');
+        ok('设置页通用六行的控件（含外观基准）全部 32px',
+            sixVals.length === 6 && sixVals.every(v => v === '32px'), sixVals);
+        const row40 = JSON.parse(ev(`(function(){
+            var e=document.querySelector('#view-settings .settings-row.theme-row');
+            var s=getComputedStyle(e); var l=getComputedStyle(e.querySelector('.settings-label'));
+            var t=getComputedStyle(e.querySelector('.theme-toggle'));
+            return JSON.stringify({dir:s.flexDirection,wrap:s.flexWrap,label:l.whiteSpace,
+                toggleHeight:t.height,toggleGrow:t.flexGrow,
+                btnHeight:getComputedStyle(e.querySelector('.theme-btn')).height});
+        })()`) || '{}');
+        ok('外观文字和三档按钮同一行、不换行，按钮组占满文字右侧',
+            row40.dir === 'row' && row40.wrap === 'nowrap' && row40.label === 'nowrap' &&
+            row40.toggleHeight === '32px' && row40.toggleGrow === '1' && row40.btnHeight === '100%',
+            row40);
+        ev(`(function(){var s=document.getElementById('phoneHeightProbe');if(s)s.remove();})();`);
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
