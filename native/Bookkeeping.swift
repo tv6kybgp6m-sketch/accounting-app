@@ -106,7 +106,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.41.48"
+        webView.customUserAgent = "BookkeepingMacApp/1.41.49"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"
@@ -465,8 +465,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         guard content != lastSnapshotContent else { return }   // 内容没变就跳过，不写重复快照
         lastSnapshotContent = content
         guard let data = content.data(using: .utf8) else { return }
-        let fmt = ISO8601DateFormatter()
-        let name = "bookkeeping-\(fmt.string(from: Date())).json"
+        // v1.41.49：文件名改成「日期打头 + 设备本地时间」。
+        // 旧写法用 ISO8601DateFormatter（UTC），文件名里的 Z 时间比北京时间早 8 小时，
+        // 且 "bookkeeping-" 前缀 + T/Z 让名字又长又看不出是哪天；Finder 按名称排序时
+        // 新格式直接按时间先后排好。只影响新生成的快照，旧文件保持原名不动。
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")   // 固定公历，别被地区日历改了年份
+        fmt.timeZone = .current                          // 跟 Mac 系统时间一致，不再用 UTC
+        fmt.dateFormat = "yyyy-MM-dd_HH-mm-ss"           // 冒号在 Finder 里显示不友好，用短横线
+        let name = "\(fmt.string(from: Date())).json"
         let dest = backupsDirURL().appendingPathComponent(name)
         try? data.write(to: dest, options: [.atomic])
     }

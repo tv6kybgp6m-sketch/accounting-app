@@ -1907,6 +1907,26 @@ async function run() {
             row40);
         ev(`(function(){var s=document.getElementById('phoneHeightProbe');if(s)s.remove();})();`);
 
+        // ---------- 41) v1.41.49：Mac 自动备份文件名改成日期打头 + 本地时间 ----------
+        stage = '41';
+        const swift41 = fs.readFileSync(path.join(REPO, 'native', 'Bookkeeping.swift'), 'utf8');
+        const snap41 = swift41.slice(swift41.indexOf('func snapshot()'), swift41.indexOf('func snapshot()') + 900);
+        ok('快照名改成日期打头、设备本地时间（不再是 UTC 的 Z）',
+            snap41.indexOf('fmt.dateFormat = "yyyy-MM-dd_HH-mm-ss"') >= 0 &&
+            snap41.indexOf('fmt.timeZone = .current') >= 0 &&
+            snap41.indexOf('Locale(identifier: "en_US_POSIX")') >= 0 &&
+            snap41.indexOf('ISO8601DateFormatter()') < 0);
+        ok('去掉 bookkeeping- 前缀，名字从 37 字符缩到 24 字符',
+            snap41.indexOf('"\\(fmt.string(from: Date())).json"') >= 0 &&
+            snap41.indexOf('bookkeeping-\\(') < 0 &&
+            /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.json$/.test('2026-11-14_16-29-50.json') &&
+            'bookkeeping-2026-11-14T08:29:50Z.json'.length === 37 &&
+            '2026-11-14_16-29-50.json'.length === 24);
+        ok('旧快照按文件修改时间找回/排序，不解析文件名（改名不影响已有 180 份）',
+            swift41.indexOf('contentModificationDateKey') >= 0 &&
+            swift41.indexOf('func primeSnapshotBaseline()') >= 0 &&
+            swift41.indexOf('func listBackups(') >= 0);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));
