@@ -6024,3 +6024,37 @@ html.mac-app #view-settings .settings-sections > .settings-section:first-child .
         line-height: 1;
     }
 }
+
+/* ===== v1.41.50：周期记账表单 —— 每格都带可见标签、两个日期并排、格高统一 =====
+   原来 8 个输入框只有 placeholder，而 iOS 的 <input type="date"> 根本不显示 placeholder，
+   空着的「截止日期」在手机上就是个看不懂的空框；Mac 上因为「开始日期」默认带今天日期才认得出来。
+   现在每格上方都有小标题，两端一致；顺序也让开始/截止日期落在同一行。 */
+.rf-field { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.rf-lab { font-size: 11px; line-height: 1.2; color: var(--text-muted); white-space: nowrap; }
+.recur-form-grid .text-input,
+.recur-form .primary-btn {
+    height: 32px;
+    min-height: 32px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    font-size: 13px;
+    line-height: 1;
+}
+.recur-form .primary-btn { justify-content: center; }
+/* Mac 宽屏改 4 列：8 个格子从 4 行压到 2 行，一行也不再拉得老长 */
+html.mac-app .recur-form-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* ---- 同一版：只在 Mac 深色下修云同步 Token 到期日的黑字 ----
+   WKWebView 里原生日期控件没声明 color-scheme 就按浅色画，深色背景下日期是黑字看不清；
+   手机 Safari 会自己适配，所以这里严格限定 html.mac-app[data-theme="dark"]，手机一条都不命中。 */
+html.mac-app[data-theme="dark"] #remoteSyncExpiry {
+    color-scheme: dark;
+    color: var(--text-primary);
+}
+html.mac-app[data-theme="dark"] #remoteSyncExpiry::-webkit-datetime-edit,
+html.mac-app[data-theme="dark"] #remoteSyncExpiry::-webkit-date-and-time-value {
+    color: var(--text-primary);
+}
+html.mac-app[data-theme="dark"] #remoteSyncExpiry::-webkit-calendar-picker-indicator {
+    filter: invert(1) opacity(.8);
+}

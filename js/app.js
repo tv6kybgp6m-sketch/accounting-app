@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.49';
+const APP_VERSION = '1.41.50';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1149,22 +1149,30 @@ function renderRecurringSection() {
     }).join('');
 
     box.innerHTML = `
-        ${state.recurring.length ? rows : '<div class="breakdown-empty">还没有周期规则，用下面表单添加一条（如房租、工资、订阅）</div>'}
+        ${rows}
         <div class="recur-form">
             <div class="recur-form-grid">
-                <select class="text-input" id="rfType">
-                    <option value="expense">支出</option><option value="income">收入</option>
-                </select>
-                <select class="text-input" id="rfCat">${cats.map(c => `<option value="${c.id}">${_esc(c.name)}</option>`).join('')}</select>
-                <input class="text-input" id="rfAmount" type="number" step="0.01" min="0" placeholder="金额">
-                <select class="text-input" id="rfInterval">
-                    <option value="monthly">每月</option><option value="weekly">每周</option>
-                    <option value="daily">每天</option><option value="yearly">每年</option>
-                </select>
-                <input class="text-input" id="rfDay" type="number" min="1" max="31" placeholder="每月几号" value="${new Date().getDate()}">
-                <input class="text-input" id="rfStart" type="date" value="${todayStr()}">
-                <input class="text-input" id="rfUntil" type="date" placeholder="结束（可空）">
-                <input class="text-input" id="rfNote" placeholder="备注（可空）">
+                <label class="rf-field"><span class="rf-lab">收支</span>
+                    <select class="text-input" id="rfType">
+                        <option value="expense">支出</option><option value="income">收入</option>
+                    </select></label>
+                <label class="rf-field"><span class="rf-lab">分类</span>
+                    <select class="text-input" id="rfCat">${cats.map(c => `<option value="${c.id}">${_esc(c.name)}</option>`).join('')}</select></label>
+                <label class="rf-field"><span class="rf-lab">金额</span>
+                    <input class="text-input" id="rfAmount" type="number" step="0.01" min="0" placeholder="金额"></label>
+                <label class="rf-field"><span class="rf-lab">周期</span>
+                    <select class="text-input" id="rfInterval">
+                        <option value="monthly">每月</option><option value="weekly">每周</option>
+                        <option value="daily">每天</option><option value="yearly">每年</option>
+                    </select></label>
+                <label class="rf-field"><span class="rf-lab">每月几号</span>
+                    <input class="text-input" id="rfDay" type="number" min="1" max="31" placeholder="1-31" value="${new Date().getDate()}"></label>
+                <label class="rf-field"><span class="rf-lab">备注</span>
+                    <input class="text-input" id="rfNote" placeholder="可空"></label>
+                <label class="rf-field"><span class="rf-lab">开始日期</span>
+                    <input class="text-input" id="rfStart" type="date" value="${todayStr()}"></label>
+                <label class="rf-field"><span class="rf-lab">截止日期</span>
+                    <input class="text-input" id="rfUntil" type="date" placeholder="结束（可空）"></label>
             </div>
             <button class="primary-btn" id="rfAdd"><i class="fa-solid fa-plus"></i> 添加规则</button>
         </div>`;

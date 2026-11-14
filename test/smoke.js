@@ -1842,7 +1842,9 @@ async function run() {
         // ---------- 40) v1.41.48：手机端补齐按钮高度 + 外观不换行，Mac 零影响 ----------
         stage = '40';
         const css40 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
-        const phoneBlock = css40.slice(css40.indexOf('/* ===== v1.41.48'));
+        const pStart40 = css40.indexOf('/* ===== v1.41.48');
+        const pEnd40 = css40.indexOf('/* ===== v1.', pStart40 + 10);
+        const phoneBlock = css40.slice(pStart40, pEnd40 > 0 ? pEnd40 : css40.length);
         const macBlock40 = css40.slice(css40.indexOf('/* ===== v1.41.47'), css40.indexOf('/* ===== v1.41.48'));
         const mediaAt = phoneBlock.indexOf('@media (max-width: 640px) {');
         const phoneCss = mediaAt >= 0
@@ -1926,6 +1928,54 @@ async function run() {
             swift41.indexOf('contentModificationDateKey') >= 0 &&
             swift41.indexOf('func primeSnapshotBaseline()') >= 0 &&
             swift41.indexOf('func listBackups(') >= 0);
+
+        // ---------- 42) v1.41.50：周期记账表单 / Mac 深色 Token 到期日 ----------
+        stage = '42';
+        const app42 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        const css42 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const bStart42 = css42.indexOf('/* ===== v1.41.50');
+        const bEnd42 = css42.indexOf('/* ===== v1.', bStart42 + 10);
+        const block42 = css42.slice(bStart42, bEnd42 > 0 ? bEnd42 : css42.length);
+        ok('周期记账空态那句说明文字已删掉',
+            app42.indexOf('还没有周期规则，用下面表单添加一条') < 0);
+        const savedRecur42 = ev(`state.recurring`);
+        ev(`state.recurring = []; renderRecurringSection();`);
+        ok('8 个格子都带可见小标题（手机也看得懂空日期框是干嘛的）',
+            ev(`document.querySelectorAll('#recurringSection .rf-field .rf-lab').length`) === 8 &&
+            ev(`document.querySelectorAll('#recurringSection .rf-field').length`) === 8 &&
+            ev(`document.getElementById('recurringSection').innerHTML.indexOf('开始日期')`) >= 0 &&
+            ev(`document.getElementById('recurringSection').innerHTML.indexOf('截止日期')`) >= 0);
+        ok('开始日期与截止日期紧挨着，落在同一行',
+            ev(`(function(){var a=document.getElementById('rfStart').closest('.rf-field');` +
+               `var b=document.getElementById('rfUntil').closest('.rf-field');` +
+               `return !!(a && b && a.nextElementSibling === b);})()`) === true);
+        ok('开始日期仍默认今天，截止日期保持空',
+            ev(`document.getElementById('rfStart').value`) === ev(`todayStr()`) &&
+            ev(`document.getElementById('rfUntil').value`) === '');
+        ok('空规则时不再渲染那句提示',
+            ev(`document.querySelectorAll('#recurringSection .breakdown-empty').length`) === 0);
+        ok('单元格高度统一 32px，Mac 改 4 列把 4 行压成 2 行',
+            /\.recur-form-grid \.text-input,\s*\.recur-form \.primary-btn \{[^}]*height: 32px/s.test(block42) &&
+            block42.indexOf('html.mac-app .recur-form-grid { grid-template-columns: repeat(4') >= 0);
+        ok('Mac 深色 Token 到期日：只在 mac-app + dark 下改，手机零影响',
+            block42.indexOf('html.mac-app[data-theme="dark"] #remoteSyncExpiry') >= 0 &&
+            block42.indexOf('color-scheme: dark') >= 0 &&
+            block42.indexOf('::-webkit-calendar-picker-indicator') >= 0 &&
+            !/^\[data-theme="dark"\] #remoteSyncExpiry/m.test(block42));
+        ev(`(function(){var s=document.createElement('style');s.id='rfProbe42';` +
+           `s.textContent=${JSON.stringify(block42.replace(/\/\*[\s\S]*?\*\//g, ''))};` +
+           `document.head.appendChild(s);})();`);
+        const h42 = id => ev(`getComputedStyle(document.querySelector('${id}')).height`);
+        ok('实际计算高度：金额 / 开始日期 / 截止日期 / 添加按钮全是 32px',
+            ['#rfAmount', '#rfStart', '#rfUntil', '#rfAdd'].every(id => h42(id) === '32px'),
+            ['#rfAmount', '#rfStart', '#rfUntil', '#rfAdd'].map(h42));
+        ev(`document.documentElement.classList.add('mac-app');`);
+        const cols42 = ev(`getComputedStyle(document.querySelector('.recur-form-grid')).gridTemplateColumns`);
+        ok('加上 Mac 标记后表单确实变 4 列',
+            typeof cols42 === 'string' && cols42.indexOf('repeat(4') >= 0, cols42);
+        ev(`document.documentElement.classList.remove('mac-app');`);
+        ev(`(function(){var s=document.getElementById('rfProbe42');if(s)s.remove();})();`);
+        ev(`state.recurring = ${JSON.stringify(savedRecur42 || [])};`);
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
