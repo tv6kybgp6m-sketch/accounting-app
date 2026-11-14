@@ -6058,3 +6058,43 @@ html.mac-app[data-theme="dark"] #remoteSyncExpiry::-webkit-date-and-time-value {
 html.mac-app[data-theme="dark"] #remoteSyncExpiry::-webkit-calendar-picker-indicator {
     filter: invert(1) opacity(.8);
 }
+
+/* ===== v1.41.51：分类管理的分类框缩小，一屏能多放几行几列 =====
+   原来每列最小 160px、卡片 padding 16px、图标 40px，手机上只有 2 列、卡片高 72px。
+   收到 108px / 9px / 26px 后手机约 3 列、Mac 约 8 列，卡片高 44px（仍够手指点）。
+   全部挂在 #view-categories 下，只影响分类管理这一页，Mac / 手机同时生效。 */
+#view-categories .category-grid {
+    grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+    gap: 8px;
+}
+#view-categories .category-sections { gap: 16px; }
+#view-categories .category-section h3 { margin-bottom: 10px; }
+#view-categories .category-card {
+    padding: 9px 8px;
+    gap: 6px;
+    min-height: 44px;
+    border-radius: var(--radius-md);
+    box-sizing: border-box;
+}
+#view-categories .category-card-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+}
+#view-categories .category-card > div:last-child { min-width: 0; }
+#view-categories .category-card-name {
+    font-size: 13px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#view-categories .category-card-count {
+    font-size: 11px;
+    line-height: 1.2;
+    margin-top: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

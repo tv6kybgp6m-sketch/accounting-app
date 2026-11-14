@@ -1977,6 +1977,45 @@ async function run() {
         ev(`(function(){var s=document.getElementById('rfProbe42');if(s)s.remove();})();`);
         ev(`state.recurring = ${JSON.stringify(savedRecur42 || [])};`);
 
+        // ---------- 43) v1.41.51：分类管理的框缩小，一屏显示更多行列 ----------
+        stage = '43';
+        const css43 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const bStart43 = css43.indexOf('/* ===== v1.41.51');
+        const bEnd43 = css43.indexOf('/* ===== v1.', bStart43 + 10);
+        const block43 = css43.slice(bStart43, bEnd43 > 0 ? bEnd43 : css43.length);
+        ok('分类卡片缩小规则写在 v1.41.51 块里', bStart43 >= 0);
+        ok('每列最小宽收到 108px、格子间距 8px',
+            block43.indexOf('minmax(108px, 1fr)') >= 0 &&
+            /\.category-grid \{[^}]*gap: 8px/s.test(block43));
+        ok('卡片最小高 44px、图标 26px、名字 13px',
+            /#view-categories \.category-card \{[^}]*min-height: 44px/s.test(block43) &&
+            /\.category-card-icon \{[^}]*width: 26px/s.test(block43) &&
+            /\.category-card-name \{[^}]*font-size: 13px/s.test(block43));
+        ok('规则全挂在 #view-categories 下且不包 media，Mac / 手机都生效、别的页不受影响',
+            (block43.match(/#view-categories/g) || []).length >= 8 &&
+            block43.indexOf('@media') < 0);
+        ev(`(function(){var s=document.createElement('style');s.id='catProbe43';` +
+           `s.textContent=${JSON.stringify(block43.replace(/\/\*[\s\S]*?\*\//g, ''))};` +
+           `document.head.appendChild(s);})();`);
+        ev(`renderCategories();`);
+        const card43 = ev(`(function(){var c=document.querySelector('#view-categories .category-card');` +
+            `if(!c)return null;var i=c.querySelector('.category-card-icon'),n=c.querySelector('.category-card-name');` +
+            `return {pt:getComputedStyle(c).paddingTop,pl:getComputedStyle(c).paddingLeft,` +
+            `minH:getComputedStyle(c).minHeight,gap:getComputedStyle(c).gap,` +
+            `iconW:getComputedStyle(i).width,iconH:getComputedStyle(i).height,` +
+            `nameSize:getComputedStyle(n).fontSize};})();`);
+        ok('实测计算样式：padding 9/8、最小高 44px、间距 6px、图标 26px、名字 13px',
+            !!card43 && card43.pt === '9px' && card43.pl === '8px' && card43.minH === '44px' &&
+            card43.gap === '6px' && card43.iconW === '26px' && card43.iconH === '26px' &&
+            card43.nameSize === '13px', card43);
+        ok('分类数据没被改坏：支出/收入卡片都在，名字与图标齐全',
+            ev(`document.querySelectorAll('#expenseCategories .category-card').length`) > 0 &&
+            ev(`document.querySelectorAll('#incomeCategories .category-card').length`) > 0 &&
+            ev(`(function(){var c=document.querySelector('#view-categories .category-card');` +
+               `return !!c.querySelector('.category-card-name').textContent.trim() &&` +
+               `!!c.querySelector('.category-card-icon i');})()`) === true);
+        ev(`(function(){var s=document.getElementById('catProbe43');if(s)s.remove();})();`);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));
