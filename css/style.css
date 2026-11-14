@@ -5846,3 +5846,11 @@ body.app-locked .fab-add { display: none !important; }
 #accountEditModal .switch-row .sr-hint { font-size: 12px; line-height: 1.5; }
 #accountEditModal .icon-picker,
 #accountEditModal .color-picker { margin-bottom: 14px; }
+
+/* v1.41.46：微信 / 支付宝是 FontAwesome Brands 字体里的图标，
+   但账户图标在选择器和各页面统一渲染成 <i class="fa-solid ...">（历史写法，改十几处风险更大）。
+   FA6 中 .fa-weixin:before / .fa-alipay:before 的图形码不依赖前缀，只差字体族：
+   用更高特异性把这两个类的字体改回 Brands，图标即可正常显示。
+   支付方式那里本来就用 fa-brands（不带 fa-solid），不受这条影响。 */
+.fa-solid.fa-weixin,
+.fa-solid.fa-alipay { font-family: "Font Awesome 6 Brands"; font-weight: 400; }

@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.45';
+const APP_VERSION = '1.41.46';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -213,19 +213,24 @@ const DEFAULT_INSURANCE_MEMBERS = ['本人'];
 
 const ASSET_GROUPS = ['流动资金', '储蓄存款', '投资理财', '固定资产', '其他资产'];
 const LIABILITY_GROUPS = ['消费负债', '大额负债', '其他负债'];
-const ACCOUNT_ICON_CHOICES = ['fa-wallet', 'fa-building-columns', 'fa-vault', 'fa-coins', 'fa-arrow-trend-up',
-    'fa-certificate', 'fa-house', 'fa-car-side', 'fa-hand-holding-dollar', 'fa-credit-card',
-    'fa-mobile-screen-button', 'fa-handshake', 'fa-gem', 'fa-landmark', 'fa-briefcase', 'fa-ellipsis'];
+// v1.41.46：删掉第 3 个 fa-vault、第 6 个 fa-certificate，末尾补微信 / 支付宝。
+// 微信、支付宝是 Brands 字体图标，而账户图标各处统一输出 fa-solid，
+// 所以 css 里给这两个单独纠正字体族（见 .fa-solid.fa-weixin）。
+const ACCOUNT_ICON_CHOICES = ['fa-wallet', 'fa-building-columns', 'fa-coins', 'fa-arrow-trend-up',
+    'fa-house', 'fa-car-side', 'fa-hand-holding-dollar', 'fa-credit-card',
+    'fa-mobile-screen-button', 'fa-handshake', 'fa-gem', 'fa-landmark', 'fa-briefcase',
+    'fa-weixin', 'fa-alipay', 'fa-ellipsis'];
 
 // v1.39.80：默认支付方式里去掉「微信支付」，只留「微信」——
 // 用户的账本里两个都有（微信 716 笔、微信支付 0 笔），下拉框里重复且「微信支付」三个字太长。
 const DEFAULT_PAYMENT_METHODS = ['微信', '支付宝', '现金', '银行卡', '信用卡', '其他'];
 
+// v1.41.46：删掉第 15 个 fa-red-envelope（FA6 没有这个图标，一直是空白格）
 const ICON_OPTIONS = [
     'fa-utensils', 'fa-car', 'fa-bag-shopping', 'fa-basket-shopping',
     'fa-gamepad', 'fa-house', 'fa-briefcase-medical', 'fa-graduation-cap',
     'fa-mobile-screen', 'fa-ellipsis', 'fa-money-bill-wave', 'fa-gift',
-    'fa-chart-line', 'fa-laptop', 'fa-red-envelope', 'fa-plane',
+    'fa-chart-line', 'fa-laptop', 'fa-plane',
     'fa-film', 'fa-mug-hot', 'fa-shirt', 'fa-dumbbell',
     'fa-paw', 'fa-baby', 'fa-tools', 'fa-credit-card',
     'fa-bus', 'fa-train', 'fa-taxi', 'fa-bicycle',
@@ -4622,20 +4627,30 @@ function openTransactionModal(id) {
     modal.classList.remove('hidden');
     raiseOverlay(modal);
     // Amount is now entered via the custom number pad below; no system keyboard needed
+    txnOpenSnapshot = captureTxnSnapshot();   // v1.41.46：记下打开时的样子，用来判断「有没有真改过」
 }
 
 function closeTransactionModal() {
     document.getElementById('transactionModal').classList.add('hidden');
     state.editingTransactionId = null;
     state.selectedCategoryId = null;
+    txnOpenSnapshot = null;
 }
 
 // ---- 滑动返回 / 点 X：共用「有无未保存内容」判断（记一笔 / 月度账单）----
-// 两者同源：滑掉前、点 X 关前，只要真填了内容就 confirm「放弃未保存的填写？」，没内容直接走。
+// 两者同源：滑掉前、点 X 关前，只要真改过东西就 confirm「放弃未保存的填写？」，没改直接走。
+// v1.41.46：以前只看「金额或备注有没有字」，从列表点开一笔已有交易时这两个本来就有值，
+// 于是「只点开看看、什么都没改」也会被拦。改成跟打开那一刻的快照比：有变化才算未保存。
+// 只选分类不算有内容（沿用既有口径）；日期 / 时间 / 支付方式 / 成员 / 收支类型的改动会被认出来。
+let txnOpenSnapshot = null;
+function captureTxnSnapshot() {
+    const gv = k => String((document.getElementById(k) || {}).value || '');
+    return JSON.stringify([gv('amountValue'), gv('dateInput'), gv('timeInput'), gv('noteInput'),
+        gv('paymentInput'), gv('memberInput'), state.selectedTransactionType || '']);
+}
 function transactionHasUnsavedContent() {
-    const amt = (document.getElementById('amountInput') || {}).value || '';
-    const note = (document.getElementById('noteInput') || {}).value || '';
-    return (amt.trim() && amt.trim() !== '0') || note.trim();
+    if (txnOpenSnapshot === null) return false;
+    return captureTxnSnapshot() !== txnOpenSnapshot;
 }
 function monthlyHasUnsavedContent() {
     if (typeof monthlyDirty !== 'undefined' && !monthlyDirty) return false;
@@ -5354,6 +5369,9 @@ function saveTransaction(opts = {}) {
         document.getElementById('deleteTxnBtn').style.display = 'none';
         // Re-render to update the list behind the modal
         renderView(state.currentView);
+        // v1.41.46：连续记账后表单已被清空，把「打开时的样子」更新成这一刻，
+        // 否则下一笔点 X 会拿旧快照比对、误弹「放弃未保存的填写？」
+        txnOpenSnapshot = captureTxnSnapshot();
     } else {
         closeTransactionModal();
         renderView(state.currentView);

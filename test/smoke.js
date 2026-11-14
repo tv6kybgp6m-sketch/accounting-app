@@ -1688,6 +1688,73 @@ async function run() {
         ok('getMonthKey 解析已存日期没被改坏（2026-11-14 → 2026-11）',
             ev(`getMonthKey('2026-11-14')`) === '2026-11');
 
+        // ---------- 38) v1.41.46：只看不改不弹提醒 / 分类空白图标 / 账户图标增删 ----------
+        stage = '38';
+        const css38 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        // jsdom 没实现 matchMedia，openTransactionModal 的渲染链会用到；补一个只读 stub。
+        ev(`window.matchMedia = window.matchMedia || function(){return {matches:false,media:'',
+            addEventListener:function(){},removeEventListener:function(){},
+            addListener:function(){},removeListener:function(){}};};`);
+        const _tid = ev(`state.transactions[0] && state.transactions[0].id`);
+        ev(`editTransaction(${JSON.stringify(_tid)});`);
+        ok('打开弹窗时确实记下了快照（不是靠 null 蒙混过关）',
+            ev(`txnOpenSnapshot !== null`) === true);
+        ok('从列表点开一笔已有交易（金额/备注本来就有值），只看不改 → 不算未保存',
+            ev(`transactionHasUnsavedContent()`) === false);
+        ok('点 X 不会弹「放弃未保存的填写？」',
+            ev(`(function(){var real=window.confirm,n=0;window.confirm=function(){n++;return true;};
+                try{confirmCloseTransactionModal();}finally{window.confirm=real;}return n;})()`) === 0);
+        ev(`editTransaction(${JSON.stringify(_tid)});`);
+        ok('真改了金额 → 算未保存',
+            ev(`(function(){var e=document.getElementById('amountValue'),o=e.value;e.value='999';
+                var r=transactionHasUnsavedContent();e.value=o;return r;})()`) === true);
+        ok('改完又改回原值 → 不算未保存', ev(`transactionHasUnsavedContent()`) === false);
+        ok('改备注 / 改日期也认得出来',
+            ev(`(function(){var e=document.getElementById('noteInput'),o=e.value;e.value='改一下';
+                var a=transactionHasUnsavedContent();e.value=o;
+                var d=document.getElementById('dateInput'),od=d.value;d.value='2026-01-01';
+                var b=transactionHasUnsavedContent();d.value=od;return !!(a&&b);})()`) === true);
+        ok('只选分类仍不算有内容（沿用既有口径）',
+            ev(`(function(){var o=state.selectedCategoryId;state.selectedCategoryId='__probe_cat__';
+                var r=transactionHasUnsavedContent();state.selectedCategoryId=o;return r;})()`) === false);
+        ok('左滑与点 X 走同一个判断函数，不会分叉',
+            /if \(modal\.id === 'transactionModal'\) return transactionHasUnsavedContent\(\);/.test(appSrc) &&
+            appSrc.indexOf('if (transactionHasUnsavedContent() && !window.confirm') >= 0);
+        ok('连续记账（再记一笔）后重设快照，不会拿旧值误弹',
+            /opts\.reopen[\s\S]{0,900}txnOpenSnapshot = captureTxnSnapshot\(\);/.test(appSrc));
+        ev(`openTransactionModal();`);
+        ok('新增模式刚打开、什么都没填 → 不算未保存',
+            ev(`transactionHasUnsavedContent()`) === false);
+        ok('新增模式填了金额 → 算未保存',
+            ev(`(function(){document.getElementById('amountValue').value='50';return transactionHasUnsavedContent();})()`) === true);
+
+        ok('分类图标删掉第 15 个空白的 fa-red-envelope，剩 27 个',
+            ev(`ICON_OPTIONS.length`) === 27 && ev(`ICON_OPTIONS.indexOf('fa-red-envelope')`) === -1 &&
+            ev(`ICON_OPTIONS[14]`) === 'fa-plane');
+        ev(`renderIconPicker();`);
+        ok('分类图标选择器也只剩 27 个，没有空白格',
+            ev(`document.querySelectorAll('#iconPicker .icon-pick-item').length`) === 27);
+        ok('账户图标删掉原第 3 / 第 6 个、加入微信与支付宝，仍是 16 个',
+            ev(`ACCOUNT_ICON_CHOICES.length`) === 16 &&
+            ev(`ACCOUNT_ICON_CHOICES.indexOf('fa-vault')`) === -1 &&
+            ev(`ACCOUNT_ICON_CHOICES.indexOf('fa-certificate')`) === -1 &&
+            ev(`ACCOUNT_ICON_CHOICES.indexOf('fa-weixin')`) >= 0 &&
+            ev(`ACCOUNT_ICON_CHOICES.indexOf('fa-alipay')`) >= 0 &&
+            ev(`ACCOUNT_ICON_CHOICES[2]`) === 'fa-coins' && ev(`ACCOUNT_ICON_CHOICES[5]`) === 'fa-car-side');
+        ev(`acctEditDraft = {icon:'fa-wallet', color:'#ff6b6b'}; renderAcctEditPickers();`);
+        ok('添加账户弹窗里能看到微信 / 支付宝两个图标',
+            ev(`!!document.querySelector('#acctEditIcons [data-icon="fa-weixin"]')`) &&
+            ev(`!!document.querySelector('#acctEditIcons [data-icon="fa-alipay"]')`) &&
+            ev(`document.querySelectorAll('#acctEditIcons .icon-pick-item').length`) === 16);
+        ok('品牌图标字体规则在（否则 fa-solid 下微信/支付宝会显示空白）',
+            css38.indexOf('.fa-solid.fa-weixin') >= 0 && css38.indexOf('"Font Awesome 6 Brands"') >= 0);
+        const fa38 = fs.readFileSync(path.join(REPO, 'vendor', 'fontawesome', 'css', 'all.min.css'), 'utf8');
+        ok('FontAwesome 里确实有微信/支付宝图形码与 Brands 字体；fa-red-envelope 确实不存在',
+            fa38.indexOf('.fa-weixin:before') >= 0 && fa38.indexOf('.fa-alipay:before') >= 0 &&
+            fa38.indexOf('"Font Awesome 6 Brands"') >= 0 && fa38.indexOf('fa-red-envelope') < 0);
+        ok('图标按名字存、不是按序号（删选项不会让已有账户/分类错位）',
+            appSrc.indexOf('data-icon="${i}"') >= 0 && appSrc.indexOf("onclick=\"selectIcon('${icon}')\"") >= 0);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));
