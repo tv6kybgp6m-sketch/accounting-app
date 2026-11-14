@@ -2016,6 +2016,79 @@ async function run() {
                `!!c.querySelector('.category-card-icon i');})()`) === true);
         ev(`(function(){var s=document.getElementById('catProbe43');if(s)s.remove();})();`);
 
+        // ---------- 44) v1.41.52：收入专属图标 / 新建支付方式 / pmStyles 对照表 ----------
+        stage = '44';
+        const app44 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        const html44 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+        const fa44 = fs.readFileSync(path.join(REPO, 'vendor/fontawesome/css/all.min.css'), 'utf8');
+        ok('新建分类弹窗有支出 / 收入 / 支付方式三种类型',
+            (html44.match(/data-cat-type="(expense|income|payment)"/g) || []).length === 3);
+        const incIcons = JSON.parse(ev('JSON.stringify(INCOME_ICON_OPTIONS)'));
+        const payIcons = JSON.parse(ev('JSON.stringify(PAYMENT_ICON_OPTIONS)'));
+        ok('收入 / 支付两套图标里每个字形在 FA 字体表里都存在（不再有空白格）',
+            incIcons.length >= 20 && payIcons.length >= 15 &&
+            incIcons.concat(payIcons).every(ic => fa44.indexOf('.' + ic + ':before') >= 0),
+            incIcons.length + ' / ' + payIcons.length);
+        ok('收入默认图标不再是支出的餐饮，颜色也不再是支出红',
+            ev('CAT_TYPE_DEFAULTS.income.icon') === 'fa-sack-dollar' &&
+            ev('CAT_TYPE_DEFAULTS.income.color') === '#00b894' &&
+            ev('CAT_TYPE_DEFAULTS.expense.icon') === 'fa-utensils');
+
+        ev(`openCategoryModal();`);
+        ok('新建分类默认仍是支出那套', ev(`state.selectedIcon`) === 'fa-utensils');
+        ev(`document.querySelector('#categoryModal .type-btn[data-cat-type="income"]').click();`);
+        const inc44 = ev(`(function(){var s=document.querySelector('#iconPicker .icon-pick-item.selected i');` +
+            `return {icon:state.selectedIcon,color:state.selectedColor,sel:s?s.className:'',` +
+            `count:document.querySelectorAll('#iconPicker .icon-pick-item').length};})()`);
+        ok('点「收入分类」后整套图标、默认选中、颜色都跟着换',
+            inc44.icon === 'fa-sack-dollar' && inc44.color === '#00b894' &&
+            inc44.sel.indexOf('fa-sack-dollar') >= 0 && inc44.count === incIcons.length, inc44);
+        ev(`document.querySelector('#categoryModal .type-btn[data-cat-type="payment"]').click();`);
+        ok('点「支付方式」后换成支付图标集、标题改为新建支付方式',
+            ev(`state.selectedIcon`) === 'fa-wallet' &&
+            ev(`document.getElementById('categoryModalTitle').textContent`) === '新建支付方式' &&
+            ev(`document.querySelectorAll('#iconPicker .icon-pick-item').length`) === payIcons.length);
+        ok('编辑已有分类时「支付方式」按钮隐藏，不会把分类 type 写成 payment',
+            ev(`(function(){openCategoryModal(state.categories[0].id);` +
+               `return document.querySelector('#categoryModal .type-btn[data-cat-type="payment"]').style.display;})()`) === 'none' &&
+            ev(`state.selectedCategoryType`) !== 'payment');
+
+        ev(`openCategoryModal();`);
+        ev(`document.querySelector('#categoryModal .type-btn[data-cat-type="payment"]').click();`);
+        ev(`document.getElementById('catNameInput').value = '测试钱包';`);
+        const catsBefore44 = ev(`state.categories.length`);
+        ev(`saveCategory();`);
+        ok('从弹窗新建支付方式：写进支付方式清单，分类一条不多',
+            ev(`state.paymentMethods.indexOf('测试钱包') >= 0`) === true &&
+            ev(`state.categories.length`) === catsBefore44);
+        const st44 = ev(`JSON.stringify(state.pmStyles['测试钱包'])`);
+        ok('图标与颜色存进独立对照表，交易里的 paymentMethod 字段形状不变',
+            !!st44 && JSON.parse(st44).icon === 'fa-wallet' && JSON.parse(st44).color === '#0984e3', st44);
+        ev(`renderPaymentMethodsManage();`);
+        const chip44 = ev(`(function(){var c=document.querySelector('#paymentMethodsList .pm-chip[data-pm="测试钱包"] i');` +
+            `return c ? {cls:c.className, col:c.style.color, attr:c.getAttribute('style')||''} : null;})()`);
+        ok('分类管理页的支付方式卡片显示自定义图标与颜色',
+            !!chip44 && chip44.cls.indexOf('fa-wallet') >= 0 &&
+            /9, ?132, ?227|0984e3/i.test(chip44.col + ' ' + chip44.attr), chip44);
+        ev(`renderPaymentOptions();`);
+        ok('记一笔的支付方式标签旁小图标跟随选中项（原生 option 放不了图标）',
+            ev(`document.getElementById('paymentIconBadge').className`).indexOf('fa-') >= 0);
+        const clean44 = JSON.parse(ev(`JSON.stringify(normalizePmStyles({` +
+            `a:{icon:'fa-wallet',color:'#123456',updatedAt:5},` +
+            `b:{icon:'javascript:alert(1)',color:'red'},c:null}))`));
+        ok(' normalizePmStyles 挡掉非法颜色与图标（拼进 style 前先过滤）'.trim(),
+            Object.keys(clean44).length === 1 && clean44.a.icon === 'fa-wallet' && clean44.a.color === '#123456');
+        ok('pmStyles 同时进本机存储与云同步载荷，改名/删除会跟着搬走或删掉',
+            (app44.match(/pmStyles: state\.pmStyles \|\| \{\}/g) || []).length === 2 &&
+            app44.indexOf('state.pmStyles = normalizePmStyles(data.pmStyles)') >= 0 &&
+            app44.indexOf('normalizePmStyles(remoteData.data.pmStyles)') >= 0 &&
+            app44.indexOf('state.pmStyles[n] = { ...state.pmStyles[old]') >= 0 &&
+            app44.indexOf('delete state.pmStyles[name]') >= 0);
+        ev(`(function(){var n='测试钱包';` +
+           `state.paymentMethods=state.paymentMethods.filter(p=>p!==n);` +
+           `delete state.pmStyles[n]; delete state.pmAddedAt[n];` +
+           `closeCategoryModal(); renderPaymentMethodsManage();})();`);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

@@ -890,8 +890,8 @@
                             <select class="text-input" id="memberInput"></select>
                         </div>
                         <div class="form-group form-group-pay">
-                            <label>支付方式</label>
-                            <select class="text-input" id="paymentInput">
+                            <label>支付方式 <span class="pay-label-icon" id="paymentIconBadge"></span></label>
+                            <select class="text-input" id="paymentInput" onchange="updatePaymentIconBadge()">
                                 <option value="微信" selected>微信</option>
                                 <option value="支付宝">支付宝</option>
                                 <option value="现金">现金</option>
@@ -950,6 +950,7 @@
                     <div class="type-toggle">
                         <button class="type-btn active" data-cat-type="expense">支出分类</button>
                         <button class="type-btn" data-cat-type="income">收入分类</button>
+                        <button class="type-btn" data-cat-type="payment">支付方式</button>
                     </div>
                     <div class="form-group">
                         <label>名称</label>
@@ -1475,7 +1476,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.51').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.52').catch(() => {});
             });
         }
     </script>

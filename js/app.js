@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.51';
+const APP_VERSION = '1.41.52';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -236,6 +236,34 @@ const ICON_OPTIONS = [
     'fa-bus', 'fa-train', 'fa-taxi', 'fa-bicycle',
 ];
 
+// v1.41.52：收入分类、支付方式各有自己的一套图标，弹窗里切换类型时整套跟着换。
+// 每个字形都已在 vendor/fontawesome/css/all.min.css 里核过 :before 存在，避免出现空白格。
+const INCOME_ICON_OPTIONS = [
+    'fa-sack-dollar', 'fa-money-bill-wave', 'fa-hand-holding-dollar', 'fa-coins',
+    'fa-chart-line', 'fa-arrow-trend-up', 'fa-chart-simple', 'fa-percent',
+    'fa-piggy-bank', 'fa-landmark', 'fa-building-columns', 'fa-circle-dollar-to-slot',
+    'fa-money-bill-transfer', 'fa-file-invoice-dollar', 'fa-receipt', 'fa-rotate-left',
+    'fa-gift', 'fa-briefcase', 'fa-laptop-code', 'fa-store',
+    'fa-house', 'fa-building', 'fa-seedling', 'fa-star', 'fa-wallet', 'fa-ellipsis',
+];
+const PAYMENT_ICON_OPTIONS = [
+    'fa-wallet', 'fa-money-bill-wave', 'fa-credit-card', 'fa-building-columns',
+    'fa-mobile-screen-button', 'fa-coins', 'fa-piggy-bank', 'fa-qrcode',
+    'fa-money-check-dollar', 'fa-receipt', 'fa-hand-holding-dollar', 'fa-sack-dollar',
+    'fa-building', 'fa-circle-dollar-to-slot', 'fa-money-bill-transfer',
+    'fa-file-invoice-dollar', 'fa-landmark', 'fa-store', 'fa-gift', 'fa-ellipsis',
+];
+const CAT_TYPE_DEFAULTS = {
+    expense: { icon: 'fa-utensils', color: '#ff6b6b' },
+    income: { icon: 'fa-sack-dollar', color: '#00b894' },
+    payment: { icon: 'fa-wallet', color: '#0984e3' },
+};
+function iconOptionsFor(type) {
+    if (type === 'income') return INCOME_ICON_OPTIONS;
+    if (type === 'payment') return PAYMENT_ICON_OPTIONS;
+    return ICON_OPTIONS;
+}
+
 const COLOR_OPTIONS = [
     '#ff6b6b', '#4ecdc4', '#ff9ff3', '#feca57', '#a29bfe',
     '#fd79a8', '#e17055', '#6c5ce7', '#00cec9', '#636e72',
@@ -313,6 +341,7 @@ let state = {
     reportMonth: null,
     deleted: { transactions: [], categories: [], budgets: [], paymentMethods: [], accounts: [], balances: [], returns: [], members: [], insuranceMembers: [], insurance: [], insuranceTypes: [], recurring: [], cols: [], currencies: [] },  // soft-delete markers  // soft-delete markers
     pmAddedAt: {},          // payment method name -> when it was added (names are the identity)
+    pmStyles: {},           // v1.41.52 支付方式的图标/颜色：name -> {icon, color, updatedAt}。名字数组本身不动
     lastExportAt: 0,        // 最近一次导出的时间戳，用于备份提醒
     fundTargets: { cash: 0, steady: 0, growth: 0 },
     insuranceMembers: [...DEFAULT_INSURANCE_MEMBERS],
@@ -357,6 +386,8 @@ function ensureArrayFields() {
     ARRAY_STATE_FIELDS.forEach(k => {
         if (!Array.isArray(state[k])) state[k] = [];
     });
+    // 支付方式样式是对象不是数组，单独兜底（老账本没这个键）
+    if (!state.pmStyles || typeof state.pmStyles !== 'object') state.pmStyles = {};
     // 回顾是对象不是数组，单独兜底（老账本没有这两个键）
     if (!state.reviews || typeof state.reviews !== 'object') state.reviews = {};
     if (!state.reviews.monthly || typeof state.reviews.monthly !== 'object') state.reviews.monthly = {};
@@ -375,6 +406,22 @@ function ensureArrayFields() {
     });
     if (!Array.isArray(state.insuranceTypes)) state.insuranceTypes = [];
     if (!state.insuranceTypeAddedAt || typeof state.insuranceTypeAddedAt !== 'object') state.insuranceTypeAddedAt = {};
+}
+
+// v1.41.52：支付方式样式从本机 / 云端 / 备份读进来时的唯一入口。
+// 只认白名单形状，颜色必须是 #hex（渲染时会拼进 style，防注入），其余一律丢弃。
+function normalizePmStyles(raw) {
+    const out = {};
+    if (!raw || typeof raw !== 'object') return out;
+    Object.keys(raw).forEach(k => {
+        const v = raw[k];
+        if (!v || typeof v !== 'object') return;
+        const icon = (typeof v.icon === 'string' && /^fa-[a-z0-9- ]+$/i.test(v.icon)) ? v.icon : '';
+        const color = (typeof v.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(v.color)) ? v.color : '';
+        if (!icon && !color) return;
+        out[k] = { icon, color, updatedAt: Number(v.updatedAt) || 0 };
+    });
+    return out;
 }
 
 // ============================================================
@@ -601,6 +648,7 @@ function saveStateNow() {
         categoryVersion: state.categoryVersion || 2,
         deleted: state.deleted,
         pmAddedAt: state.pmAddedAt,
+        pmStyles: state.pmStyles || {},
         lastExportAt: state.lastExportAt,
         recurring: state.recurring,
         // 待确认队列和"这期我跳过了"的标记必须落盘：
@@ -1623,6 +1671,7 @@ function buildSyncPayload() {
             settings: settingsForSync,
             deleted: state.deleted,
             pmAddedAt: state.pmAddedAt,
+            pmStyles: state.pmStyles || {},
             // 周期规则也要走同步：不然 Mac 上建的房租规则，手机上根本不存在，
             // 待确认队列就永远只在 Mac 上冒出来。队列本身仍是本机的（确认是"人+设备"的动作）。
             recurring: state.recurring,
@@ -1877,6 +1926,13 @@ function mergeRemoteData(remoteData) {
     const remoteAddedAt = normalizeAddedAtMap(remoteData.data.pmAddedAt);
     Object.keys(remoteAddedAt).forEach(k => {
         if (!state.pmAddedAt[k] || remoteAddedAt[k] > state.pmAddedAt[k]) state.pmAddedAt[k] = remoteAddedAt[k];
+    });
+    // v1.41.52：支付方式样式按名字较新胜（同步 / 备份恢复 / 导入都走这里）
+    if (!state.pmStyles || typeof state.pmStyles !== 'object') state.pmStyles = {};
+    const remoteStyles = normalizePmStyles(remoteData.data.pmStyles);
+    Object.keys(remoteStyles).forEach(k => {
+        const cur = state.pmStyles[k], r = remoteStyles[k];
+        if (!cur || (r.updatedAt || 0) > (cur.updatedAt || 0)) state.pmStyles[k] = r;
     });
 
     // Merge the soft-delete markers, then let them hide any row they cover
@@ -2988,7 +3044,7 @@ function wipeForReplace(data) {
     state.accounts = DEFAULT_ACCOUNTS.map(a => Object.assign({}, a));
     state.categories = [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES];
     state.transactions = []; state.budgets = []; state.balances = []; state.returns = [];
-    state.insurancePolicies = []; state.paymentMethods = []; state.pmAddedAt = {};
+    state.insurancePolicies = []; state.paymentMethods = []; state.pmAddedAt = {}; state.pmStyles = {};
     state.memberAddedAt = {}; state.insuranceMemberAddedAt = {};
     state.balanceMembers = ['本人']; state.insuranceMembers = [...DEFAULT_INSURANCE_MEMBERS];
     state.balanceOwner = 'all';
@@ -3858,6 +3914,7 @@ function loadState() {
             state.moneyVisibleByPage = { balance: false, funds: false, returns: false };
             state.deleted = normalizeTombstones(data.deleted);
             state.pmAddedAt = normalizeAddedAtMap(data.pmAddedAt);
+            state.pmStyles = normalizePmStyles(data.pmStyles);
             state.lastExportAt = Number(data.lastExportAt) || 0;
             const ui = data.uiPrefs || {};
             if (ui.balanceOwner === 'all' || state.balanceMembers.includes(ui.balanceOwner)) state.balanceOwner = ui.balanceOwner;
@@ -5038,6 +5095,17 @@ function renderPaymentOptions(selected) {
     const target = selected || state.settings.defaultPaymentMethod || '微信';
     const value = methods.includes(target) ? target : methods[0];
     sel.innerHTML = methods.map(p => `<option value="${p}" ${p === value ? 'selected' : ''}>${p}</option>`).join('');
+    updatePaymentIconBadge();
+}
+
+// v1.41.52：原生 <option> 里放不了字体图标，在「支付方式」标签旁放一个小图标，
+// 跟着当前选中项变，自定义图标和颜色在记一笔时也能看见。
+function updatePaymentIconBadge() {
+    const sel = document.getElementById('paymentInput');
+    const badge = document.getElementById('paymentIconBadge');
+    if (!sel || !badge) return;
+    badge.className = 'pay-label-icon ' + paymentIconFor(sel.value);
+    badge.style.color = paymentColorFor(sel.value) || 'var(--text-muted)';
 }
 
 // 交易归属成员选择器：只有家庭有多个成员时才显示，单人家庭保持极简（不显示）。
@@ -5053,6 +5121,12 @@ function renderMemberSelector(def) {
 }
 
 function paymentIconFor(name) {
+    // v1.41.52：用户在「新建支付方式」里挑过图标就优先用它；没挑过仍按名字给内置 logo
+    const st = state.pmStyles && state.pmStyles[name];
+    if (st && st.icon) {
+        const ic = String(st.icon);
+        return ic.indexOf(' ') > 0 ? ic : 'fa-solid ' + ic;
+    }
     return {
         '现金': 'fa-solid fa-money-bill-wave',
         '微信': 'fa-brands fa-weixin',
@@ -5061,6 +5135,10 @@ function paymentIconFor(name) {
         '信用卡': 'fa-solid fa-credit-card',
     }[name] || 'fa-solid fa-coins';
 }
+function paymentColorFor(name) {
+    const st = state.pmStyles && state.pmStyles[name];
+    return st && st.color ? st.color : '';
+}
 
 function renderPaymentMethodsManage() {
     const container = document.getElementById('paymentMethodsList');
@@ -5068,10 +5146,12 @@ function renderPaymentMethodsManage() {
     container.innerHTML = state.paymentMethods.map(p => {
         const count = state.transactions.filter(t => (t.paymentMethod || '现金') === p).length;
         const isDefault = p === (state.settings.defaultPaymentMethod || '微信');
+        const col = paymentColorFor(p);
+        const iconStyle = col ? ' style="color:' + col + '"' : '';
         return `
             <div class="pm-chip ${isDefault ? 'pm-chip-default' : ''}" draggable="true" data-pm="${_esc(p)}"
                  title="按住拖动可调整顺序；点一下可改 / 删">
-                <i class="${paymentIconFor(p)}"></i>
+                <i class="${paymentIconFor(p)}"${iconStyle}></i>
                 <span>${_esc(p)}</span>
                 ${isDefault ? '<span class="pm-default-tag">默认</span>' : ''}
             </div>
@@ -5212,6 +5292,11 @@ function renamePaymentMethod(old) {
     state.transactions.forEach(t => { if ((t.paymentMethod || '现金') === old) { t.paymentMethod = n; t.updatedAt = Date.now(); } });
     if (state.pmAddedAt[old] !== undefined) { state.pmAddedAt[n] = state.pmAddedAt[old]; delete state.pmAddedAt[old]; }
     else state.pmAddedAt[n] = Date.now();
+    // v1.41.52：名字就是样式的 key，改名要一起搬，否则自定义图标/颜色会丢
+    if (state.pmStyles && state.pmStyles[old]) {
+        state.pmStyles[n] = { ...state.pmStyles[old], updatedAt: Date.now() };
+        delete state.pmStyles[old];
+    }
     if ((state.settings.defaultPaymentMethod || '微信') === old) state.settings.defaultPaymentMethod = n;
     addTombstone('paymentMethods', old);
     saveState();
@@ -5253,6 +5338,7 @@ function deletePaymentMethod(name) {
     pushUndo(`支付方式「${name}」`, { paymentMethods: [name] });
     addTombstone('paymentMethods', name);
     state.paymentMethods = state.paymentMethods.filter(p => p !== name);
+    if (state.pmStyles) delete state.pmStyles[name];
     if ((state.settings.defaultPaymentMethod || '微信') === name) {
         state.settings.defaultPaymentMethod = state.paymentMethods[0];
     }
@@ -6578,10 +6664,15 @@ function openCategoryModal(id) {
         state.editingCategoryId = null;
         title.textContent = '新建分类';
         state.selectedCategoryType = 'expense';
-        state.selectedIcon = 'fa-utensils';
-        state.selectedColor = '#ff6b6b';
+        state.selectedIcon = CAT_TYPE_DEFAULTS.expense.icon;
+        state.selectedColor = CAT_TYPE_DEFAULTS.expense.color;
         document.getElementById('catNameInput').value = '';
     }
+
+    // v1.41.52：编辑已有分类时不允许切成「支付方式」，否则会把分类的 type 写成 payment（坏数据）
+    const pmTypeBtn = document.querySelector('#categoryModal .type-btn[data-cat-type="payment"]');
+    if (pmTypeBtn) pmTypeBtn.style.display = id ? 'none' : '';
+    if (id && state.selectedCategoryType === 'payment') state.selectedCategoryType = 'expense';
 
     document.querySelectorAll('#categoryModal .type-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.catType === state.selectedCategoryType);
@@ -6600,7 +6691,10 @@ function closeCategoryModal() {
 
 function renderIconPicker() {
     const container = document.getElementById('iconPicker');
-    container.innerHTML = ICON_OPTIONS.map(icon => `
+    // v1.41.52：按当前类型选整套图标；编辑旧分类时若原图标不在新集合里，临时补进来保持选中态
+    const opts = iconOptionsFor(state.selectedCategoryType).slice();
+    if (state.selectedIcon && opts.indexOf(state.selectedIcon) < 0) opts.unshift(state.selectedIcon);
+    container.innerHTML = opts.map(icon => `
         <div class="icon-pick-item ${icon === state.selectedIcon ? 'selected' : ''}"
              onclick="selectIcon('${icon}')">
             <i class="fa-solid ${icon}"></i>
@@ -6630,6 +6724,21 @@ function selectColor(color) {
 function saveCategory() {
     const name = document.getElementById('catNameInput').value.trim();
     if (!name) { showToast('请输入分类名称', 'error'); return; }
+
+    // v1.41.52：类型选「支付方式」时写进支付方式清单（名字仍是身份），
+    // 图标和颜色另存对照表，不碰交易里的 paymentMethod 字段。
+    if (state.selectedCategoryType === 'payment' && !state.editingCategoryId) {
+        if (state.paymentMethods.includes(name)) { showToast('该支付方式已存在', 'error'); return; }
+        state.paymentMethods.push(name);
+        state.pmAddedAt[name] = Date.now();
+        state.pmStyles[name] = { icon: state.selectedIcon, color: state.selectedColor, updatedAt: Date.now() };
+        saveState();
+        closeCategoryModal();
+        renderPaymentMethodsManage();
+        try { renderPaymentOptions(); } catch (_) {}
+        showToast(`支付方式「${name}」已添加`, 'success');
+        return;
+    }
 
     if (state.editingCategoryId) {
         const c = state.categories.find(x => x.id === state.editingCategoryId);
@@ -7709,6 +7818,7 @@ function clearAllData() {
     state.paymentMethods = [...DEFAULT_PAYMENT_METHODS];
     // 故意不重置 state.deleted：这些墓碑就是「清空」本身
     state.pmAddedAt = {};
+    state.pmStyles = {};
     saveState();
     renderView(state.currentView);
     refreshAccountLists();
@@ -7736,6 +7846,7 @@ function resetLocalData() {
     state.categories = [...DEFAULT_EXPENSE_CATEGORIES, ...DEFAULT_INCOME_CATEGORIES];
     state.paymentMethods = [...DEFAULT_PAYMENT_METHODS];
     state.pmAddedAt = {};
+    state.pmStyles = {};
     // 本机重置：连本地删除标记一起清空，确保同步时不会把任何墓碑
     //（含之前「清空全部」留下的全量墓碑、或单条删除的墓碑）传到别的设备。
     // 之后同步从云端把共享的删除标记和账本一起拉回来，本机与其它设备一致、但绝不多删。
@@ -15596,9 +15707,18 @@ function initEventListeners() {
     // Category type toggle
     document.querySelectorAll('#categoryModal .type-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            state.selectedCategoryType = btn.dataset.catType;
+            const t = btn.dataset.catType;
+            state.selectedCategoryType = t;
             document.querySelectorAll('#categoryModal .type-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
+            // v1.41.52：整套图标 + 默认颜色跟着类型换，收入不再顶着支出那个餐饮图标
+            const d = CAT_TYPE_DEFAULTS[t] || CAT_TYPE_DEFAULTS.expense;
+            state.selectedIcon = d.icon;
+            state.selectedColor = d.color;
+            renderIconPicker();
+            renderColorPicker();
+            const h = document.getElementById('categoryModalTitle');
+            if (h && !state.editingCategoryId) h.textContent = t === 'payment' ? '新建支付方式' : '新建分类';
         });
     });
 

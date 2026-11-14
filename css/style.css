@@ -6098,3 +6098,19 @@ html.mac-app[data-theme="dark"] #remoteSyncExpiry::-webkit-calendar-picker-indic
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+/* ===== v1.41.52：新建分类弹窗加「支付方式」类型，支付方式也能带图标颜色 ===== */
+#categoryModal .type-toggle .type-btn {
+    font-size: 13px;
+    padding: 8px 4px;
+    white-space: nowrap;
+}
+#categoryModal .type-btn.active[data-cat-type="payment"] {
+    background: var(--accent);
+    color: #fff;
+}
+/* 记一笔的支付方式标签旁：原生 option 放不了字体图标，用这枚小图标跟随选中项 */
+.pay-label-icon {
+    font-size: 12px;
+    margin-left: 4px;
+}
