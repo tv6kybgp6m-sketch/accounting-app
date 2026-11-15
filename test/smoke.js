@@ -2095,7 +2095,9 @@ async function run() {
         const css45 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
         const html45 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
         const bStart45 = css45.indexOf('/* ===== v1.41.53');
-        const block53 = bStart45 >= 0 ? css45.slice(bStart45) : '';
+        // ⚠️ 截到下一个版本块为止，别 slice 到文件末尾（后面追加新版本时会被算进本块）
+        const bEnd45 = css45.indexOf('/* ===== v1.', bStart45 + 10);
+        const block53 = bStart45 >= 0 ? css45.slice(bStart45, bEnd45 > 0 ? bEnd45 : css45.length) : '';
         const media45 = block53.indexOf('@media (max-width: 640px) {');
         const macPart45 = media45 > 0 ? block53.slice(0, media45) : block53;
         const inner45 = media45 > 0
@@ -2235,6 +2237,52 @@ async function run() {
            `state.paymentMethods=state.paymentMethods.filter(p=>p!==n);` +
            `delete state.pmStyles[n];delete state.pmAddedAt[n];});` +
            `closeCategoryModal();renderPaymentMethodsManage();})();`);
+
+        // ---------- 46) v1.41.54：手机口令页整屏、顶部按钮完整、上下同色 ----------
+        stage = '46';
+        const css46 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const bStart46 = css46.indexOf('/* ===== v1.41.54');
+        const bEnd46 = css46.indexOf('/* ===== v1.', bStart46 + 10);
+        const block54 = bStart46 >= 0 ? css46.slice(bStart46, bEnd46 > 0 ? bEnd46 : css46.length) : '';
+        const media46 = block54.indexOf('@media (max-width: 640px) {');
+        const inner46 = media46 > 0
+            ? block54.slice(media46 + '@media (max-width: 640px) {'.length, block54.lastIndexOf('}'))
+            : '';
+        ok('v1.41.54 只一个版本块头，整块包在手机 media 里、Mac 一条都不命中',
+            bStart46 >= 0 && (css46.match(/\/\* ===== v1\.41\.54/g) || []).length === 1 &&
+            media46 > 0 && inner46.indexOf('html:not(.mac-app)') >= 0 &&
+            inner46.indexOf('html.mac-app') < 0);
+        ok('口令页从 340px 圆角卡片改成整屏：满宽 / 100dvh / 去边框圆角 / 上下留安全区',
+            /#startupLock \.startup-lock-card \{[^}]*width: 100% !important/s.test(inner46) &&
+            inner46.indexOf('min-height: 100dvh !important') >= 0 &&
+            inner46.indexOf('border-radius: 0 !important') >= 0 &&
+            inner46.indexOf('border: 0 !important') >= 0 &&
+            inner46.indexOf('justify-content: center !important') >= 0 &&
+            inner46.indexOf('env(safe-area-inset-top') >= 0 &&
+            inner46.indexOf('env(safe-area-inset-bottom') >= 0);
+        ok('锁屏外层与顶端状态栏采样条都换成同一底色，不再有一块异色方块',
+            /html:not\(\.mac-app\) #startupLock \{[^}]*background: var\(--bg-modal\) !important/s.test(inner46) &&
+            inner46.indexOf('body.app-locked #statusBarProbe') >= 0);
+        ok('记一笔头部让开状态栏色条，X / 删除按钮整颗都画得出来',
+            /#transactionModal \.modal-header \{[^}]*padding-top: calc\(env\(safe-area-inset-top/s.test(inner46));
+        ok('弹窗 / 内容区 / 数字键盘统一底色，下半屏不再是一块方形',
+            inner46.indexOf('#transactionModal > .modal,') >= 0 &&
+            inner46.indexOf('#transactionModal .numpad') >= 0 &&
+            /html:not\(\.mac-app\) #transactionModal > \.modal,[\s\S]*background: var\(--bg-modal\) !important/s.test(inner46));
+        const probe46 = inner46.replace(/\/\*[\s\S]*?\*\//g, '');
+        ev(`(function(){var s=document.createElement('style');s.id='probe46';` +
+           `s.textContent=${JSON.stringify(probe46)};document.head.appendChild(s);})();`);
+        const card46 = ev(`(function(){var c=document.querySelector('#startupLock .startup-lock-card');` +
+            `var s=getComputedStyle(c);return {w:s.width,br:s.borderTopLeftRadius};})()`);
+        ev(`document.documentElement.classList.add('mac-app');`);
+        const cardMac46 = ev(`(function(){var c=document.querySelector('#startupLock .startup-lock-card');` +
+            `var s=getComputedStyle(c);return {w:s.width,br:s.borderTopLeftRadius};})()`);
+        ev(`document.documentElement.classList.remove('mac-app');`);
+        ev(`(function(){var s=document.getElementById('probe46');if(s)s.remove();})();`);
+        ok('实测：手机口令卡片满宽无圆角，加了 Mac 标记后完全不命中（仍是 340px 卡片）',
+            (card46.w === '100%' || parseInt(card46.w, 10) === ev('window.innerWidth')) &&
+            /^(0|0px)$/.test(card46.br) && cardMac46.w === '340px' && cardMac46.w !== card46.w,
+            { card46, cardMac46 });
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
