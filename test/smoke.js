@@ -1799,7 +1799,7 @@ async function run() {
             '#view-transactions .view-header-right .primary-btn',
             '#view-transactions .filter-bar .filter-right .filter-select',
             '#view-reports .view-header .report-controls .filter-select',
-            '#view-reports .view-header .report-controls .secondary-btn',
+            '#view-reports .view-header .report-controls .ym-review-btn',
             '#view-reports .close-head .secondary-btn',
             '#view-reports .close-head .filter-select.close-month',
             '#view-reports .ci-act', '#view-reports .ci-exclude',
@@ -2310,6 +2310,162 @@ async function run() {
         const mac47 = ev(findSync47(month47));
         ok('Mac 分支仍是同一句，没有被这次改动带坏', !!mac47 && mac47 === never47, { mac47, never47 });
         ev(`(function(){remoteSyncCfg = ${savedCfg47}; delete window.electronAPI;})();`);
+
+        // ---------- 48) v1.41.56：三张统计表 + 小符号关联回顾 / 月报 ----------
+        stage = '48';
+        const app48 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        const css48 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const html48 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+        const bStart48 = css48.indexOf('/* ===== v1.41.56');
+        const bEnd48 = css48.indexOf('/* ===== v1.', bStart48 + 10);
+        const block56 = bStart48 >= 0 ? css48.slice(bStart48, bEnd48 > 0 ? bEnd48 : css48.length) : '';
+        ok('v1.41.56 只有一个版本块头，小符号 / 纯图标按钮样式都在这一块',
+            bStart48 >= 0 && (css48.match(/\/\* ===== v1\.41\.56/g) || []).length === 1 &&
+            block56.indexOf('.bill-stats .bs-review-btn') >= 0 &&
+            block56.indexOf('.ym-review-btn') >= 0 &&
+            block56.indexOf('.bs-avg-year') >= 0);
+        ok('回顾弹窗支持带「哪一期 + 月报/年报」打开，且不传参数还是老行为',
+            app48.indexOf('function openReviewModal(tab, key)') >= 0 &&
+            app48.indexOf("if (tab === 'month' || tab === 'year') reviewTab = tab;") >= 0 &&
+            app48.indexOf('if (!reviewMonth) reviewMonth = _monthKeyNow();') >= 0);
+        ok('小符号带 stopPropagation，不会抢整行原有的「看明细」点击',
+            app48.indexOf("onclick=\"event.stopPropagation();openReviewModal('${tab}','${key}')\"") >= 0);
+        ok('三个页面各有一个纯图标的日期联动入口，没有把回顾文字铺在页面上',
+            (html48.match(/ym-review-btn/g) || []).length === 3 &&
+            html48.indexOf("openReviewForCurrent('balance')") >= 0 &&
+            html48.indexOf("openReviewForCurrent('returns')") >= 0 &&
+            html48.indexOf("openReviewForCurrent('reports')") >= 0 &&
+            html48.indexOf('id="reviewAuto"') >= 0 &&
+            html48.slice(html48.indexOf('id="view-reports"'), html48.indexOf('id="view-funds"')).indexOf('class="review-report"') < 0);
+
+        // 造一套跨年的假账（3 年流水 / 4 期余额快照 / 5 期收益），专门验口径
+        ev(`(function(){
+            var k = sheetAssetCats()[0].key;
+            state.balanceOwner = 'all'; moneyVisible = true; state.lendings = [];
+            state.transactions = [
+                {id:'s1',date:'2024-01-15',type:'expense',amount:100,member:'本人',categoryId:'c1'},
+                {id:'s2',date:'2025-03-10',type:'expense',amount:200,member:'本人',categoryId:'c1'},
+                {id:'s3',date:'2025-06-10',type:'income',amount:300,member:'本人',categoryId:'c1'},
+                {id:'s4',date:'2026-01-10',type:'expense',amount:400,member:'本人',categoryId:'c1'},
+                {id:'s5',date:'2026-02-10',type:'expense',amount:500,member:'本人',categoryId:'c1'}
+            ];
+            state.balances = [
+                {id:'q1',member:'本人',accountId:'a',cur:'CNY',cat:k,amount:100,month:'2025-12',updatedAt:1},
+                {id:'q2',member:'本人',accountId:'a',cur:'CNY',cat:k,amount:200,month:'2026-01',updatedAt:2},
+                {id:'q3',member:'本人',accountId:'a',cur:'CNY',cat:k,amount:300,month:'2026-02',updatedAt:3},
+                {id:'q4',member:'本人',accountId:'a',cur:'CNY',cat:k,amount:900,month:'2026-12',updatedAt:4}
+            ];
+            state.returns = [
+                {id:'u1',month:'2025-11',accountId:'a',amount:10,member:'本人'},
+                {id:'u2',month:'2025-12',accountId:'a',amount:20,member:'本人'},
+                {id:'u3',month:'2026-01',accountId:'a',amount:30,member:'本人'},
+                {id:'u4',month:'2026-02',accountId:'a',amount:-5,member:'本人'},
+                {id:'u5',month:'2026-03',accountId:'a',amount:15,member:'本人'}
+            ];
+            state.reportPeriod='all'; state.balancePeriod='all'; state.returnPeriod='all';
+            billYearExpanded.clear(); balanceYearExpanded.clear(); returnYearExpanded.clear();
+            billYearExpanded.add(2025); balanceYearExpanded.add('2026'); returnYearExpanded.add('2026');
+        })();`);
+
+        ev(`renderBillStats();`);
+        const bill48 = ev(`document.getElementById('billStatsBody').innerHTML`);
+        ok('账单统计「全部」有年均行，位置在月均上方，且写明按几个有记录年份平均',
+            bill48.indexOf('年均 · 3 年') >= 0 &&
+            bill48.indexOf('年均 · 3 年') > bill48.indexOf('bs-total') &&
+            bill48.indexOf('年均 · 3 年') < bill48.lastIndexOf('月均'),
+            bill48.slice(0, 160));
+        ok('年均 = 合计 ÷ 有记录年份数（−900 ÷ 3 = −300），月均仍是 ÷ 有记录月份数',
+            bill48.indexOf('>-300</span>') >= 0 && bill48.indexOf('>-180</span>') >= 0,
+            bill48.match(/bs-avg[\s\S]{0,220}/g));
+        ok('年报档 / 月报档都不冒出年均行',
+            ev(`(function(){state.reportPeriod='year';state.reportYear=2026;renderBillStats();` +
+               `var a=document.getElementById('billStatsBody').innerHTML.indexOf('年均');` +
+               `state.reportPeriod='month';state.reportMonth=1;renderBillStats();` +
+               `var b=document.getElementById('billStatsBody').innerHTML.indexOf('年均');` +
+               `state.reportPeriod='all';renderBillStats();return a+'|'+b;})()`) === '-1|-1');
+        ok('账单统计：年份行跳年报、展开的月份行跳当时的月报（不是当前月）',
+            /openReviewModal\('year','2025'\)/.test(bill48) &&
+            /openReviewModal\('month','2025-06'\)/.test(bill48) &&
+            bill48.indexOf("openBillStatsLedger(2025, 6") >= 0, bill48.match(/openReviewModal\([^)]*\)/g));
+
+        ev(`renderBalanceStats();`);
+        const bal48 = ev(`document.getElementById('balanceStatsBody').innerHTML`);
+        ok('资产负债统计：全部档按年分组折叠，不再把全部月份平铺',
+            (bal48.match(/class="bs-year/g) || []).length === 2 &&
+            /toggleBalanceYear\('2026'\)/.test(bal48) &&
+            (bal48.match(/class="bs-row bs-sub/g) || []).length === 3,
+            bal48.match(/class="bs-year[^"]*"/g));
+        ok('资产负债「期末」只放最后一期 900，不是把 4 期相加成 1500',
+            bal48.indexOf('期末 · 最后一期') >= 0 &&
+            /期末 · 最后一期<\/td>[\s\S]{0,240}?>900<\/span>/.test(bal48) &&
+            bal48.indexOf('>1500</span>') < 0, bal48.slice(0, 300));
+        ok('资产负债年份行显示该年最后一期（2026 → 900），不是 12 个月相加',
+            /2026 年[\s\S]{0,300}?>900<\/span>/.test(bal48) &&
+            bal48.indexOf('>1400</span>') < 0);
+        ok('资产负债统计三档联动：月报档不再隐藏卡片，且只剩当期一行',
+            ev(`(function(){state.balancePeriod='month';state.balanceYear=2026;state.balanceMonth=1;` +
+               `renderBalanceStats();var c=document.getElementById('balanceStatsCard');` +
+               `var h=document.getElementById('balanceStatsBody').innerHTML;` +
+               `state.balancePeriod='all';renderBalanceStats();` +
+               `return (!c.classList.contains('hidden'))+'|'+(h.match(/class="bs-row/g)||[]).length;})()`) === 'true|1');
+        ok('资产负债表的月份行 / 年份行都带回顾小符号（点月跳月报、点年跳年报）',
+            /openReviewModal\('month','2026-01'\)/.test(bal48) &&
+            /openReviewModal\('year','2026'\)/.test(bal48) &&
+            bal48.indexOf("openAccountHistoryForPeriod('2026-01'") >= 0);
+
+        ev(`renderReturnMonthly();`);
+        const ret48 = ev(`document.getElementById('retMonthlyBody').innerHTML`);
+        ok('投资收益表也按年分组折叠，合计 / 年均 / 月均三行都在',
+            (ret48.match(/class="bs-year/g) || []).length === 2 &&
+            /toggleReturnYear\('2026'\)/.test(ret48) &&
+            ret48.indexOf('年均 · 2 年') >= 0 &&
+            ret48.indexOf('月均 · 5 期') >= 0, ret48.slice(0, 200));
+        ok('投资收益的均值行只有「本期收益」填数，累计/收益率/环比三列留 —（不平均、不相加）',
+            ev(`(function(){var trs=document.querySelectorAll('#retMonthlyBody tr.bs-avg');` +
+               `return Array.prototype.map.call(trs,function(tr){` +
+               `return (tr.querySelectorAll('td').length)+':'+(tr.innerHTML.match(/>—<|>—<\\/span>/g)||[]).length;});})()`)
+                .join('|') === '5:3|5:3',
+            ev(`Array.prototype.map.call(document.querySelectorAll('#retMonthlyBody tr.bs-avg'),function(t){return t.textContent.trim();})`));
+        ok('投资收益表按档位联动：月报档只显示当期，年报档只显示该年',
+            ev(`(function(){state.returnPeriod='month';state.returnYear=2026;state.returnMonth=2;` +
+               `renderReturnMonthly();var a=(document.getElementById('retMonthlyBody').innerHTML.match(/class="bs-row/g)||[]).length;` +
+               `state.returnPeriod='year';renderReturnMonthly();` +
+               `var b=(document.getElementById('retMonthlyBody').innerHTML.match(/class="bs-row/g)||[]).length;` +
+               `state.returnPeriod='all';renderReturnMonthly();return a+'|'+b;})()`) === '1|3');
+        ok('投资收益的月份行 / 年份行也带回顾小符号，点行仍是看各账户明细',
+            /openReviewModal\('month','2026-02'\)/.test(ret48) &&
+            /openReviewModal\('year','2026'\)/.test(ret48) &&
+            ret48.indexOf("openReturnDetailForMonth('2026-02')") >= 0);
+
+        // 真点一次：从三张表的小符号跳进去，弹窗要对上那一期
+        const jump48 = ev(`(function(){
+            openReviewModal('month','2025-06');
+            var a=[reviewTab,reviewMonth,document.getElementById('reviewModal').classList.contains('hidden'),
+                   document.getElementById('reviewAuto').innerHTML.indexOf('收支结余')>=0,
+                   document.getElementById('reviewPeriodLabel').textContent];
+            openReviewModal('year','2025');
+            var b=[reviewTab,reviewMonth,document.getElementById('reviewAuto').innerHTML.indexOf('一年总支出')>=0,
+                   document.getElementById('reviewPeriodLabel').textContent];
+            return JSON.stringify([a,b]);})()`);
+        const j48 = JSON.parse(jump48 || '[[]]');
+        ok('点月份小符号 → 弹窗打开那一期的月报（不是当前月，也不是年报）',
+            j48[0] && j48[0][0] === 'month' && j48[0][1] === '2025-06' &&
+            j48[0][2] === false && j48[0][3] === true && j48[0][4].indexOf('2025') >= 0, j48[0]);
+        ok('点年份小符号 → 弹窗切到那一年的年报',
+            j48[1] && j48[1][0] === 'year' && j48[1][1] === '2025-01' &&
+            j48[1][2] === true && j48[1][3].indexOf('2025') >= 0, j48[1]);
+        const cur48 = ev(`(function(){
+            state.reportPeriod='month'; state.reportYear=2026; state.reportMonth=2;
+            openReviewForCurrent('reports'); var a=[reviewTab,reviewMonth];
+            state.reportPeriod='all'; openReviewForCurrent('reports'); var b=[reviewTab,reviewMonth.slice(0,4)];
+            state.reportPeriod='year'; openReviewForCurrent('reports'); var c=[reviewTab,reviewMonth.slice(0,4)];
+            return JSON.stringify([a,b,c]);})()`);
+        ok('日期联动：月报档跳当月月报、年报档跳该年年报、全部档跳最近有记录年份的年报',
+            cur48 === JSON.stringify([['month', '2026-02'], ['year', '2026'], ['year', '2026']]), cur48);
+        ok('三个统计页都没有把回顾文字内嵌展示，只有点了小符号才弹',
+            ev(`JSON.stringify(['view-reports','view-balance','view-returns'].map(function(id){` +
+               `var s=document.getElementById(id);return s.innerHTML.indexOf('class="review-report"')>=0;}))`)
+                === '[false,false,false]');
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {

@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.55';
+const APP_VERSION = '1.41.56';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -5669,10 +5669,55 @@ function renderReports() {
 
 // 年报分组（"全部"视图）：按年折叠，默认收起，点年份展开看各月
 let billYearExpanded = new Set();
+let balanceYearExpanded = new Set();
+let returnYearExpanded = new Set();
 function toggleBillYear(y) {
     if (billYearExpanded.has(y)) billYearExpanded.delete(y);
     else billYearExpanded.add(y);
     renderBillStats();
+}
+function toggleBalanceYear(y) {
+    if (balanceYearExpanded.has(y)) balanceYearExpanded.delete(y);
+    else balanceYearExpanded.add(y);
+    renderBalanceStats();
+}
+function toggleReturnYear(y) {
+    if (returnYearExpanded.has(y)) returnYearExpanded.delete(y);
+    else returnYearExpanded.add(y);
+    renderReturnMonthly();
+}
+
+// v1.41.56：三张统计表跟「回顾 / 月报」关联。
+// 只打开回顾弹窗、带上「哪一期 + 月报还是年报」，不写任何数；
+// event.stopPropagation() 保证不抢整行原有的「看明细」点击。
+function reviewEntryHTML(tab, key, title) {
+    const t = String(title || '看这一期的回顾').replace(/"/g, '&quot;');
+    return `<button class="bs-review-btn" type="button" title="${t}" aria-label="${t}" `
+         + `onclick="event.stopPropagation();openReviewModal('${tab}','${key}')">`
+         + `<i class="fa-solid fa-book-open"></i></button>`;
+}
+
+// 年月选择器旁的纯图标入口：跟着当前页的 月报 / 年报 / 全部 档位走。
+// 全部档按年分组，所以带最近一个有记录的年份去年报；其余按月 / 年各归各。
+// 三页都不显示回顾文字，只有这个小符号，点了才弹出回顾 / 月报。
+function openReviewForCurrent(page) {
+    const now = new Date();
+    const y = Number(page === 'balance' ? state.balanceYear
+            : page === 'returns' ? state.returnYear : state.reportYear) || now.getFullYear();
+    const m = Number(page === 'balance' ? state.balanceMonth
+            : page === 'returns' ? state.returnMonth : state.reportMonth) || (now.getMonth() + 1);
+    const period = page === 'balance' ? state.balancePeriod
+            : page === 'returns' ? state.returnPeriod : state.reportPeriod;
+    if (period === 'all') {
+        const ys = page === 'balance' ? balanceYears()
+            : page === 'returns' ? returnYears()
+            : [...new Set(state.transactions.map(t => String(t.date).slice(0, 4)))].filter(v => /^\d{4}$/.test(v)).sort();
+        openReviewModal('year', String(ys.length ? ys[ys.length - 1] : y));
+    } else if (period === 'year') {
+        openReviewModal('year', String(y));
+    } else {
+        openReviewModal('month', `${y}-${String(m).padStart(2, '0')}`);
+    }
 }
 
 // ---- Reports: 账单统计 ----
@@ -5708,30 +5753,46 @@ function renderBillStats() {
     const total = sumOf(txns);
     const periods = byDay ? getReportDays(txns, range) : list.length;
     const avgLabel = byDay ? '日均' : '月均';
+    // v1.41.56：全部档按「有记录的年份数」算年均，跟月均同一套分母逻辑。
+    // 不足整年的年份也算一年，所以标签上写明按几个有记录年份平均，避免误读成整年。
+    const yearCount = new Set(list.map(b => b.y)).size;
     const dayLabel = b => byDay ? `${b.m}月${b.d}日` : (range.period === 'year' ? `${b.m}月` : `${b.y}年${b.m}月`);
     const money = (v, cls) => `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${formatCurrency(v)}</span>`;
 
-    // 合计行紧跟表头，其后是日均/月均行
+    // 合计行紧跟表头，其后是日均/月均行；全部档在月均上方再加一行年均
     const rows = [`
         <tr class="bs-total">
             <td class="bs-label">合计</td>
             <td>${money(total.inc, 'income')}</td>
             <td>${money(total.exp, 'expense')}</td>
             <td>${money(total.net)}</td>
-        </tr>`, `
+        </tr>`];
+    if (range.period === 'all' && yearCount > 0) {
+        rows.push(`
+        <tr class="bs-avg bs-avg-year">
+            <td class="bs-label" title="按 ${yearCount} 个有记录年份平均；不足整年的年份也算一年">年均 · ${yearCount} 年</td>
+            <td>${money(total.inc / yearCount)}</td>
+            <td>${money(total.exp / yearCount)}</td>
+            <td>${money(total.net / yearCount)}</td>
+        </tr>`);
+    }
+    rows.push(`
         <tr class="bs-avg">
             <td class="bs-label">${avgLabel}</td>
             <td>${money(periods ? total.inc / periods : 0)}</td>
             <td>${money(periods ? total.exp / periods : 0)}</td>
             <td>${money(periods ? total.net / periods : 0)}</td>
-        </tr>`];
+        </tr>`);
 
     // 单行（月/日）HTML：月视图折成「全部」里按年分组后，标签只显示月份
+    // v1.41.56：标签后跟一个纯图标，点了跳这一期的回顾（月报档没有「日」，一律跳所属月份的月报）
+    const monthKey = b => `${b.y}-${String(b.m).padStart(2, '0')}`;
     const rowHTML = (b, shortLabel) => {
         const st = sumOf(b.rows);
         const lbl = byDay ? `${b.m}月${b.d}日` : `${b.y}年${b.m}月`;
+        const rev = reviewEntryHTML('month', monthKey(b), `看 ${monthKey(b)} 的月报`);
         return `<tr class="bs-row${shortLabel ? ' bs-sub' : ''}" onclick="openBillStatsLedger(${b.y}, ${b.m}, ${byDay ? b.d : 'null'}, '${lbl}')">
-            <td class="bs-label">${shortLabel || lbl}</td>
+            <td class="bs-label">${shortLabel || lbl}${rev}</td>
             <td>${money(st.inc)}</td>
             <td>${money(st.exp)}</td>
             <td>${money(st.net)}</td>
@@ -5750,8 +5811,9 @@ function renderBillStats() {
             const yb = byYear.get(y);
             const yst = sumOf(yb.flatMap(x => x.rows));
             const open = billYearExpanded.has(y);
+            const yRev = reviewEntryHTML('year', String(y), `看 ${y} 年的年报`);
             rows.push(`<tr class="bs-year${open ? ' open' : ' collapsed'}" data-year="${y}" onclick="toggleBillYear(${y})">
-                <td class="bs-label"><span class="bs-caret">${open ? '▾' : '▸'}</span>${y} 年</td>
+                <td class="bs-label"><span class="bs-caret">${open ? '▾' : '▸'}</span>${y} 年${yRev}</td>
                 <td>${money(yst.inc, 'income')}</td>
                 <td>${money(yst.exp, 'expense')}</td>
                 <td>${money(yst.net)}</td>
@@ -8174,23 +8236,29 @@ function setBalanceMetric(metric) {
 }
 
 // 资产负债统计：只在年报 / 总 两个视图出现，逐月一行，日期从新到旧
+// v1.41.56：跟报表分析「账单统计」同一套样式 —— 汇总行 + 按年分组折叠 + 月报/年报/全部联动。
+// ⚠️ 口径：余额是「月末快照」，不能像流水那样相加。所以第一行叫「期末」，只放最后一期；
+//    「年均 / 月均」是各期平均，不是合计。年份行显示该年最后一期，不是把 12 个月加起来。
 function renderBalanceStats() {
     const card = document.getElementById('balanceStatsCard');
     const body = document.getElementById('balanceStatsBody');
     if (!card || !body) return;
-    if (state.balancePeriod === 'month') {
-        card.classList.add('hidden');
-        body.innerHTML = '';
-        return;
-    }
     card.classList.remove('hidden');
 
+    const now = new Date();
+    const period = state.balancePeriod;
+    const selYear = state.balanceYear || now.getFullYear();
+    const selMonth = state.balanceMonth || (now.getMonth() + 1);
     const all = balanceMonths();
-    const months = state.balancePeriod === 'year'
-        ? all.filter(m => m.slice(0, 4) === String(state.balanceYear || new Date().getFullYear()))
-        : all;
-    document.getElementById('balanceStatsSubtitle').textContent =
-        state.balancePeriod === 'year' ? `${state.balanceYear}年 · 逐月` : '全部月份 · 逐月';
+    const months = period === 'month'
+        ? all.filter(m => m === `${selYear}-${String(selMonth).padStart(2, '0')}`)
+        : period === 'year'
+            ? all.filter(m => m.slice(0, 4) === String(selYear))
+            : all;
+    const subtitle = period === 'month' ? `${selYear}年${selMonth}月 · 当期`
+        : period === 'year' ? `${selYear}年 · 逐月` : '全部时间 · 按年分组';
+    const subEl = document.getElementById('balanceStatsSubtitle');
+    if (subEl) subEl.textContent = subtitle;
 
     if (months.length === 0) {
         body.innerHTML = '<tr><td colspan="4" class="bs-empty">该范围还没有余额记录</td></tr>';
@@ -8206,18 +8274,61 @@ function renderBalanceStats() {
         let str = abs.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
         return `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${sign}${str}</span>`;
     };
-    body.innerHTML = months.slice().reverse().map(m => {
-        const t = totalsFromCat(balancesByCat(m));
+    const totalsOf = m => totalsFromCat(balancesByCat(m));
+    const snap = new Map(months.map(m => [m, totalsOf(m)]));
+    const avgOf = list => {
+        const n = list.length || 1;
+        return ['asset', 'liability', 'net'].reduce((o, k) => {
+            o[k] = list.reduce((s, m) => s + (snap.get(m)[k] || 0), 0) / n;
+            return o;
+        }, {});
+    };
+    const statCells = t => `<td>${bsMoney(t.asset, 'income')}</td><td>${bsMoney(t.liability, 'expense')}</td><td>${bsMoney(t.net)}</td>`;
+    const rows = [];
+
+    // 期末（不是合计）：只放最后一期
+    rows.push(`<tr class="bs-total"><td class="bs-label" title="余额是月末快照，不能相加；这里只显示最后一期">期末 · 最后一期</td>${statCells(snap.get(months[months.length - 1]))}</tr>`);
+    // 全部档：按有记录年份数平均（各年最后一期），与账单统计「年均」同一位置
+    if (period === 'all') {
+        const byYear = new Map();
+        months.forEach(m => byYear.set(m.slice(0, 4), m));
+        const yearEnds = [...byYear.values()];
+        rows.push(`<tr class="bs-avg bs-avg-year"><td class="bs-label" title="按 ${byYear.size} 个有记录年份平均（各年最后一期）">年均 · ${byYear.size} 年</td>${statCells(avgOf(yearEnds))}</tr>`);
+    }
+    rows.push(`<tr class="bs-avg"><td class="bs-label" title="按 ${months.length} 期平均，不是合计">月均 · ${months.length} 期</td>${statCells(avgOf(months))}</tr>`);
+
+    const rowHTML = (m, shortLabel) => {
         const [y, mm] = m.split('-');
-        const dateLabel = state.balancePeriod === 'year' ? `${Number(mm)}月` : `${y}.${Number(mm)}`;
-        return `
-        <tr class="bs-row" onclick="openAccountHistoryForPeriod('${m}', '${y}年${Number(mm)}月')">
-            <td class="bs-label">${dateLabel}</td>
-            <td>${bsMoney(t.asset, 'income')}</td>
-            <td>${bsMoney(t.liability, 'expense')}</td>
-            <td>${bsMoney(t.net)}</td>
+        const dateLabel = shortLabel || (period === 'year' ? `${Number(mm)}月` : `${y}年${Number(mm)}月`);
+        const rev = reviewEntryHTML('month', m, `看 ${m} 的月报`);
+        return `<tr class="bs-row${shortLabel ? ' bs-sub' : ''}" onclick="openAccountHistoryForPeriod('${m}', '${y}年${Number(mm)}月')">
+            <td class="bs-label">${dateLabel}${rev}</td>
+            ${statCells(snap.get(m))}
         </tr>`;
-    }).join('');
+    };
+
+    const desc = months.slice().reverse();
+    if (period === 'all') {
+        const byYear = new Map();
+        desc.forEach(m => {
+            const y = m.slice(0, 4);
+            if (!byYear.has(y)) byYear.set(y, []);
+            byYear.get(y).push(m);
+        });
+        byYear.forEach((list, y) => {
+            const open = balanceYearExpanded.has(y);
+            const last = list[0];   // desc 里第一个 = 该年最后一期
+            const yRev = reviewEntryHTML('year', y, `看 ${y} 年的年报`);
+            rows.push(`<tr class="bs-year${open ? ' open' : ' collapsed'}" data-year="${y}" onclick="toggleBalanceYear('${y}')">
+                <td class="bs-label" title="该年最后一期余额，不是 12 个月相加"><span class="bs-caret">${open ? '▾' : '▸'}</span>${y} 年${yRev}</td>
+                ${statCells(snap.get(last))}
+            </tr>`);
+            if (open) list.forEach(m => rows.push(rowHTML(m, `${Number(m.slice(5, 7))}月`)));
+        });
+    } else {
+        desc.forEach(m => rows.push(rowHTML(m, null)));
+    }
+    body.innerHTML = rows.join('');
 }
 
 function setBalanceChartType(type, dim) {
@@ -15488,50 +15599,104 @@ function renderReturnCalendar() {
     });
 }
 
+// v1.41.56：跟报表分析「账单统计」同一套样式 —— 合计 / 年均 / 月均 + 按年分组折叠 + 三档联动。
+// ⚠️ 口径：只有「本期收益」是流量能加总、能平均；累计收益是跑动和、收益率要按月连乘、
+//    环比是相邻两月差值，都不能相加或求算术平均。所以均值行这三列一律留「—」。
 function renderReturnMonthly() {
     const body = document.getElementById('retMonthlyBody');
     if (!body) return;
-    const months = returnMonths().slice().reverse();   // 最新在前
-    if (!months.length) {
-        body.innerHTML = '<tr><td colspan="5" class="breakdown-empty">还没有收益记录，点右上角「记收益」添加</td></tr>';
+    const info = returnPeriodInfo();
+    const period = info.period;
+    const scoped = info.months.slice();            // 正序，已按当前档位过滤
+    if (!scoped.length) {
+        const hint = document.getElementById('retMonthlyHint');
+        if (hint) hint.textContent = period === 'month' ? '这一期还没有收益记录' : '点击月份查看各账户明细';
+        body.innerHTML = '<tr><td colspan="5" class="breakdown-empty">该范围还没有收益记录</td></tr>';
         return;
     }
-    // 累计要按时间正序累加
-    const asc = returnMonths();
+    const hint = document.getElementById('retMonthlyHint');
+    if (hint) hint.textContent = period === 'all' ? '按年分组，点年份展开；点月份查看各账户明细'
+        : period === 'year' ? `${info.year}年 · 逐月` : '点击月份查看各账户明细';
+
+    // 累计要按「全部月份」正序累加，不能只累计当前档位那几期
+    const ascAll = returnMonths();
     const running = {};
     let acc = 0;
     const rateByMonth = {};
-    asc.forEach(m => {
+    ascAll.forEach(m => {
         acc += returnSummary([m]).total;
         running[m] = acc;
         rateByMonth[m] = portfolioMonthStats(m).rate;
     });
-
+    const amountOf = m => returnSummary([m]).total;
+    const total = scoped.reduce((s, m) => s + amountOf(m), 0);
     const money = (v, cls) => `<span class="bs-num${v < 0 ? ' neg' : ''}${cls ? ' ' + cls : ''}">${maskMoney(v)}</span>`;
-    let html = months.map((m, i) => {
-        const cur = returnSummary([m]).total;
+    const dash = '<span class="bs-num">—</span>';
+    const rows = [];
+
+    // 合计行：本期收益是加总，收益率是连乘（不是相加），环比没有意义
+    rows.push(`<tr class="bs-total">
+        <td class="bs-label">合计</td>
+        <td>${money(total, total >= 0 ? 'income' : 'expense')}</td>
+        <td>${money(running[scoped[scoped.length - 1]])}</td>
+        <td><span class="bs-num">${pctText(portfolioCumulative(scoped).cumulative, 2)}</span></td>
+        <td>${dash}</td>
+    </tr>`);
+    if (period === 'all') {
+        const yearCount = new Set(scoped.map(m => m.slice(0, 4))).size;
+        rows.push(`<tr class="bs-avg bs-avg-year">
+            <td class="bs-label" title="按 ${yearCount} 个有记录年份平均；不足整年的年份也算一年">年均 · ${yearCount} 年</td>
+            <td>${money(total / yearCount)}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
+        </tr>`);
+    }
+    rows.push(`<tr class="bs-avg">
+        <td class="bs-label" title="按 ${scoped.length} 期平均，只平均「本期收益」">月均 · ${scoped.length} 期</td>
+        <td>${money(total / scoped.length)}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>
+    </tr>`);
+
+    const rowHTML = (m, shortLabel) => {
+        const cur = amountOf(m);
         const prevMonth = previousMonthOf(m);
-        const prev = prevMonth && returnMonthHasRecords(prevMonth) ? returnSummary([prevMonth]).total : null;
+        const prev = prevMonth && returnMonthHasRecords(prevMonth) ? amountOf(prevMonth) : null;
         const delta = prev === null ? null : cur - prev;
+        const rev = reviewEntryHTML('month', m, `看 ${m} 的月报`);
+        const lbl = shortLabel || `${m.replace('-', '年')}月`;
         return `
-        <tr class="bs-row" onclick="openReturnDetailForMonth('${m}')">
-            <td class="bs-label">${m.replace('-', '年')}月</td>
+        <tr class="bs-row${shortLabel ? ' bs-sub' : ''}" onclick="openReturnDetailForMonth('${m}')">
+            <td class="bs-label">${lbl}${rev}</td>
             <td>${money(cur, cur >= 0 ? 'income' : 'expense')}</td>
             <td>${money(running[m])}</td>
             <td><span class="bs-num${(rateByMonth[m] || 0) > 0 ? ' income' : ((rateByMonth[m] || 0) < 0 ? ' expense' : '')}">${pctText(rateByMonth[m], 2)}</span></td>
-            <td>${delta === null ? '<span class="bs-num">—</span>' : money(delta, delta >= 0 ? 'income' : 'expense')}</td>
+            <td>${delta === null ? dash : money(delta, delta >= 0 ? 'income' : 'expense')}</td>
         </tr>`;
-    }).join('');
-    const totalAll = returnSummary(asc).total;
-    html += `
-        <tr class="bs-total">
-            <td class="bs-label">合计</td>
-            <td>${money(totalAll, totalAll >= 0 ? 'income' : 'expense')}</td>
-            <td>${money(totalAll)}</td>
-            <td><span class="bs-num">${pctText(portfolioCumulative(asc).cumulative, 2)}</span></td>
-            <td><span class="bs-num">—</span></td>
-        </tr>`;
-    body.innerHTML = html;
+    };
+
+    const desc = scoped.slice().reverse();
+    if (period === 'all') {
+        const byYear = new Map();
+        desc.forEach(m => {
+            const y = m.slice(0, 4);
+            if (!byYear.has(y)) byYear.set(y, []);
+            byYear.get(y).push(m);
+        });
+        byYear.forEach((list, y) => {
+            const open = returnYearExpanded.has(y);
+            const yAsc = list.slice().reverse();
+            const yTotal = list.reduce((s, m) => s + amountOf(m), 0);
+            const yRev = reviewEntryHTML('year', y, `看 ${y} 年的年报`);
+            rows.push(`<tr class="bs-year${open ? ' open' : ' collapsed'}" data-year="${y}" onclick="toggleReturnYear('${y}')">
+                <td class="bs-label"><span class="bs-caret">${open ? '▾' : '▸'}</span>${y} 年${yRev}</td>
+                <td>${money(yTotal, yTotal >= 0 ? 'income' : 'expense')}</td>
+                <td>${money(running[yAsc[yAsc.length - 1]])}</td>
+                <td><span class="bs-num">${pctText(portfolioCumulative(yAsc).cumulative, 2)}</span></td>
+                <td>${dash}</td>
+            </tr>`);
+            if (open) list.forEach(m => rows.push(rowHTML(m, `${Number(m.slice(5, 7))}月`)));
+        });
+    } else {
+        desc.forEach(m => rows.push(rowHTML(m, null)));
+    }
+    body.innerHTML = rows.join('');
 }
 
 // ---- 某期各账户明细（复用账户历史弹窗的 DOM）----
@@ -16321,9 +16486,18 @@ function renderLendingCard() {
 // ---- 月度 / 年度回顾：自动报告（只给事实）+ 自己写的一段话 ----
 let reviewTab = 'month';
 let reviewMonth = null;
-function openReviewModal() {
+// v1.41.56：可以带「哪一期 + 月报还是年报」打开。
+// tab='month' 时 key 是 'YYYY-MM'，tab='year' 时 key 是 'YYYY'；
+// 不传参数仍是老行为（停在原来那一期），回顾 / 月报按钮点开不受影响。
+function openReviewModal(tab, key) {
     const m = document.getElementById('reviewModal');
     if (!m) return;
+    if (tab === 'month' || tab === 'year') reviewTab = tab;
+    if (key) {
+        reviewMonth = tab === 'year'
+            ? `${String(key).slice(0, 4)}-01`
+            : String(key).slice(0, 7);
+    }
     if (!reviewMonth) reviewMonth = _monthKeyNow();
     m.classList.remove('hidden');
     raiseOverlay(m);

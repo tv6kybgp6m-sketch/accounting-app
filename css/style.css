@@ -6235,3 +6235,66 @@ html.mac-app #pmActionSheet .action-sheet-header { padding: 8px; }
         background: var(--bg-modal) !important;
     }
 }
+
+/* ===== v1.41.56：三张统计表跟「回顾 / 月报」用小符号关联，点月跳月报、点年跳年报 ===== */
+/* 表格行里的小书页：只占一个图标， hover 才明显，不抢整行的「看明细」点击 */
+.bill-stats .bs-review-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    margin-left: 6px;
+    padding: 2px 4px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+    transition: color .15s, background .15s;
+}
+.bill-stats .bs-review-btn:hover,
+.bill-stats .bs-review-btn:focus-visible {
+    color: var(--accent-text);
+    background: var(--accent-light);
+    outline: none;
+}
+.bill-stats tr.bs-year .bs-review-btn { color: var(--text-secondary); }
+.bill-stats tr.bs-year:hover .bs-review-btn { color: var(--accent-text); }
+
+/* 年月选择器旁的纯图标入口，跟现有控件对齐、不带文字 */
+.ym-review-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--accent-text);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background .15s;
+}
+.ym-review-btn:hover { background: var(--accent-light); }
+/* Mac 上跟同一排的年月轮盘 / 按钮严格同高（32px，含边框），不靠默认值碰运气 */
+html.mac-app #view-reports .view-header .report-controls .ym-review-btn,
+html.mac-app #view-balance .view-header .report-controls .ym-review-btn,
+html.mac-app #view-returns .view-header .report-controls .ym-review-btn {
+    box-sizing: border-box;
+    height: 32px;
+    min-height: 32px;
+    padding: 0;
+}
+
+/* 年均行跟月均行同款，但用一条淡下划线区分，避免两行看串 */
+.bill-stats tr.bs-avg-year td.bs-label { text-decoration: underline dotted var(--text-muted); text-underline-offset: 3px; }
+
+@media (max-width: 640px) {
+    .bill-stats .bs-review-btn { margin-left: 3px; padding: 2px 3px; font-size: 11px; }
+    .ym-review-btn { width: 32px; height: 32px; }
+}

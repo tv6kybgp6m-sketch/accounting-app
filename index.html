@@ -196,7 +196,7 @@
                                     <i class="fa-solid fa-chevron-down ym-anchor-caret"></i>
                                 </button>
                             </div>
-                            <button class="secondary-btn" onclick="openReviewModal()"><i class="fa-solid fa-book-open"></i> 回顾 / 月报</button>
+                            <button class="ym-review-btn" type="button" onclick="openReviewForCurrent('reports')" title="看这一期的回顾 / 月报" aria-label="看这一期的回顾 / 月报"><i class="fa-solid fa-book-open"></i></button>
                         </div>
                     </div>
                     <!-- 月度结账清单：把每月重复的那几步集中成待办（原来藏在资产负债页最底下） -->
@@ -349,6 +349,7 @@
                                     <i class="fa-solid fa-chevron-down ym-anchor-caret"></i>
                                 </button>
                             </div>
+                            <button class="ym-review-btn" type="button" onclick="openReviewForCurrent('balance')" title="看这一期的回顾 / 月报" aria-label="看这一期的回顾 / 月报"><i class="fa-solid fa-book-open"></i></button>
                             <button class="secondary-btn" onclick="openAccountsModal()">
                                 <i class="fa-solid fa-building-columns"></i> 账户
                             </button>
@@ -501,6 +502,7 @@
                                     <i class="fa-solid fa-chevron-down ym-anchor-caret"></i>
                                 </button>
                             </div>
+                            <button class="ym-review-btn" type="button" onclick="openReviewForCurrent('returns')" title="看这一期的回顾 / 月报" aria-label="看这一期的回顾 / 月报"><i class="fa-solid fa-book-open"></i></button>
                             <button class="secondary-btn" onclick="openAccountsModal()">
                                 <i class="fa-solid fa-building-columns"></i> 账户
                             </button>
@@ -1476,7 +1478,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.55').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.56').catch(() => {});
             });
         }
     </script>
