@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.52';
+const APP_VERSION = '1.41.53';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1296,6 +1296,25 @@ function raiseOverlay(id) {
     if (!el) return;
     overlayZ += 10;
     el.style.zIndex = String(overlayZ);
+}
+
+// v1.41.53：Mac 上把操作面板放到鼠标点中的位置（手机仍是底部弹出）。
+// CSS 只在 html.mac-app 下读这两个变量，所以这里只在 Mac 壳里写，手机零影响。
+function placeSheetAt(sheet, x, y) {
+    if (!sheet || !document.documentElement.classList.contains('mac-app')) return;
+    // 用面板真实量出来的宽高来夹住位置，别写死：按钮数量不同（分类 2 个 / 支付 3 个）高度不一样
+    const box = sheet.querySelector ? sheet.querySelector('.action-sheet') : null;
+    const W = (box && box.offsetWidth) || 240;
+    const H = (box && box.offsetHeight) || 230;
+    let px = Number(x), py = Number(y);
+    if (!isFinite(px) || !isFinite(py)) {          // 程序触发、没有鼠标坐标时退回屏幕中间
+        px = window.innerWidth / 2 - W / 2;
+        py = window.innerHeight / 2 - H / 2;
+    }
+    const left = Math.max(8, Math.min(px, Math.max(8, window.innerWidth - W - 8)));
+    const top = Math.max(8, Math.min(py, Math.max(8, window.innerHeight - H - 8)));
+    sheet.style.setProperty('--sheet-x', Math.round(left) + 'px');
+    sheet.style.setProperty('--sheet-y', Math.round(top) + 'px');
 }
 
 function topmostOverlay() {
@@ -5182,7 +5201,7 @@ function bindPaymentMethodDrag(container) {
     container.addEventListener('click', e => {
         const chip = chipFromEvent(e);
         if (!chip || !chip.dataset.pm) return;
-        openPmActionSheet(chip.dataset.pm);
+        openPmActionSheet(chip.dataset.pm, e.clientX, e.clientY);
     });
     container.addEventListener('dragstart', e => {
         const chip = chipFromEvent(e);
@@ -5220,7 +5239,7 @@ function bindPaymentMethodDrag(container) {
 // 名字就是身份，所以用模块级变量记住当前操作的是哪一个，绝不在按钮上拼名字。
 let pmSheetName = null;
 
-function openPmActionSheet(name) {
+function openPmActionSheet(name, x, y) {
     if (!name || !state.paymentMethods.includes(name)) return;
     const sheet = document.getElementById('pmActionSheet');
     if (!sheet) return;
@@ -5237,6 +5256,7 @@ function openPmActionSheet(name) {
     const defBtn = document.getElementById('pmSheetDefaultBtn');
     if (defBtn) defBtn.style.display = ((state.settings.defaultPaymentMethod || '微信') === name) ? 'none' : '';
     sheet.classList.remove('hidden');
+    placeSheetAt(sheet, x, y);
     raiseOverlay(sheet);
 }
 
@@ -5252,10 +5272,11 @@ function pmSheetSetDefault() {
     if (n) setDefaultPaymentMethod(n);
 }
 
-function pmSheetRename() {
+// v1.41.53：不再用系统 prompt() 只改名字，统一开那个「名称 + 图标 + 颜色」的弹窗
+function pmSheetEdit() {
     const n = pmSheetName;
     closePmActionSheet();
-    if (n) renamePaymentMethod(n);
+    if (n) openCategoryModal(null, n);
 }
 
 function pmSheetDelete() {
@@ -5280,8 +5301,10 @@ function reorderPaymentMethod(from, to) {
 
 // 支付方式以「名字」为身份，改名要连带改：交易引用、默认项、新增时间键（否则同步会打架），
 // 并给旧名打墓碑，避免别的设备把旧名又合并回来。
-function renamePaymentMethod(old) {
-    const input = prompt('修改支付方式名称', old);
+// v1.41.53：加一个可选 preset —— 编辑弹窗把新名字传进来，就完全不弹系统输入框；
+// 不传时仍保持原来的 prompt 行为（别的入口／老习惯都不受影响）。
+function renamePaymentMethod(old, preset, quiet) {
+    const input = (typeof preset === 'string') ? preset : prompt('修改支付方式名称', old);
     if (input === null) return;
     const n = input.trim();
     if (!n || n === old) return;
@@ -5302,7 +5325,7 @@ function renamePaymentMethod(old) {
     saveState();
     renderPaymentMethodsManage();
     try { renderPaymentOptions(); } catch (_) {}
-    showToast(`已改名为「${n}」`, 'success');
+    if (!quiet) showToast(`已改名为「${n}」`, 'success');
 }
 
 function setDefaultPaymentMethod(name) {
@@ -6647,19 +6670,39 @@ function renderCategories() {
     renderPaymentMethodsManage();
 }
 
-function openCategoryModal(id) {
+// v1.41.53：同一个弹窗三种用途 —— 新建分类 / 编辑分类 / 编辑支付方式。
+// 后两种都把「类型」整排收起来：分类改成别的类型会把旧交易的归属弄乱，
+// 支付方式更不能变成分类。标题里直接写清楚当前是哪一类。
+let catEditingPaymentName = null;
+
+function openCategoryModal(id, paymentName) {
     const modal = document.getElementById('categoryModal');
     const title = document.getElementById('categoryModalTitle');
+    const toggle = document.querySelector('#categoryModal .type-toggle');
+    const pmTypeBtn = document.querySelector('#categoryModal .type-btn[data-cat-type="payment"]');
+    catEditingPaymentName = null;
 
-    if (id) {
+    if (paymentName) {
+        // 编辑已有支付方式：名字、图标、颜色都从这个弹窗改
+        if (!state.paymentMethods.includes(paymentName)) return;
+        catEditingPaymentName = paymentName;
+        state.editingCategoryId = null;
+        state.selectedCategoryType = 'payment';
+        const st = state.pmStyles && state.pmStyles[paymentName];
+        state.selectedIcon = (st && st.icon) || paymentIconFor(paymentName);
+        state.selectedColor = (st && st.color) || CAT_TYPE_DEFAULTS.payment.color;
+        document.getElementById('catNameInput').value = paymentName;
+        title.textContent = '编辑支付方式';
+    } else if (id) {
         state.editingCategoryId = id;
         const c = state.categories.find(x => x.id === id);
         if (!c) return;
-        title.textContent = '编辑分类';
-        state.selectedCategoryType = c.type;
+        // 锁死类型：支出就一直是支出，收入就一直是收入
+        state.selectedCategoryType = (c.type === 'income') ? 'income' : 'expense';
         state.selectedIcon = c.icon;
         state.selectedColor = c.color;
         document.getElementById('catNameInput').value = c.name;
+        title.textContent = state.selectedCategoryType === 'income' ? '编辑收入分类' : '编辑支出分类';
     } else {
         state.editingCategoryId = null;
         title.textContent = '新建分类';
@@ -6669,12 +6712,12 @@ function openCategoryModal(id) {
         document.getElementById('catNameInput').value = '';
     }
 
-    // v1.41.52：编辑已有分类时不允许切成「支付方式」，否则会把分类的 type 写成 payment（坏数据）
-    const pmTypeBtn = document.querySelector('#categoryModal .type-btn[data-cat-type="payment"]');
-    if (pmTypeBtn) pmTypeBtn.style.display = id ? 'none' : '';
-    if (id && state.selectedCategoryType === 'payment') state.selectedCategoryType = 'expense';
-
+    // 编辑时整排类型按钮收起并禁用（双保险，程序触发 click 也换不了类型）
+    const editing = !!id || !!paymentName;
+    if (toggle) toggle.style.display = editing ? 'none' : '';
+    if (pmTypeBtn) pmTypeBtn.style.display = editing ? 'none' : '';
     document.querySelectorAll('#categoryModal .type-btn').forEach(btn => {
+        btn.disabled = editing;
         btn.classList.toggle('active', btn.dataset.catType === state.selectedCategoryType);
     });
 
@@ -6687,6 +6730,7 @@ function openCategoryModal(id) {
 function closeCategoryModal() {
     document.getElementById('categoryModal').classList.add('hidden');
     state.editingCategoryId = null;
+    catEditingPaymentName = null;
 }
 
 function renderIconPicker() {
@@ -6694,12 +6738,16 @@ function renderIconPicker() {
     // v1.41.52：按当前类型选整套图标；编辑旧分类时若原图标不在新集合里，临时补进来保持选中态
     const opts = iconOptionsFor(state.selectedCategoryType).slice();
     if (state.selectedIcon && opts.indexOf(state.selectedIcon) < 0) opts.unshift(state.selectedIcon);
-    container.innerHTML = opts.map(icon => `
+    container.innerHTML = opts.map(icon => {
+        // v1.41.53：微信/支付宝这类品牌图标自带 "fa-brands ..."，再硬拼 fa-solid 会串字体族
+        const cls = String(icon).indexOf(' ') > 0 ? icon : 'fa-solid ' + icon;
+        return `
         <div class="icon-pick-item ${icon === state.selectedIcon ? 'selected' : ''}"
              onclick="selectIcon('${icon}')">
-            <i class="fa-solid ${icon}"></i>
+            <i class="${cls}"></i>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function renderColorPicker() {
@@ -6725,6 +6773,23 @@ function saveCategory() {
     const name = document.getElementById('catNameInput').value.trim();
     if (!name) { showToast('请输入分类名称', 'error'); return; }
 
+    // v1.41.53：编辑支付方式 —— 名字用同一套改名搬迁逻辑（不弹 prompt），
+    // 再把这次挑的图标 / 颜色写回样式表；分类一条都不碰。
+    if (catEditingPaymentName) {
+        const oldName = catEditingPaymentName;
+        if (!state.paymentMethods.includes(oldName)) { showToast('该支付方式已不存在', 'error'); return; }
+        if (name !== oldName && state.paymentMethods.includes(name)) { showToast('已存在同名支付方式', 'error'); return; }
+        renamePaymentMethod(oldName, name, true);   // 只搬数据，不弹 prompt、不抢着报一次 toast
+        if (!state.pmStyles || typeof state.pmStyles !== 'object') state.pmStyles = {};
+        state.pmStyles[name] = { icon: state.selectedIcon, color: state.selectedColor, updatedAt: Date.now() };
+        saveState();
+        closeCategoryModal();
+        renderPaymentMethodsManage();
+        try { renderPaymentOptions(); updatePaymentIconBadge(); } catch (_) {}
+        showToast(`支付方式「${name}」已更新`, 'success');
+        return;
+    }
+
     // v1.41.52：类型选「支付方式」时写进支付方式清单（名字仍是身份），
     // 图标和颜色另存对照表，不碰交易里的 paymentMethod 字段。
     if (state.selectedCategoryType === 'payment' && !state.editingCategoryId) {
@@ -6746,7 +6811,7 @@ function saveCategory() {
             c.name = name;
             c.icon = state.selectedIcon;
             c.color = state.selectedColor;
-            c.type = state.selectedCategoryType;
+            // v1.41.53：类型锁死，不再从弹窗的 selectedCategoryType 回写 c.type
         }
         showToast('分类已更新', 'success');
     } else {
@@ -6819,7 +6884,7 @@ let catDrag = null;          // active drag session
 let catPress = null;         // pending long press
 let catSuppressClick = false;
 
-function openCatActionSheet(id) {
+function openCatActionSheet(id, x, y) {
     const c = state.categories.find(x => x.id === id);
     if (!c) return;
     catSheetId = id;
@@ -6828,7 +6893,9 @@ function openCatActionSheet(id) {
     icon.style.color = c.color;
     icon.innerHTML = `<i class="fa-solid ${c.icon}"></i>`;
     document.getElementById('catSheetTitle').textContent = c.name;
-    document.getElementById('catActionSheet').classList.remove('hidden');
+    const sheet = document.getElementById('catActionSheet');
+    sheet.classList.remove('hidden');
+    placeSheetAt(sheet, x, y);
     raiseOverlay('catActionSheet');
 }
 
@@ -6861,7 +6928,7 @@ function catCardFromEvent(e) {
 function onCatListClick(e) {
     if (catSuppressClick) { catSuppressClick = false; return; }
     const card = catCardFromEvent(e);
-    if (card) openCatActionSheet(card.dataset.id);
+    if (card) openCatActionSheet(card.dataset.id, e.clientX, e.clientY);
 }
 
 // Long press = 450ms hold without moving
@@ -15707,6 +15774,8 @@ function initEventListeners() {
     // Category type toggle
     document.querySelectorAll('#categoryModal .type-btn').forEach(btn => {
         btn.addEventListener('click', () => {
+            // v1.41.53：编辑分类 / 编辑支付方式时类型是锁死的，整排已收起，这里再挡一道
+            if (state.editingCategoryId || catEditingPaymentName || btn.disabled) return;
             const t = btn.dataset.catType;
             state.selectedCategoryType = t;
             document.querySelectorAll('#categoryModal .type-btn').forEach(b => b.classList.remove('active'));

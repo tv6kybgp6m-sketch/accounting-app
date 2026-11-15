@@ -2089,6 +2089,153 @@ async function run() {
            `delete state.pmStyles[n]; delete state.pmAddedAt[n];` +
            `closeCategoryModal(); renderPaymentMethodsManage();})();`);
 
+        // ---------- 45) v1.41.53：Mac 面板跟手 / 编辑锁类型 / 支付方式统一弹窗 / 手机记账全屏 ----------
+        stage = '45';
+        const app45 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        const css45 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const html45 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+        const bStart45 = css45.indexOf('/* ===== v1.41.53');
+        const block53 = bStart45 >= 0 ? css45.slice(bStart45) : '';
+        const media45 = block53.indexOf('@media (max-width: 640px) {');
+        const macPart45 = media45 > 0 ? block53.slice(0, media45) : block53;
+        const inner45 = media45 > 0
+            ? block53.slice(media45 + '@media (max-width: 640px) {'.length, block53.lastIndexOf('}'))
+            : '';
+        ok('v1.41.53 只写一个版本块头（同一版的第二块用 ---- 小标题）',
+            bStart45 >= 0 && (css45.match(/\/\* ===== v1\.41\.53/g) || []).length === 1 &&
+            block53.indexOf('/* ---- 同一版：') >= 0);
+        ok('Mac 面板规则只在 html.mac-app 下、读 --sheet-x/--sheet-y，别的面板照旧底部弹',
+            /html\.mac-app #catActionSheet > \.action-sheet[\s\S]*position: absolute/s.test(macPart45) &&
+            macPart45.indexOf('var(--sheet-x') >= 0 && macPart45.indexOf('var(--sheet-y') >= 0 &&
+            macPart45.indexOf('sheetPop') >= 0 && macPart45.indexOf('excludeBalanceSheet') < 0);
+        ok('分类 / 支付方式的点击委托都把鼠标坐标传进面板',
+            app45.indexOf('openPmActionSheet(chip.dataset.pm, e.clientX, e.clientY)') >= 0 &&
+            app45.indexOf('openCatActionSheet(card.dataset.id, e.clientX, e.clientY)') >= 0);
+
+        ev(`(function(){document.documentElement.classList.add('mac-app');` +
+           `var s=document.getElementById('catActionSheet');` +
+           `s.style.removeProperty('--sheet-x'); s.style.removeProperty('--sheet-y');` +
+           `openCatActionSheet(state.categories[0].id, 120, 80);})();`);
+        const macXY45 = ev(`(function(){var s=document.getElementById('catActionSheet');` +
+            `return {x:s.style.getPropertyValue('--sheet-x'),y:s.style.getPropertyValue('--sheet-y')};})()`);
+        ok('Mac 上分类面板落在鼠标点的位置', macXY45.x === '120px' && macXY45.y === '80px', macXY45);
+        ev(`(function(){document.documentElement.classList.add('mac-app');` +
+           `openPmActionSheet(state.paymentMethods[0], 99999, 99999);})();`);
+        const clamp45 = ev(`(function(){var s=document.getElementById('pmActionSheet');` +
+            `return {x:parseInt(s.style.getPropertyValue('--sheet-x')),y:parseInt(s.style.getPropertyValue('--sheet-y')),` +
+            `w:window.innerWidth,h:window.innerHeight};})()`);
+        ok('点在屏幕右下角时面板会夹回屏幕内，不会被切掉',
+            clamp45.x >= 8 && clamp45.y >= 8 && clamp45.x + 240 <= clamp45.w && clamp45.y + 230 <= clamp45.h, clamp45);
+        ev(`(function(){document.documentElement.classList.remove('mac-app');` +
+           `var s=document.getElementById('catActionSheet');` +
+           `s.style.removeProperty('--sheet-x'); s.style.removeProperty('--sheet-y');` +
+           `openCatActionSheet(state.categories[0].id, 120, 80);})();`);
+        ok('去掉 Mac 标记后不写坐标，手机仍是从底部弹出',
+            ev(`document.getElementById('catActionSheet').style.getPropertyValue('--sheet-x')`) === '');
+
+        const exp45 = ev(`(function(){var c=state.categories.find(x=>x.type==='expense');return c?c.id:null;})()`);
+        ev(`openCategoryModal(${JSON.stringify(exp45)});`);
+        const lock45 = ev(`(function(){return {` +
+            `title:document.getElementById('categoryModalTitle').textContent,` +
+            `toggle:document.querySelector('#categoryModal .type-toggle').style.display,` +
+            `type:state.selectedCategoryType,icon:state.selectedIcon,` +
+            `allDisabled:[].slice.call(document.querySelectorAll('#categoryModal .type-btn')).every(b=>b.disabled)};})()`);
+        ok('编辑支出分类：类型整排收起并禁用，标题写明是支出分类',
+            lock45.title === '编辑支出分类' && lock45.toggle === 'none' &&
+            lock45.type === 'expense' && lock45.allDisabled, lock45);
+        ev(`document.querySelector('#categoryModal .type-btn[data-cat-type="income"]').click();`);
+        ok('就算程序去点「收入分类」也换不了类型、换不了那套图标',
+            ev(`state.selectedCategoryType`) === 'expense' && ev(`state.selectedIcon`) === lock45.icon);
+        ev(`saveCategory();`);
+        ok('保存后分类 type 原样不动，不再从弹窗状态回写',
+            ev(`(function(){var c=state.categories.find(x=>x.id===${JSON.stringify(exp45)});return c?c.type:null;})()`) === 'expense');
+        const inc45 = ev(`(function(){var c=state.categories.find(x=>x.type==='income');return c?c.id:null;})()`);
+        ev(`openCategoryModal(${JSON.stringify(inc45)});`);
+        ok('编辑收入分类同样锁死（标题 / 类型 / 收起类型排）',
+            ev(`document.getElementById('categoryModalTitle').textContent`) === '编辑收入分类' &&
+            ev(`state.selectedCategoryType`) === 'income' &&
+            ev(`document.querySelector('#categoryModal .type-toggle').style.display`) === 'none');
+        ok('新建分类时三个类型按钮全部恢复可用',
+            (ev(`(function(){openCategoryModal();return [].slice.call(document.querySelectorAll('#categoryModal .type-btn'))` +
+                `.map(b=>b.disabled).join(',');})()`) || '') === 'false,false,false');
+
+        ev(`(function(){var n='测试卡片A';` +
+           `if(state.paymentMethods.indexOf(n)<0)state.paymentMethods.push(n);` +
+           `state.pmAddedAt[n]=Date.now();` +
+           `state.pmStyles[n]={icon:'fa-wallet',color:'#123456',updatedAt:Date.now()};` +
+           `window.__promptHits=0; window.prompt=function(){window.__promptHits++;return null;};})();`);
+        ev(`openPmActionSheet('测试卡片A');`);
+        ev(`pmSheetEdit();`);
+        const pe45 = ev(`(function(){return {` +
+            `title:document.getElementById('categoryModalTitle').textContent,` +
+            `name:document.getElementById('catNameInput').value,icon:state.selectedIcon,color:state.selectedColor,` +
+            `hidden:document.getElementById('categoryModal').classList.contains('hidden'),` +
+            `toggle:document.querySelector('#categoryModal .type-toggle').style.display,` +
+            `sel:!!document.querySelector('#iconPicker .icon-pick-item.selected')};})()`);
+        ok('支付方式「编辑」开的是同一个弹窗，名字 / 图标 / 颜色全带出来',
+            pe45.title === '编辑支付方式' && pe45.name === '测试卡片A' &&
+            pe45.icon === 'fa-wallet' && pe45.color === '#123456' &&
+            !pe45.hidden && pe45.toggle === 'none' && pe45.sel, pe45);
+        ok('操作面板上的按钮文案不再只说「编辑名称」',
+            html45.indexOf('onclick="pmSheetEdit()"') >= 0 &&
+            html45.indexOf('编辑名称 / 图标 / 颜色') >= 0 &&
+            html45.indexOf('pmSheetRename') < 0);
+        ev(`(function(){document.getElementById('catNameInput').value='测试卡片B';` +
+           `selectIcon('fa-qrcode'); selectColor('#e17055');})();`);
+        const catsBefore45 = ev(`state.categories.length`);
+        ev(`saveCategory();`);
+        const saved45 = ev(`(function(){return {` +
+            `hasB:state.paymentMethods.indexOf('测试卡片B')>=0,` +
+            `hasA:state.paymentMethods.indexOf('测试卡片A')>=0,` +
+            `style:JSON.stringify(state.pmStyles['测试卡片B']||null),` +
+            `oldStyle:JSON.stringify(state.pmStyles['测试卡片A']||null),` +
+            `cats:state.categories.length,prompts:window.__promptHits};})()`);
+        ok('保存后改名 + 图标 + 颜色一起落下，全程不弹系统输入框，分类一条不多',
+            saved45.hasB && !saved45.hasA && saved45.cats === catsBefore45 &&
+            saved45.prompts === 0 && saved45.oldStyle === 'null' &&
+            JSON.parse(saved45.style).icon === 'fa-qrcode' && JSON.parse(saved45.style).color === '#e17055', saved45);
+        ok('分类管理页的支付方式卡片也跟着换成新名字和新图标',
+            ev(`(function(){var c=document.querySelector('#paymentMethodsList .pm-chip[data-pm="测试卡片B"] i');` +
+               `return c?c.className:'';})()`).indexOf('fa-qrcode') >= 0);
+        const brand45 = ev(`(function(){var n='微信';var old=state.pmStyles[n];` +
+            `state.pmStyles[n]={icon:'fa-brands fa-weixin',color:'#00b894',updatedAt:Date.now()};` +
+            `openCategoryModal(null,n);var i=document.querySelector('#iconPicker .icon-pick-item.selected i');` +
+            `var r=i?i.className:'';if(old)state.pmStyles[n]=old;else delete state.pmStyles[n];` +
+            `closeCategoryModal();return r;})()`) || '';
+        ok('品牌图标（fa-brands fa-weixin）进图标选择器时不会被硬拼上 fa-solid',
+            brand45.indexOf('fa-brands fa-weixin') >= 0 && brand45.indexOf('fa-solid fa-brands') < 0, brand45);
+
+        ok('手机全屏规则只在手机：媒体块里全是 html:not(.mac-app)，没有裸 html.mac-app',
+            media45 > 0 && inner45.indexOf('html:not(.mac-app)') >= 0 &&
+            inner45.indexOf('html.mac-app') < 0 && inner45.indexOf('#transactionModal') >= 0);
+        ok('宽高 / 位置全部 !important，压掉缩放手柄留下的行内尺寸',
+            ['width: 100vw !important', 'height: 100dvh !important',
+             'max-width: 100vw !important', 'max-height: 100dvh !important',
+             'left: auto !important', 'top: auto !important',
+             'position: relative !important', 'border-radius: 0 !important']
+                .every(s => inner45.indexOf(s) >= 0));
+        ok('内容超高时能滑到底，手机上的缩放手柄收起',
+            inner45.indexOf('overflow-y: auto !important') >= 0 &&
+            inner45.indexOf('.modal-resize-grip') >= 0);
+        const probe45 = inner45.replace(/\/\*[\s\S]*?\*\//g, '');
+        ev(`(function(){var s=document.createElement('style');s.id='probe45';` +
+           `s.textContent=${JSON.stringify(probe45)};document.head.appendChild(s);})();`);
+        const wPhone45 = ev(`getComputedStyle(document.querySelector('#transactionModal > .modal')).width`);
+        const wVw45 = ev(`window.innerWidth`);
+        ev(`document.documentElement.classList.add('mac-app');`);
+        const wMac45 = ev(`getComputedStyle(document.querySelector('#transactionModal > .modal')).width`);
+        ev(`document.documentElement.classList.remove('mac-app');`);
+        ev(`(function(){var s=document.getElementById('probe45');if(s)s.remove();})();`);
+        // jsdom 会把 100vw 折成 px（= innerWidth），真浏览器保留 100vw，两种都算命中
+        ok('同一份规则：手机命中整屏宽，加了 Mac 标记就不命中（Mac 宽度不变）',
+            (wPhone45 === '100vw' || parseInt(wPhone45, 10) === wVw45) &&
+            wMac45 !== wPhone45 && wMac45 !== '100vw', { wPhone45, wMac45, wVw45 });
+
+        ev(`(function(){['测试卡片A','测试卡片B'].forEach(function(n){` +
+           `state.paymentMethods=state.paymentMethods.filter(p=>p!==n);` +
+           `delete state.pmStyles[n];delete state.pmAddedAt[n];});` +
+           `closeCategoryModal();renderPaymentMethodsManage();})();`);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

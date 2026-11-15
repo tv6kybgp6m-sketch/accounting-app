@@ -6114,3 +6114,75 @@ html.mac-app[data-theme="dark"] #remoteSyncExpiry::-webkit-calendar-picker-indic
     font-size: 12px;
     margin-left: 4px;
 }
+
+/* ===== v1.41.53：Mac 操作面板跟手弹、手机「记一笔」铺满整屏 ===== */
+
+/* ---- 同一版：① Mac 上分类 / 支付方式的操作面板在鼠标点的位置出现 ----
+   JS 只在 html.mac-app 下把 --sheet-x / --sheet-y 写到 overlay 上；
+   手机既没有这两个变量，也不命中下面任何一条，仍旧从屏幕底部弹出。 */
+html.mac-app #catActionSheet.action-sheet-overlay,
+html.mac-app #pmActionSheet.action-sheet-overlay {
+    align-items: flex-start;
+    justify-content: flex-start;
+}
+html.mac-app #catActionSheet > .action-sheet,
+html.mac-app #pmActionSheet > .action-sheet {
+    position: absolute;
+    left: var(--sheet-x, 50%);
+    top: var(--sheet-y, 50%);
+    width: 240px;
+    max-width: calc(100vw - 16px);
+    border-radius: var(--radius-lg);
+    padding: 8px 12px 12px;
+    box-shadow: var(--shadow-lg);
+    animation: sheetPop 0.14s ease;
+}
+@keyframes sheetPop {
+    from { transform: scale(.96); opacity: .5; }
+    to   { transform: none; opacity: 1; }
+}
+html.mac-app #catActionSheet .action-sheet-btn,
+html.mac-app #pmActionSheet .action-sheet-btn { padding: 9px 10px; font-size: 14px; }
+html.mac-app #catActionSheet .action-sheet-header,
+html.mac-app #pmActionSheet .action-sheet-header { padding: 8px; }
+
+/* ---- 同一版：② 手机上「记一笔」就是整块屏幕，不再是一个居中的方盒子 ----
+   ⚠️ 只在手机：@media (max-width:640px) + html:not(.mac-app)，Mac 窗口再窄也不命中。
+   用 !important 压掉弹窗缩放手柄留下的行内 width/height/left/top —— 拖过一次之后
+   弹窗会被钉在旧位置和旧尺寸上，看起来就是「没显示全 / 一个方块」。 */
+@media (max-width: 640px) {
+    html:not(.mac-app) #transactionModal.modal-overlay {
+        padding: 0 !important;
+        align-items: stretch !important;
+        justify-content: flex-start !important;
+    }
+    html:not(.mac-app) #transactionModal > .modal {
+        position: relative !important;
+        left: auto !important;
+        top: auto !important;
+        margin: 0 !important;
+        width: 100vw !important;
+        min-width: 100vw !important;
+        max-width: 100vw !important;
+        height: 100vh !important;
+        height: 100dvh !important;
+        min-height: 100vh !important;
+        min-height: 100dvh !important;
+        max-height: 100vh !important;
+        max-height: 100dvh !important;
+        border-radius: 0 !important;
+        box-sizing: border-box !important;
+        display: flex !important;
+        flex-direction: column !important;
+        overflow: hidden !important;
+    }
+    /* 内容真比屏幕高时至少能滑到底，不会出现「下面那截看不到」 */
+    html:not(.mac-app) #transactionModal .modal-body {
+        flex: 1 1 auto !important;
+        min-height: 0 !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    /* 全屏弹窗不需要右下角的缩放手柄，留着只会被误拖成小方块 */
+    html:not(.mac-app) #transactionModal .modal-resize-grip { display: none !important; }
+}

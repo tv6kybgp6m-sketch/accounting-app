@@ -989,7 +989,7 @@
                     <div class="action-sheet-title" id="pmSheetTitle"></div>
                 </div>
                 <button class="action-sheet-btn" id="pmSheetDefaultBtn" onclick="pmSheetSetDefault()"><i class="fa-solid fa-star"></i> 设为默认</button>
-                <button class="action-sheet-btn" onclick="pmSheetRename()"><i class="fa-solid fa-pen"></i> 编辑名称</button>
+                <button class="action-sheet-btn" onclick="pmSheetEdit()"><i class="fa-solid fa-pen"></i> 编辑名称 / 图标 / 颜色</button>
                 <button class="action-sheet-btn action-sheet-danger" onclick="pmSheetDelete()"><i class="fa-solid fa-trash-can"></i> 删除</button>            </div>
         </div>
 
@@ -1476,7 +1476,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.52').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.53').catch(() => {});
             });
         }
     </script>
