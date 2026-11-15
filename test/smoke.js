@@ -2284,6 +2284,33 @@ async function run() {
             /^(0|0px)$/.test(card46.br) && cardMac46.w === '340px' && cardMac46.w !== card46.w,
             { card46, cardMac46 });
 
+        // ---------- 47) v1.41.55：月度结账清单的「云同步已开启」在手机上也带上次同步时间 ----------
+        stage = '47';
+        const app47 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        const clBody47 = app47.slice(app47.indexOf('function closeChecklist('));
+        ok('手机写死的「数据自动同步」已删，Mac / 手机共用同一句带时间的文案',
+            app47.indexOf('云同步已开启，数据自动同步') < 0 &&
+            (app47.match(/text: _syncOkText/g) || []).length === 2 &&
+            app47.indexOf('const _syncOkText = `云同步已开启（上次同步 ') >= 0 &&
+            clBody47.indexOf('if (isElectron())') > clBody47.indexOf('const _syncOkText'));
+        const month47 = ev(`closeCheckMonth()`);
+        const savedCfg47 = ev(`JSON.stringify(remoteSyncCfg)`);
+        ev(`remoteSyncCfg = { enabled: true, token: 'x', gistId: 'g',` +
+           ` lastSyncAt: Date.now() - 3 * 60000, tokenExpiresAt: 0, tokenExpiresAtAt: 0 };`);
+        const findSync47 = m => `(function(){var r=closeChecklist(${JSON.stringify(m)});` +
+            `return (r.items.filter(i=>i.text.indexOf('云同步已开启')>=0).map(i=>i.text)[0]||'');})()`;
+        const phone47 = ev(findSync47(month47));
+        ok('手机 / 网页端结账清单显示「云同步已开启（上次同步 3 分钟前）」',
+            phone47.indexOf('云同步已开启（上次同步 3 分钟前）') >= 0, phone47);
+        ev(`remoteSyncCfg.lastSyncAt = 0;`);
+        const never47 = ev(findSync47(month47));
+        ok('一次都没同步成功时明确写「尚未同步」，不再假装一切正常',
+            never47.indexOf('云同步已开启（上次同步 尚未同步）') >= 0, never47);
+        ev(`window.electronAPI = { isElectron: true };`);
+        const mac47 = ev(findSync47(month47));
+        ok('Mac 分支仍是同一句，没有被这次改动带坏', !!mac47 && mac47 === never47, { mac47, never47 });
+        ev(`(function(){remoteSyncCfg = ${savedCfg47}; delete window.electronAPI;})();`);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

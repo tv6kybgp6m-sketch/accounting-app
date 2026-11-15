@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.54';
+const APP_VERSION = '1.41.55';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -8567,6 +8567,9 @@ function closeChecklist(month) {
     const _exp = _rem.tokenExpiresAt;
     const _expired = _exp && Date.now() > _exp;
     const _near = _exp && !_expired && (_exp - Date.now()) <= 14 * DAY;
+    // v1.41.55：Mac 和手机共用这一句。以前手机那句只说「云同步已开启」+「数据自动同步」，
+    // 看不到上次成功的时间，就没法判断同步到底有没有跑成功。
+    const _syncOkText = `云同步已开启（上次同步 ${_rem.lastSyncAt ? relTimeText(_rem.lastSyncAt) : '尚未同步'}）`;
 
     if (isElectron()) {
         // Mac 原生壳：iCloud 同步 + 云同步（GitHub Token）开启情况一起看
@@ -8591,7 +8594,7 @@ function closeChecklist(month) {
             const _d = Math.ceil((_exp - Date.now()) / DAY);
             items.push({ state: 'warn', text: `云同步 Token 还有 ${_d} 天到期`, act: { label: '去设置', run: openRemoteSyncSettings } });
         } else {
-            items.push({ state: 'ok', text: `云同步已开启（上次同步 ${_rem.lastSyncAt ? relTimeText(_rem.lastSyncAt) : '尚未同步'}）`, act: null });
+            items.push({ state: 'ok', text: _syncOkText, act: null });
         }
     } else {
         // 手机 / PWA：开了云同步就不提示导出；Token 到期 / 临近才提示并跳转
@@ -8602,7 +8605,7 @@ function closeChecklist(month) {
                 const _d = Math.ceil((_exp - Date.now()) / DAY);
                 items.push({ state: 'warn', text: `云同步 Token 还有 ${_d} 天到期`, act: { label: '去设置', run: openRemoteSyncSettings } });
             } else {
-                items.push({ state: 'ok', text: '云同步已开启，数据自动同步', act: null });
+                items.push({ state: 'ok', text: _syncOkText, act: null });
             }
         } else {
             const expAge = state.lastExportAt ? Math.floor((Date.now() - state.lastExportAt) / DAY) : null;
