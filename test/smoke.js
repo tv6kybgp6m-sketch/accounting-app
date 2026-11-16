@@ -2669,6 +2669,81 @@ async function run() {
             ev(`document.querySelectorAll('#reviewModal #reviewText').length`) === 1 &&
             ev(`Array.prototype.filter.call(document.querySelectorAll('#reviewModal button'),function(b){return b.textContent.trim()==='保存这段话';}).length`) === 1);
 
+        // ---------- 52) v1.41.60：删掉重点块标签 + 切成员后图表不再被别的页遮住 ----------
+        stage = '52';
+        const app52 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        const css52 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        ok('「第一眼只看这个」整行删掉，重点块只剩数字和说明',
+            app52.indexOf('第一眼只看这个') < 0 && app52.indexOf('rr-hero-lab') < 0 &&
+            css52.indexOf('.rr-hero-lab') < 0);
+        ev(`openReviewModal('month','2026-02','balance');`);
+        ok('三种来源的重点块里都不再出现那句话',
+            ev(`(function(){var o=[];['reports','returns','balance'].forEach(function(p){
+                openReviewModal('month','2026-02',p);
+                o.push(document.querySelector('#reviewAuto .rr-hero').textContent.indexOf('第一眼只看这个')>=0);
+                });return JSON.stringify(o);})()`) === '[false,false,false]');
+        ok('每张图都按自己那一页的眼睛拨回遮罩，tooltip 改用闭包里的读数函数',
+            app52.indexOf('function chartMaskFor(page)') >= 0 &&
+            (app52.match(/const mm = chartMaskFor\('balance'\)/g) || []).length === 3 &&
+            app52.indexOf("chartMaskFor('balance');") >= 0 &&
+            app52.indexOf("chartMaskFor('returns');") >= 0 &&
+            app52.indexOf('${mm(e0.raw)}') >= 0 &&
+            (app52.match(/\$\{mm\(c\.raw\)\}/g) || []).length === 3);
+        const trendSeg52 = app52.slice(app52.indexOf('function renderBalanceTrend'), app52.indexOf('function renderBalancePie'));
+        ok('资产负债走势图的准星与提示框不再读全局 moneyVisible',
+            trendSeg52.indexOf('maskMoney(') < 0 && trendSeg52.indexOf('${mm(e0.raw)}') >= 0);
+        ok('模拟「切成员 → 收益页把开关改关 → 下一帧画资产负债图」：图上是可见的',
+            ev(`(function(){
+                state.moneyVisibleByPage.balance = true;
+                state.moneyVisibleByPage.returns = false;
+                moneyVisible = false;
+                renderBalanceTrend(document.getElementById('balanceChart'), 'line', {}, 'net');
+                return moneyVisible;})()`) === true);
+        ok('反向也成立：收益页眼睛闭着时，资产负债的饼图不会把它带亮',
+            ev(`(function(){
+                state.moneyVisibleByPage.balance = false;
+                state.moneyVisibleByPage.returns = false;
+                moneyVisible = true;
+                renderBalancePie(document.getElementById('balanceChart'), { month: '2026-02' });
+                return moneyVisible;})()`) === false);
+
+        // ---------- 53) v1.41.60：清仓月「本金未知」的提示指对地方，算法不猜数 ----------
+        stage = '53';
+        const app53 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        ok('收益率算法一行没改：缺的期末余额仍不当 0，也不替人猜本金',
+            app53.indexOf('const ok = capKnown && (flowKnownOf[id] || curKnown);') >= 0 &&
+            app53.indexOf('base = flowKnown ? (v0 + flow / 2) : ((v0 + v1) / 2);') >= 0);
+        const cap53 = ev(`(function(){
+            var k = sheetAssetCats()[0].key;
+            state.balances.push({id:'cap160a',member:'本人',accountId:'acct160',cur:'CNY',cat:k,amount:100000,month:'2026-01',updatedAt:9});
+            state.returns.push({id:'ret160a',member:'本人',accountId:'acct160',cur:'CNY',month:'2026-02',amount:5000,updatedAt:9});
+            var s=portfolioMonthStats('2026-02',['acct160'],null,'all');
+            return JSON.stringify({rate:s.rate,reason:s.reason,
+                hasPrev:balancesAtMonth('2026-01','all')['acct160'],
+                hasProfitRec:returnsAtMonth('2026-02','all')['acct160'],
+                missingClosing:s.missingClosing});
+        })()`);
+        const o53 = JSON.parse(cap53 || '{}');
+        ok('造「上月 10 万、本月清仓没填月末、赚 5000」：数都在，就是分母拿不到，且标明缺的是本月月末',
+            o53.rate === null && o53.reason === 'no-closing' && o53.hasPrev === 100000 && o53.hasProfitRec === 5000 &&
+            o53.missingClosing && o53.missingClosing.length === 1 && o53.missingClosing[0] === 'acct160', cap53);
+        ok('把清仓那月的月末余额补成 0 就能算（分母按期初期末平均会偏高，软件不擅自改口径）',
+            ev(`(function(){
+                var k = sheetAssetCats()[0].key;
+                state.balances.push({id:'cap160b',member:'本人',accountId:'acct160',cur:'CNY',cat:k,amount:0,month:'2026-02',updatedAt:10});
+                var s=portfolioMonthStats('2026-02',['acct160'],null,'all');
+                return JSON.stringify([s.rate,s.base,s.reason]);
+            })()`) === '[0.1,50000,""]');
+        ok('提示与跳转都改指当月，缺上月余额的旧文案仍在',
+            app53.indexOf("'no-closing': '本金未知：这个月没填月末余额（清仓了就记一笔 0）") >= 0 &&
+            app53.indexOf("'no-capital': '本金未知：这些账户缺上月余额、也没填净入金") >= 0 &&
+            app53.indexOf('openBalanceModal(targetM)') >= 0 &&
+            app53.indexOf('清仓了请记一笔 0') >= 0 &&
+            app53.indexOf('按月看那个月会留空，按年会跳过它') >= 0);
+        ok('按年 / 全部档会把算不出的月份跳过去（所以换个档位看着像「又好了」，不是数据变了）',
+            app53.indexOf('if (st.rate !== null && isFinite(st.rate)) { acc *= (1 + st.rate); n += 1; }') >= 0 &&
+            app53.indexOf('const cumulative = n > 0 ? acc - 1 : null;') >= 0);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

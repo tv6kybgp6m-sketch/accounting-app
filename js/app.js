@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.59';
+const APP_VERSION = '1.41.60';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -4027,6 +4027,17 @@ function formatCurrency(amount) {
 let moneyVisible = false;
 function maskMoney(v) {
     return moneyVisible ? formatCurrency(v) : '****';
+}
+// v1.41.60：金额遮罩用的是全局 moneyVisible，「谁最后重画谁说了算」。
+// 但两张主图都是下一帧才画（requestAnimationFrame + Chart.js 懒加载），
+// setBalanceOwner() 会先 renderBalance() 再 renderReturns()，于是画资产负债图时
+// 那个全局开关已经是收益页的状态了 —— 眼睛明明开着，图上读数却全是 ****。
+// 画图函数一律在开头按自己那页的眼睛拨回来，并把这个读数函数闭包带进 tooltip，
+// 这样之后别页再重画、或用户过一会儿才 hover，读数都不会突然变脸。
+function chartMaskFor(page) {
+    const show = !!(state.moneyVisibleByPage && state.moneyVisibleByPage[page]);
+    moneyVisible = show;
+    return show ? formatCurrency : () => '****';
 }
 function maskMoneySigned(v) {
     return moneyVisible ? (v > 0 ? '+' : '') + formatCurrency(v) : '****';
@@ -8916,6 +8927,7 @@ function renderBalanceChart() {
     const token = ++balanceRenderToken;
     requestAnimationFrame(() => {
         if (token !== balanceRenderToken) return;
+        chartMaskFor('balance');
         const ctx = document.getElementById('balanceChart');
         if (!ctx) return;
         bindChartTouchGuard(ctx);
@@ -8950,6 +8962,7 @@ function balanceValueAt(month, metric) {
 }
 
 function renderBalanceTrend(ctx, chartType, meta, metric) {
+    const mm = chartMaskFor('balance');
     if (typeof Chart === 'undefined') { loadChartLib().then(() => renderBalanceTrend(ctx, chartType, meta, metric)).catch(() => {}); return; }
     if (charts.balance) { charts.balance.destroy(); charts.balance = null; }
     const buckets = balanceTrendMonths();
@@ -8983,7 +8996,7 @@ function renderBalanceTrend(ctx, chartType, meta, metric) {
         plugins: [chartCrosshairPlugin(entries => {
             const e0 = entries[0];
             if (!e0 || e0.raw === null || e0.raw === undefined) return '';
-            return `${e0.label}  ${meta.name} ${maskMoney(e0.raw)}`;
+            return `${e0.label}  ${meta.name} ${mm(e0.raw)}`;
         })],
         options: {
             ...chartReadOptions(),
@@ -9001,7 +9014,7 @@ function renderBalanceTrend(ctx, chartType, meta, metric) {
             },
             plugins: {
                 legend: { display: false },
-                tooltip: { callbacks: { label: (c) => `${meta.name}: ${maskMoney(c.raw)}` } },
+                tooltip: { callbacks: { label: (c) => `${meta.name}: ${mm(c.raw)}` } },
             },
             scales: {
                 x: {
@@ -9053,6 +9066,7 @@ function balancePieEntries(info, metric) {
 }
 
 function renderBalancePie(ctx, info) {
+    const mm = chartMaskFor('balance');
     if (typeof Chart === 'undefined') { loadChartLib().then(() => renderBalancePie(ctx, info)).catch(() => {}); return; }
     if (charts.balance) { charts.balance.destroy(); charts.balance = null; }
     const metric = state.balanceMetric;
@@ -9105,7 +9119,7 @@ function renderBalancePie(ctx, info) {
                     callbacks: {
                         label: (c) => {
                             const pct = gross ? ((c.raw / gross) * 100).toFixed(1) : '0.0';
-                            return `${c.label}: ${maskMoney(c.raw)} (${pct}%)`;
+                            return `${c.label}: ${mm(c.raw)} (${pct}%)`;
                         },
                     },
                 },
@@ -9116,6 +9130,7 @@ function renderBalancePie(ctx, info) {
 }
 
 function renderBalanceAccountPie(ctx, info) {
+    const mm = chartMaskFor('balance');
     if (typeof Chart === 'undefined') { loadChartLib().then(() => renderBalanceAccountPie(ctx, info)).catch(() => {}); return; }
     if (charts.balance) { charts.balance.destroy(); charts.balance = null; }
     // 按账户汇总资产（不含负债类），每个账户一块；借出款单独算一块。画进资产负债页主图（#balanceChart）。
@@ -9163,7 +9178,7 @@ function renderBalanceAccountPie(ctx, info) {
                     callbacks: {
                         label: (c) => {
                             const pct = gross ? ((c.raw / gross) * 100).toFixed(1) : '0.0';
-                            return `${c.label}: ${maskMoney(c.raw)} (${pct}%)`;
+                            return `${c.label}: ${mm(c.raw)} (${pct}%)`;
                         },
                     },
                 },
@@ -14384,14 +14399,20 @@ function portfolioMonthStats(month, ids, draft, memberOverride) {
         }
     });
 
-    const eligible = [], unknown = [];
+    const eligible = [], unknown = [], missingClosing = [];
     scope.forEach(id => {
         const capKnown = prevMap[id] !== undefined || flowKnownOf[id];
         const curKnown = curMap[id] !== undefined;
         // B07 修复：期末余额缺失时，期初期末平均口径（base=(v0+v1)/2）的分母 v1 拿不到，
         // 不能把"缺余额"当 0 算出一个虚高收益率。走了 Modified Dietz（录了净入金）才允许缺期末。
         const ok = capKnown && (flowKnownOf[id] || curKnown);
-        ok ? eligible.push(id) : unknown.push(id);
+        if (ok) eligible.push(id);
+        else {
+            unknown.push(id);
+            // v1.41.60：上月有余额、本月月末那格空着（清仓后常这样），
+            // 缺的是「本月期末」不是「上月」，提示和跳转都得按这个月指。
+            if (prevMap[id] !== undefined && !curKnown && !flowKnownOf[id]) missingClosing.push(id);
+        }
     });
     const sum = (map) => eligible.reduce((s, id) => s + (Number(map[id]) || 0), 0);
 
@@ -14407,7 +14428,7 @@ function portfolioMonthStats(month, ids, draft, memberOverride) {
     // 平均本金会凭空少一半，所以宁可不给数字，也绝不给一个假的高收益率。
     let rate = null, base = 0, reason = '';
     if (!scope.length) reason = 'no-account';
-    else if (!eligible.length) reason = 'no-capital';
+    else if (!eligible.length) reason = missingClosing.length ? 'no-closing' : 'no-capital';
     else if (!hasProfit) reason = 'no-profit';
     else if (v0 <= 0 && !flowKnown) reason = 'zero-opening';
     else {
@@ -14427,7 +14448,7 @@ function portfolioMonthStats(month, ids, draft, memberOverride) {
         if (Math.abs(gap) > tol) check = { implied, gap, tol };
     }
 
-    return { v0, v1, profit, flow, flowKnown, base, rate, check, eligible, unknown, reason, hasProfit };
+    return { v0, v1, profit, flow, flowKnown, base, rate, check, eligible, unknown, reason, hasProfit, missingClosing };
 }
 
 // 时间加权累计收益率：逐月 (1+r) 连乘。剔掉"什么时候加钱/取钱"的影响，
@@ -15075,10 +15096,11 @@ function renderReturnSummary(info) {
 
     // 本月（月报是选中的那个月，总览是最后一个有记录的月）
     const mKey = info.month || monthsAll[monthsAll.length - 1] || null;
-    const mStat = mKey ? portfolioMonthStats(mKey) : { rate: null, reason: 'no-account', unknown: [], base: 0, flowKnown: false, flow: 0 };
+    const mStat = mKey ? portfolioMonthStats(mKey) : { rate: null, reason: 'no-account', unknown: [], missingClosing: [], base: 0, flowKnown: false, flow: 0 };
     const NO_RATE = {
         'no-account': '还没有归类为稳健理财 / 长期投资的账户',
-        'no-capital': '本金未知：这些账户都没记上月余额，先去「资产负债」补上',
+        'no-capital': '本金未知：这些账户缺上月余额、也没填净入金，先去「资产负债」补上',
+        'no-closing': '本金未知：这个月没填月末余额（清仓了就记一笔 0），去「资产负债」补上就能算',
         'no-profit': '这个月没有收益记录',
         'zero-opening': '上月余额记的是 0，本月进来的钱算新入金：填一下「净入金」才能算准',
         'zero-base': '本金为 0，算不出比率',
@@ -15118,7 +15140,7 @@ function renderReturnSummary(info) {
         amount: sumOf(yMonths), rate: yCum.cumulative,
         amountId: 'retYearAmount', rateId: 'retYearRate', hintId: 'retYearHint',
         hint: yCum.months ? `${yCum.months} 个月连乘${viewYear === nowYear ? '（至今）' : ''}`
-            : (yMonths.length ? '这些月份本金未知，算不出率' : '这一年没有记录'),
+            : (yMonths.length ? '这些月份本金未知（缺上月或月末余额），算不出率' : '这一年没有记录'),
     };
 
     const avgList = info.period === 'year' ? yMonths : monthsAll;
@@ -15174,19 +15196,22 @@ function renderReturnScope(info) {
     const incFixed = !!(state.settings && state.settings.returnIncludeFixed);
     const names = ids.map(id => (accountById(id) || {}).name).filter(Boolean);
     const mKey = info.month || returnMonths()[returnMonths().length - 1] || null;
-    const cur = mKey ? portfolioMonthStats(mKey) : { unknown: [] };
+    const cur = mKey ? portfolioMonthStats(mKey) : { unknown: [], missingClosing: [] };
     const missing = (cur.unknown || []).map(id => (accountById(id) || {}).name).filter(Boolean);
     const outFixed = state.accounts.filter(a => a.kind === 'asset' && a.group === '固定资产'
         && (incCash ? ['steady', 'growth', 'cash'] : ['steady', 'growth']).includes(a.bucket)
         && !ids.includes(a.id)).map(a => a.name);
     const prevM = mKey ? previousMonthOf(mKey) : null;
+    // v1.41.60：缺本月期末余额时别再引导去补上月（上月本来就有数），要打开的是当月。
+    const lackClosing = (cur.missingClosing || []).length > 0;
+    const targetM = lackClosing ? mKey : prevM;
     const open = !!state.returnScopeOpen;
 
     const manual = (state.settings || {}).returnAccountMode === 'manual';
     // 本金未知的账户是这一屏里唯一需要用户动手补的，所以留在折叠外面，不藏进详情
     const warnTxt = missing.length
         ? ` · <span class="rsl-warn">${_esc(missing.join('、'))} 本金未知，`
-            + `<button class="link-btn" id="retGoBalance">去记 ${_esc(prevM ? prevM.replace('-', '年') + '月' : '')} 余额</button></span>`
+            + `<button class="link-btn" id="retGoBalance">去记 ${_esc(targetM ? targetM.replace('-', '年') + '月' : '')} 余额</button></span>`
         : '';
     const ruleTxt = manual
         ? `手动挑选 <b>${names.length}</b> 个账户`
@@ -15203,9 +15228,11 @@ function renderReturnScope(info) {
     const detail = open
         ? `<div class="rsl-detail">`
             + (outFixed.length ? `<div class="ret-excluded">已排除固定资产：${_esc(outFixed.join('、'))}（市值大、一般不录收益）</div>` : '')
-            + (missing.length ? `<div class="ret-excluded">上面标了"本金未知"的账户，是因为缺 ${_esc(prevM ? prevM.replace('-', '年') + '月' : '上月')} 的余额，`
+            + (missing.length ? `<div class="ret-excluded">上面标了"本金未知"的账户，${lackClosing
+                    ? '本月月末余额没填（清仓归零也要记一笔 0，只删掉那一格不算数）'
+                    : `缺 ${_esc(prevM ? prevM.replace('-', '年') + '月' : '上月')} 的余额`}，`
                 + `本月只能算收益金额、算不出收益率。</div>` : '')
-            + `<div class="ret-excluded">收益率只按"能算出本金"的月份逐月连乘（时间加权），本金未知的月份会被跳过，不会当成 0% 拖低结果。</div>`
+            + `<div class="ret-excluded">收益率只按"能算出本金"的月份逐月连乘（时间加权），本金未知的月份会被跳过，不会当成 0% 拖低结果；按月看那个月会留空，按年会跳过它，所以换个档位看着像"又好了"。</div>`
             + `</div>`
         : '';
     box.innerHTML = `<div class="rsl-head">${head}${toggles}</div>${detail}`;
@@ -15213,7 +15240,7 @@ function renderReturnScope(info) {
     const bind = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
     bind('retScopeMore', () => { state.returnScopeOpen = !state.returnScopeOpen; saveState(); renderReturns(); });
     bind('retScopeOpen', () => openReturnScope());
-    bind('retGoBalance', () => { switchView('balance'); openBalanceModal(prevM); });
+    bind('retGoBalance', () => { switchView('balance'); openBalanceModal(targetM); });
     bind('retScopeCash', () => { state.settings.returnIncludeCash = !state.settings.returnIncludeCash; saveState(); renderReturns(); });
     bind('retScopeFixed', () => { state.settings.returnIncludeFixed = !state.settings.returnIncludeFixed; saveState(); renderReturns(); });
 
@@ -15268,6 +15295,7 @@ function renderReturnChart() {
     const token = ++returnRenderToken;
     requestAnimationFrame(() => {
         if (token !== returnRenderToken) return;
+        chartMaskFor('returns');
         const ctx = document.getElementById('returnChart');
         if (!ctx) return;
         bindChartTouchGuard(ctx);
@@ -15293,7 +15321,7 @@ function renderReturnTrend(ctx, chartType) {
     if (!buckets.length) { returnShowEmpty('该期间没有收益记录'); return; }
     returnHideEmpty();
     if (rate && plotted.every(v => v === null)) {
-        returnShowEmpty('这些月份的本金未知（缺上月余额），算不出收益率——先去「资产负债」补上余额');
+        returnShowEmpty('这些月份本金未知：缺上月余额或当月月末余额（清仓请记 0），算不出收益率');
         return;
     }
     // 投资收益按 A 股习惯配色：盈利红、亏损绿
@@ -15584,7 +15612,7 @@ function renderReturnCalendar() {
             : '点年份看该年各月';
     } else {
         note.textContent = rate
-            ? '空白 = 该月没记录；— = 缺上月余额，本金未知算不出收益率。' + irrHintText(portfolioIrr(months.filter(m => m.slice(0, 4) === String(year))).reason)
+            ? '空白 = 该月没记录；— = 缺上月或当月月末余额，本金未知算不出收益率。' + irrHintText(portfolioIrr(months.filter(m => m.slice(0, 4) === String(year))).reason)
             : '空白 = 该月没记录';
     }
 
@@ -16698,7 +16726,6 @@ function reviewHeroHTML(exp, avg6, isYear, yearNet, yearExp, delta) {
 // v1.41.58：三种开场共用同一层壳，整页始终只有一个彩色重点块。
 function reviewHeroShell(cls, val, sub) {
     return `<div class="rr-hero ${cls}">
-        <div class="rr-hero-lab">第一眼只看这个</div>
         <div class="rr-hero-val">${val}</div>
         <div class="rr-hero-sub">${sub}</div>
     </div>`;
@@ -16907,10 +16934,13 @@ function renderReturnMissing(info) {
     const rmap = returnsAtMonth(month, member);
     const nameOf = id => { const a = accountById(id); return a ? a.name : id; };
     const unknown = (st.unknown || []).map(nameOf);
+    const closing = (st.missingClosing || []).map(nameOf);
+    const opening = unknown.filter(n => closing.indexOf(n) < 0);
     const noProfit = (st.eligible || []).filter(id => rmap[id] === undefined || rmap[id] === null).map(nameOf);
     if (!unknown.length && !noProfit.length) { box.classList.add('hidden'); return; }
     let html = '<div class="rm-head"><i class="fa-solid fa-circle-info"></i> <b>这个月的收益率可能没算全</b>（只提醒，不改任何数）</div><ul>';
-    if (unknown.length) html += `<li>缺上月余额、也没填净入金，已从这个月的率里剔除：<b>${_esc(unknown.slice(0, 8).join('、'))}</b>${unknown.length > 8 ? ` 等 ${unknown.length} 个` : ''}</li>`;
+    if (opening.length) html += `<li>缺上月余额、也没填净入金，已从这个月的率里剔除：<b>${_esc(opening.slice(0, 8).join('、'))}</b>${opening.length > 8 ? ` 等 ${opening.length} 个` : ''}</li>`;
+    if (closing.length) html += `<li>本月月末余额没填（清仓了请记一笔 0），已从这个月的率里剔除：<b>${_esc(closing.slice(0, 8).join('、'))}</b>${closing.length > 8 ? ` 等 ${closing.length} 个` : ''}</li>`;
     if (noProfit.length) html += `<li>有余额但本月没录收益，只进了分母没进分子，会把整体率摊低：<b>${_esc(noProfit.slice(0, 8).join('、'))}</b>${noProfit.length > 8 ? ` 等 ${noProfit.length} 个` : ''}</li>`;
     html += '</ul>';
     box.innerHTML = html;
