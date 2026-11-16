@@ -2325,11 +2325,11 @@ async function run() {
             block56.indexOf('.ym-review-btn') >= 0 &&
             block56.indexOf('.bs-avg-year') >= 0);
         ok('回顾弹窗支持带「哪一期 + 月报/年报」打开，且不传参数还是老行为',
-            app48.indexOf('function openReviewModal(tab, key)') >= 0 &&
+            app48.indexOf('function openReviewModal(tab, key, from)') >= 0 &&
             app48.indexOf("if (tab === 'month' || tab === 'year') reviewTab = tab;") >= 0 &&
             app48.indexOf('if (!reviewMonth) reviewMonth = _monthKeyNow();') >= 0);
         ok('小符号带 stopPropagation，不会抢整行原有的「看明细」点击',
-            app48.indexOf("onclick=\"event.stopPropagation();openReviewModal('${tab}','${key}')\"") >= 0);
+            app48.indexOf("onclick=\"event.stopPropagation();openReviewModal('${tab}','${key}','${from}')\"") >= 0);
         ok('三个页面各有一个纯图标的日期联动入口，没有把回顾文字铺在页面上',
             (html48.match(/ym-review-btn/g) || []).length === 3 &&
             html48.indexOf("openReviewForCurrent('balance')") >= 0 &&
@@ -2384,8 +2384,8 @@ async function run() {
                `var b=document.getElementById('billStatsBody').innerHTML.indexOf('年均');` +
                `state.reportPeriod='all';renderBillStats();return a+'|'+b;})()`) === '-1|-1');
         ok('账单统计：年份行跳年报、展开的月份行跳当时的月报（不是当前月）',
-            /openReviewModal\('year','2025'\)/.test(bill48) &&
-            /openReviewModal\('month','2025-06'\)/.test(bill48) &&
+            /openReviewModal\('year','2025'/.test(bill48) &&
+            /openReviewModal\('month','2025-06'/.test(bill48) &&
             bill48.indexOf("openBillStatsLedger(2025, 6") >= 0, bill48.match(/openReviewModal\([^)]*\)/g));
 
         ev(`renderBalanceStats();`);
@@ -2409,8 +2409,8 @@ async function run() {
                `state.balancePeriod='all';renderBalanceStats();` +
                `return (!c.classList.contains('hidden'))+'|'+(h.match(/class="bs-row/g)||[]).length;})()`) === 'true|1');
         ok('资产负债表的月份行 / 年份行都带回顾小符号（点月跳月报、点年跳年报）',
-            /openReviewModal\('month','2026-01'\)/.test(bal48) &&
-            /openReviewModal\('year','2026'\)/.test(bal48) &&
+            /openReviewModal\('month','2026-01'/.test(bal48) &&
+            /openReviewModal\('year','2026'/.test(bal48) &&
             bal48.indexOf("openAccountHistoryForPeriod('2026-01'") >= 0);
 
         ev(`renderReturnMonthly();`);
@@ -2433,8 +2433,8 @@ async function run() {
                `var b=(document.getElementById('retMonthlyBody').innerHTML.match(/class="bs-row/g)||[]).length;` +
                `state.returnPeriod='all';renderReturnMonthly();return a+'|'+b;})()`) === '1|3');
         ok('投资收益的月份行 / 年份行也带回顾小符号，点行仍是看各账户明细',
-            /openReviewModal\('month','2026-02'\)/.test(ret48) &&
-            /openReviewModal\('year','2026'\)/.test(ret48) &&
+            /openReviewModal\('month','2026-02'/.test(ret48) &&
+            /openReviewModal\('year','2026'/.test(ret48) &&
             ret48.indexOf("openReturnDetailForMonth('2026-02')") >= 0);
 
         // 真点一次：从三张表的小符号跳进去，弹窗要对上那一期
@@ -2466,6 +2466,91 @@ async function run() {
             ev(`JSON.stringify(['view-reports','view-balance','view-returns'].map(function(id){` +
                `var s=document.getElementById(id);return s.innerHTML.indexOf('class="review-report"')>=0;}))`)
                 === '[false,false,false]');
+
+
+        // ---------- 49) v1.41.57：回顾页重点 + 按来源换开场 ----------
+        stage = '49';
+        const app49 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        const css49 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const bS49 = css49.indexOf('/* ===== v1.41.57');
+        const bE49 = css49.indexOf('/* ===== v1.', bS49 + 10);
+        const block57 = bS49 >= 0 ? css49.slice(bS49, bE49 > 0 ? bE49 : css49.length) : '';
+        ok('v1.41.57 只有一个版本块头，重点块 / 条形 / 拆解 / 折叠样式都在这一块',
+            bS49 >= 0 && (css49.match(/\/\* ===== v1\.41\.57/g) || []).length === 1 &&
+            block57.indexOf('.rr-hero') >= 0 && block57.indexOf('.rr-bar-fill') >= 0 &&
+            block57.indexOf('.rr-bridge') >= 0 && block57.indexOf('.rr-more') >= 0);
+        ok('配色全部走主题变量，深色下不会白底白字',
+            block57.indexOf('var(--income-light)') >= 0 &&
+            block57.indexOf('var(--warning-light)') >= 0 &&
+            block57.indexOf('var(--bg-card)') >= 0 && block57.indexOf('#ffffff') < 0);
+        ok('三个来源开场各看各的：报表看分类、收益看写过的话、家底看拆解',
+            ev(`(function(){var out=[];['reports','returns','balance'].forEach(function(p){
+                openReviewModal('month','2025-06',p);
+                var h=document.getElementById('reviewAuto').innerHTML;
+                out.push([reviewFrom,h.indexOf('钱花在哪')>=0,h.indexOf('这一期你写过的话')>=0,h.indexOf('家底为什么变了')>=0]);
+                });return JSON.stringify(out);})()`)
+            === JSON.stringify([
+                ['reports', true, false, false],
+                ['returns', false, true, false],
+                ['balance', false, false, true]
+            ]));
+        const h49 = JSON.parse(ev(`JSON.stringify([
+            reviewHeroHTML(8000,6000,false,0,0,null),
+            reviewHeroHTML(4000,6000,false,0,0,null),
+            reviewHeroHTML(6000,6000,false,0,0,null),
+            reviewHeroHTML(8000,null,false,0,0,null)
+        ])`) || '[]');
+        ok('重点块只给一个比较：多花标橙、少花标绿、持平平色、没历史不硬比',
+            h49.length === 4 && h49[0].indexOf('rr-hero bad') >= 0 && h49[0].indexOf('比平时多花 2000') >= 0 &&
+            h49[1].indexOf('rr-hero good') >= 0 && h49[1].indexOf('比平时少花 2000') >= 0 &&
+            h49[2].indexOf('rr-hero flat') >= 0 && h49[3].indexOf('还没有足够的历史月份可比') >= 0,
+            h49.map(x => x.slice(0, 70)));
+        const inc49 = ev(`reviewIncomeHTML([{type:'income',amount:20000,categoryId:'salary'},{type:'income',amount:2000,categoryId:'bonus'}],22000)`);
+        ev(`openReviewModal('month','2025-06','reports');`);
+        ok('收入异常时也能看到「赚在哪」，不再只有支出分类前五',
+            inc49.indexOf('20000') >= 0 && inc49.indexOf('2000') >= 0 &&
+            ev(`document.getElementById('reviewAuto').innerHTML`).indexOf('赚在哪') >= 0);
+        const br49 = ev(`reviewBridgeHTML(netWorthBridge('2026-01'),false)`);
+        ok('资产负债开场把变动拆成结余 / 投资收益 / 固定资产 / 待核对',
+            br49.indexOf('这个月结余') >= 0 && br49.indexOf('投资收益') >= 0 &&
+            br49.indexOf('固定资产变动') >= 0 && br49.indexOf('待核对差额') >= 0);
+        const seg49 = app49.slice(app49.indexOf('// ---- v1.41.57'), app49.indexOf('// ---- 收益率缺料清单'));
+        ok('新报告整段只读：不写任何数、不替人判断该不该花',
+            seg49.length > 1000 && seg49.indexOf('saveState') < 0 && seg49.indexOf('应该') < 0);
+        ok('填写仍只有一处：一个输入框、一个保存按钮，云同步 / 墓碑那套没动',
+            ev(`document.querySelectorAll('#reviewModal #reviewText').length`) === 1 &&
+            ev(`Array.prototype.filter.call(document.querySelectorAll('#reviewModal button'),function(b){return b.textContent.trim()==='保存这段话';}).length`) === 1 &&
+            app49.indexOf('function saveReviewText()') >= 0);
+        const revBefore49 = ev(`JSON.stringify(state.reviews)`);
+        ev(`openReviewModal('month','2025-06','balance');`);
+        ok('点开回顾只读，不往账本写任何数', ev(`JSON.stringify(state.reviews)`) === revBefore49);
+        ev(`reviewFrom=''; reviewTab='month'; reviewMonth='2026-10'; renderReviewModal();`);
+        ok('原来那一屏四行事实没丢，收进「更多事实」',
+            ev(`document.querySelectorAll('#reviewAuto .rr-row').length`) === 4 &&
+            ev(`document.getElementById('reviewAuto').innerHTML`).indexOf('收支结余') >= 0);
+        ev(`reviewTab='year'; reviewMonth='2026-01'; renderReviewModal();`);
+        ok('年报四个数仍在，只是给主次让位',
+            ev(`document.querySelectorAll('#reviewAuto .rr-big').length`) === 4 &&
+            ev(`document.getElementById('reviewAuto').innerHTML`).indexOf('一年总支出') >= 0);
+        ok('年报也按来源换开场（全年拆解 / 当年写过的说明）',
+            ev(`(function(){
+                openReviewModal('year','2025','balance');var a=document.getElementById('reviewAuto').innerHTML;
+                openReviewModal('year','2025','returns');var b=document.getElementById('reviewAuto').innerHTML;
+                return JSON.stringify([a.indexOf('家底为什么变了')>=0,a.indexOf('一年净结余')>=0,b.indexOf('这一期你写过的话')>=0]);})()`)
+            === '[true,true,true]');
+        ok('三张统计表的小符号都带上了各自的来源页',
+            ev(`(function(){
+                state.reportPeriod='all'; billYearExpanded.add(2025); renderBillStats();
+                var a=document.getElementById('billStatsBody').innerHTML;
+                state.balancePeriod='all'; balanceYearExpanded.add('2026'); renderBalanceStats();
+                var b=document.getElementById('balanceStatsBody').innerHTML;
+                state.returnPeriod='all'; returnYearExpanded.add('2026'); renderReturnMonthly();
+                var c=document.getElementById('retMonthlyBody').innerHTML;
+                return JSON.stringify([a.indexOf("'reports'")>=0,b.indexOf("'balance'")>=0,c.indexOf("'returns'")>=0]);})()`)
+            === '[true,true,true]');
+        ok('不传来源仍是老行为（默认开场）',
+            ev(`(function(){openReviewModal('month','2025-06');return reviewFrom;})()`) === '' &&
+            ev(`document.getElementById('reviewAuto').innerHTML`).indexOf('钱花在哪') >= 0);
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {

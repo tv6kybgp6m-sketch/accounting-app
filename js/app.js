@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.56';
+const APP_VERSION = '1.41.57';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -5690,10 +5690,11 @@ function toggleReturnYear(y) {
 // v1.41.56：三张统计表跟「回顾 / 月报」关联。
 // 只打开回顾弹窗、带上「哪一期 + 月报还是年报」，不写任何数；
 // event.stopPropagation() 保证不抢整行原有的「看明细」点击。
-function reviewEntryHTML(tab, key, title) {
+function reviewEntryHTML(tab, key, title, page) {
     const t = String(title || '看这一期的回顾').replace(/"/g, '&quot;');
+    const from = ['reports', 'returns', 'balance'].indexOf(page) >= 0 ? page : 'reports';
     return `<button class="bs-review-btn" type="button" title="${t}" aria-label="${t}" `
-         + `onclick="event.stopPropagation();openReviewModal('${tab}','${key}')">`
+         + `onclick="event.stopPropagation();openReviewModal('${tab}','${key}','${from}')">`
          + `<i class="fa-solid fa-book-open"></i></button>`;
 }
 
@@ -5712,11 +5713,11 @@ function openReviewForCurrent(page) {
         const ys = page === 'balance' ? balanceYears()
             : page === 'returns' ? returnYears()
             : [...new Set(state.transactions.map(t => String(t.date).slice(0, 4)))].filter(v => /^\d{4}$/.test(v)).sort();
-        openReviewModal('year', String(ys.length ? ys[ys.length - 1] : y));
+        openReviewModal('year', String(ys.length ? ys[ys.length - 1] : y), page);
     } else if (period === 'year') {
-        openReviewModal('year', String(y));
+        openReviewModal('year', String(y), page);
     } else {
-        openReviewModal('month', `${y}-${String(m).padStart(2, '0')}`);
+        openReviewModal('month', `${y}-${String(m).padStart(2, '0')}`, page);
     }
 }
 
@@ -5790,7 +5791,7 @@ function renderBillStats() {
     const rowHTML = (b, shortLabel) => {
         const st = sumOf(b.rows);
         const lbl = byDay ? `${b.m}月${b.d}日` : `${b.y}年${b.m}月`;
-        const rev = reviewEntryHTML('month', monthKey(b), `看 ${monthKey(b)} 的月报`);
+        const rev = reviewEntryHTML('month', monthKey(b), `看 ${monthKey(b)} 的月报`, 'reports');
         return `<tr class="bs-row${shortLabel ? ' bs-sub' : ''}" onclick="openBillStatsLedger(${b.y}, ${b.m}, ${byDay ? b.d : 'null'}, '${lbl}')">
             <td class="bs-label">${shortLabel || lbl}${rev}</td>
             <td>${money(st.inc)}</td>
@@ -5811,7 +5812,7 @@ function renderBillStats() {
             const yb = byYear.get(y);
             const yst = sumOf(yb.flatMap(x => x.rows));
             const open = billYearExpanded.has(y);
-            const yRev = reviewEntryHTML('year', String(y), `看 ${y} 年的年报`);
+            const yRev = reviewEntryHTML('year', String(y), `看 ${y} 年的年报`, 'reports');
             rows.push(`<tr class="bs-year${open ? ' open' : ' collapsed'}" data-year="${y}" onclick="toggleBillYear(${y})">
                 <td class="bs-label"><span class="bs-caret">${open ? '▾' : '▸'}</span>${y} 年${yRev}</td>
                 <td>${money(yst.inc, 'income')}</td>
@@ -8300,7 +8301,7 @@ function renderBalanceStats() {
     const rowHTML = (m, shortLabel) => {
         const [y, mm] = m.split('-');
         const dateLabel = shortLabel || (period === 'year' ? `${Number(mm)}月` : `${y}年${Number(mm)}月`);
-        const rev = reviewEntryHTML('month', m, `看 ${m} 的月报`);
+        const rev = reviewEntryHTML('month', m, `看 ${m} 的月报`, 'balance');
         return `<tr class="bs-row${shortLabel ? ' bs-sub' : ''}" onclick="openAccountHistoryForPeriod('${m}', '${y}年${Number(mm)}月')">
             <td class="bs-label">${dateLabel}${rev}</td>
             ${statCells(snap.get(m))}
@@ -8318,7 +8319,7 @@ function renderBalanceStats() {
         byYear.forEach((list, y) => {
             const open = balanceYearExpanded.has(y);
             const last = list[0];   // desc 里第一个 = 该年最后一期
-            const yRev = reviewEntryHTML('year', y, `看 ${y} 年的年报`);
+            const yRev = reviewEntryHTML('year', y, `看 ${y} 年的年报`, 'balance');
             rows.push(`<tr class="bs-year${open ? ' open' : ' collapsed'}" data-year="${y}" onclick="toggleBalanceYear('${y}')">
                 <td class="bs-label" title="该年最后一期余额，不是 12 个月相加"><span class="bs-caret">${open ? '▾' : '▸'}</span>${y} 年${yRev}</td>
                 ${statCells(snap.get(last))}
@@ -15659,7 +15660,7 @@ function renderReturnMonthly() {
         const prevMonth = previousMonthOf(m);
         const prev = prevMonth && returnMonthHasRecords(prevMonth) ? amountOf(prevMonth) : null;
         const delta = prev === null ? null : cur - prev;
-        const rev = reviewEntryHTML('month', m, `看 ${m} 的月报`);
+        const rev = reviewEntryHTML('month', m, `看 ${m} 的月报`, 'returns');
         const lbl = shortLabel || `${m.replace('-', '年')}月`;
         return `
         <tr class="bs-row${shortLabel ? ' bs-sub' : ''}" onclick="openReturnDetailForMonth('${m}')">
@@ -15683,7 +15684,7 @@ function renderReturnMonthly() {
             const open = returnYearExpanded.has(y);
             const yAsc = list.slice().reverse();
             const yTotal = list.reduce((s, m) => s + amountOf(m), 0);
-            const yRev = reviewEntryHTML('year', y, `看 ${y} 年的年报`);
+            const yRev = reviewEntryHTML('year', y, `看 ${y} 年的年报`, 'returns');
             rows.push(`<tr class="bs-year${open ? ' open' : ' collapsed'}" data-year="${y}" onclick="toggleReturnYear('${y}')">
                 <td class="bs-label"><span class="bs-caret">${open ? '▾' : '▸'}</span>${y} 年${yRev}</td>
                 <td>${money(yTotal, yTotal >= 0 ? 'income' : 'expense')}</td>
@@ -16486,12 +16487,16 @@ function renderLendingCard() {
 // ---- 月度 / 年度回顾：自动报告（只给事实）+ 自己写的一段话 ----
 let reviewTab = 'month';
 let reviewMonth = null;
+// v1.41.57：从哪个页面点进来的，只决定「开场先看哪块」，不影响写在哪、存到哪。
+let reviewFrom = '';   // '' | 'reports' | 'returns' | 'balance' 
 // v1.41.56：可以带「哪一期 + 月报还是年报」打开。
 // tab='month' 时 key 是 'YYYY-MM'，tab='year' 时 key 是 'YYYY'；
 // 不传参数仍是老行为（停在原来那一期），回顾 / 月报按钮点开不受影响。
-function openReviewModal(tab, key) {
+function openReviewModal(tab, key, from) {
     const m = document.getElementById('reviewModal');
     if (!m) return;
+    if (from === 'reports' || from === 'returns' || from === 'balance') reviewFrom = from;
+    else reviewFrom = '';   // 不传来源 = 老行为（顶部按钮 / 直接调用），用默认开场
     if (tab === 'month' || tab === 'year') reviewTab = tab;
     if (key) {
         reviewMonth = tab === 'year'
@@ -16526,7 +16531,7 @@ function renderReviewModal() {
         ? `${year} 年` : `${month.slice(0, 4)} 年 ${Number(month.slice(5, 7))} 月`;
     if (gv('reviewTabMonth')) gv('reviewTabMonth').classList.toggle('active', reviewTab === 'month');
     if (gv('reviewTabYear')) gv('reviewTabYear').classList.toggle('active', reviewTab === 'year');
-    auto.innerHTML = reviewTab === 'year' ? reviewYearPageHTML(year) : reviewMonthReportHTML(month);
+    auto.innerHTML = reviewAutoHTML(month, year);
     const kind = reviewTab === 'year' ? 'yearly' : 'monthly';
     const key = reviewTab === 'year' ? year : month;
     const saved = (state.reviews && state.reviews[kind] && state.reviews[kind][key]) || null;
@@ -16632,6 +16637,181 @@ function reviewYearPageHTML(year) {
         <div class="rr-foot">净资产增加按这一年内第一次与最后一次有余额记录的月份相减，不是预测。</div>
         <div class="rr-notes"><div class="review-history-title">这一年写过的月度备注</div>${notes || '<div class="review-empty">这一年还没写过月度备注</div>'}</div>
     </div>`;
+}
+
+// ---- v1.41.57：回顾页按「从哪来」换开场；填写仍只有一处，全程只读 ----
+// 只拼 HTML，不写任何数；state.reviews / #reviewText / saveReviewText 一行不动。
+function reviewScope(month, isYear) {
+    const key = isYear ? month.slice(0, 4) : month;
+    return state.transactions.filter(t => {
+        const k = String(getMonthKey(t.date));
+        return isYear ? k.slice(0, 4) === key : k === key;
+    });
+}
+function reviewSum(rows, type) {
+    return rows.filter(t => t.type === type).reduce((s, t) => s + (Number(t.amount) || 0), 0);
+}
+function reviewCatName(id) {
+    const c = state.categories.find(x => x.id === id);
+    return c ? (c.name || c.label || id) : id;
+}
+function reviewAvgExpense6(month) {
+    let cursor = month, sum = 0, n = 0;
+    for (let i = 0; i < 6; i++) {
+        cursor = previousMonthOf(cursor);
+        if (!cursor) break;
+        const rows = state.transactions.filter(t => t.type === 'expense' && getMonthKey(t.date) === cursor);
+        if (rows.length) { sum += reviewSum(rows, 'expense'); n++; }
+    }
+    return n ? sum / n : null;
+}
+function reviewCatTop(rows, type, limit) {
+    const map = {};
+    rows.filter(t => t.type === type).forEach(t => {
+        const k = t.categoryId || 'other';
+        map[k] = (map[k] || 0) + (Number(t.amount) || 0);
+    });
+    return Object.keys(map).sort((a, b) => map[b] - map[a]).slice(0, limit)
+        .map(k => ({ name: reviewCatName(k), amount: map[k] }));
+}
+function reviewHeroHTML(exp, avg6, isYear, yearNet, yearExp, delta) {
+    let cls = 'flat', val, sub;
+    if (isYear) {
+        cls = yearNet >= 0 ? 'good' : 'bad';
+        val = `一年净结余 ${_fmtY(yearNet)}`;
+        sub = `一年总支出 ${_fmtY(yearExp)} · 净资产增加 ${delta === null ? '—' : _fmtY(delta)}`;
+    } else if (avg6 === null) {
+        val = `这个月支出 ${_fmtY(exp)}`;
+        sub = '还没有足够的历史月份可比';
+    } else {
+        const diff = exp - avg6;
+        cls = diff > 0 ? 'bad' : (diff < 0 ? 'good' : 'flat');
+        val = diff > 0 ? `比平时多花 ${_fmtY(diff)}`
+            : (diff < 0 ? `比平时少花 ${_fmtY(-diff)}` : '和平时一样');
+        sub = `这个月支出 ${_fmtY(exp)} · 前 6 个月平均 ${_fmtY(avg6)}`;
+    }
+    return `<div class="rr-hero ${cls}">
+        <div class="rr-hero-lab">第一眼只看这个</div>
+        <div class="rr-hero-val">${val}</div>
+        <div class="rr-hero-sub">${sub}</div>
+    </div>`;
+}
+function reviewBarsHTML(top, total) {
+    if (!top.length) return '<div class="rr-empty">这一期没有支出记录</div>';
+    const max = top[0].amount || 1;
+    return `<div class="rr-bars">${top.map(c => {
+        const pct = total > 0 ? (c.amount / total * 100).toFixed(1) : '0.0';
+        const w = Math.max(4, Math.round(c.amount / max * 100));
+        return `<div class="rr-bar-row">
+            <span class="rr-bar-name">${_esc(c.name)}</span>
+            <span class="rr-bar-track"><span class="rr-bar-fill" style="width:${w}%"></span></span>
+            <span class="rr-bar-val">${_fmtY(c.amount)} · ${pct}%</span>
+        </div>`;
+    }).join('')}</div>`;
+}
+function reviewIncomeHTML(rows, inc) {
+    if (!inc) return '<div class="rr-empty">这一期没有收入记录</div>';
+    const top = reviewCatTop(rows, 'income', 4);
+    if (!top.length) return `<div class="rr-kv">收入 ${_fmtY(inc)}</div>`;
+    return `<div class="rr-kv">${top.map(c => `${_esc(c.name)} ${_fmtY(c.amount)}`).join(' · ')}</div>`;
+}
+function reviewBridgeFor(month, isYear) {
+    try {
+        if (!isYear) return netWorthBridge(month);
+        const y = Number(month.slice(0, 4));
+        const all = balanceMonths();
+        const inYear = all.filter(m => m.slice(0, 4) === String(y));
+        if (inYear.length < 2) return null;
+        const cur = inYear[inYear.length - 1];
+        const prevYear = all.filter(m => m.slice(0, 4) === String(y - 1));
+        const prev = prevYear.length ? prevYear[prevYear.length - 1] : previousMonthOf(inYear[0]);
+        const range = prev ? monthsBetween(prev, cur) : [cur];
+        return netWorthBridge(cur, prev, range.length ? range : [cur]);
+    } catch (e) { return null; }
+}
+function reviewBridgeHTML(b, isYear) {
+    if (!b) return '<div class="rr-empty">还没有足够的余额记录可对照</div>';
+    const lab = isYear ? '这一年' : '这个月';
+    const rows = [
+        ['期初净资产', b.open, true],
+        [`＋ ${lab}结余（收入 ${_fmtY(b.income)} − 支出 ${_fmtY(b.expense)}）`, b.saved, false],
+        ['＋ 投资收益', b.profit, false],
+        ['＋ 固定资产变动', b.fixedMove, false],
+        ['＝ 期末净资产', b.close, true],
+        ['净资产变动', b.delta, false],
+        ['待核对差额（只标出来，不猜是什么）', b.unexplained, false],
+    ];
+    return `<div class="rr-bridge">${rows.map(([k, v, total]) => {
+        const diff = k === '净资产变动' || k.indexOf('待核对') === 0;
+        return `<div class="rr-br-row${total ? ' total' : ''}${diff ? ' diff' : ''}"><span>${k}</span><b>${_fmtY(v)}</b></div>`;
+    }).join('')}
+        <div class="rr-foot">拆解跟着资产负债页当前选的家人走；对不上的那部分只标出来，不猜它是什么。</div>
+    </div>`;
+}
+function reviewSavedNoteHTML(kind, key) {
+    const rec = state.reviews && state.reviews[kind] && state.reviews[kind][key];
+    const text = rec && !rec.deletedAt ? String(rec.text || '').trim() : '';
+    return `<div class="rr-note"><div class="rr-note-t">这一期你写过的话</div>
+        <div class="rr-note-b">${text ? _esc(text) : '这一期还没写过说明'}</div></div>`;
+}
+function reviewReturnsHTML(months) {
+    let profit = 0;
+    (months || []).forEach(m => {
+        const rm = returnsAtMonth(m, 'all');
+        Object.keys(rm).forEach(k => { profit += Number(rm[k]) || 0; });
+    });
+    let rate = null;
+    try { const c = portfolioCumulative(months || [], 'all'); rate = c.cumulative; } catch (e) {}
+    return `<div class="rr-sec">这一期的收益</div>
+        <div class="rr-kv">投资收益 ${_fmtY(profit)} · 收益率 ${rate === null ? '—' : pctText(rate)}</div>`;
+}
+function reviewFocusHTML(from, month, isYear, rows, exp, inc, bridge) {
+    if (from === 'balance') {
+        return `<div class="rr-sec">家底为什么变了</div>${reviewBridgeHTML(bridge, isYear)}`;
+    }
+    if (from === 'returns') {
+        const months = isYear
+            ? Array.from({ length: 12 }, (_, i) => `${month.slice(0, 4)}-${String(i + 1).padStart(2, '0')}`)
+            : [month];
+        const kind = isYear ? 'yearly' : 'monthly';
+        const key = isYear ? month.slice(0, 4) : month;
+        return reviewSavedNoteHTML(kind, key) + reviewReturnsHTML(months);
+    }
+    return `<div class="rr-sec">钱花在哪</div>${reviewBarsHTML(reviewCatTop(rows, 'expense', 5), exp)}
+        <div class="rr-sec">赚在哪</div>${reviewIncomeHTML(rows, inc)}`;
+}
+function reviewAutoHTML(month, year) {
+    const isYear = reviewTab === 'year';
+    const from = ['reports', 'returns', 'balance'].indexOf(reviewFrom) >= 0 ? reviewFrom : 'reports';
+    const rows = reviewScope(month, isYear);
+    const exp = reviewSum(rows, 'expense');
+    const inc = reviewSum(rows, 'income');
+    const net = inc - exp;
+    const avg6 = reviewAvgExpense6(month);
+    const bridge = from === 'balance' ? reviewBridgeFor(month, isYear) : null;
+    let delta = null;
+    if (isYear) {
+        const withBal = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`)
+            .filter(m => monthHasRecords(m));
+        if (withBal.length > 1) {
+            delta = totalsFromCat(balancesByCat(withBal[withBal.length - 1], 'all')).net
+                  - totalsFromCat(balancesByCat(withBal[0], 'all')).net;
+        }
+    }
+    const hero = reviewHeroHTML(exp, avg6, isYear, net, exp, delta);
+    const focus = `<div class="rr-focus">${reviewFocusHTML(from, month, isYear, rows, exp, inc, bridge)}</div>`;
+    const rmap = returnsAtMonth(month, 'all');
+    const profit = Object.keys(rmap).reduce((s, k) => s + (Number(rmap[k]) || 0), 0);
+    const minor = isYear ? '' : `<div class="rr-minor">
+        <div class="rr-mini"><span>这个月结余</span><b>${_fmtY(net)}</b></div>
+        <div class="rr-mini"><span>月末净资产</span><b>${_fmtY(totalsFromCat(balancesByCat(month, 'all')).net)}</b></div>
+        <div class="rr-mini"><span>当月投资收益</span><b>${_fmtY(profit)}</b></div>
+    </div>`;
+    // 老的一屏四行 / 年报四数原样保留，收进次要区，既不丢事实也不跟重点抢视线。
+    const legacy = isYear ? reviewYearPageHTML(year) : reviewMonthReportHTML(month);
+    const more = isYear ? `<div class="rr-legacy">${legacy}</div>`
+        : `<details class="rr-more"><summary>更多事实（收支、分类、家底、记账习惯）</summary>${legacy}</details>`;
+    return hero + focus + minor + more;
 }
 
 // ---- 收益率缺料清单（只读）：这个月的率到底算全了没有 ----
