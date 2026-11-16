@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.57';
+const APP_VERSION = '1.41.58';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -16690,11 +16690,45 @@ function reviewHeroHTML(exp, avg6, isYear, yearNet, yearExp, delta) {
             : (diff < 0 ? `比平时少花 ${_fmtY(-diff)}` : '和平时一样');
         sub = `这个月支出 ${_fmtY(exp)} · 前 6 个月平均 ${_fmtY(avg6)}`;
     }
+    return reviewHeroShell(cls, val, sub);
+}
+// v1.41.58：三种开场共用同一层壳，整页始终只有一个彩色重点块。
+function reviewHeroShell(cls, val, sub) {
     return `<div class="rr-hero ${cls}">
         <div class="rr-hero-lab">第一眼只看这个</div>
         <div class="rr-hero-val">${val}</div>
         <div class="rr-hero-sub">${sub}</div>
     </div>`;
+}
+// 资产负债来源：第一眼只看「净资产增减 + 跟去年比」。
+function reviewBalanceHeroHTML(b, prev, isYear) {
+    if (!reviewUsableBridge(b)) {
+        return reviewHeroShell('flat', '净资产变动 —', '还没有足够的余额记录可对照');
+    }
+    const d = b.delta;
+    const cls = d > 0 ? 'good' : (d < 0 ? 'bad' : 'flat');
+    const val = d > 0 ? `净资产增加 ${_fmtY(d)}`
+        : (d < 0 ? `净资产减少 ${_fmtY(-d)}` : '净资产没变');
+    const period = isYear ? '去年' : '去年同月';
+    let sub;
+    if (!reviewUsableBridge(prev)) {
+        sub = `${period}没有可对照的余额记录`;
+    } else {
+        const pd = prev.delta;
+        const gap = d - pd;
+        const cmp = gap > 0 ? `比${period}多 ${_fmtY(gap)}`
+            : (gap < 0 ? `比${period}少 ${_fmtY(-gap)}` : `跟${period}一样`);
+        sub = `${period}${pd > 0 ? '增加' : (pd < 0 ? '减少' : '没变')}${pd === 0 ? '' : ' ' + _fmtY(Math.abs(pd))} · ${cmp}`;
+    }
+    return reviewHeroShell(cls, val, sub);
+}
+// 投资收益来源：第一眼只看收益率，金额放下面。
+function reviewReturnsHeroHTML(stats, isYear) {
+    const rate = stats && stats.rate !== null && isFinite(stats.rate) ? stats.rate : null;
+    const cls = rate === null ? 'flat' : (rate >= 0 ? 'good' : 'bad');
+    const val = rate === null ? '投资收益率 —' : `投资收益率 ${pctText(rate)}`;
+    const sub = isYear ? '这一年按每月连乘算出来的，没做年化折算' : '这个月的收益率，没做年化折算';
+    return reviewHeroShell(cls, val, sub);
 }
 function reviewBarsHTML(top, total) {
     if (!top.length) return '<div class="rr-empty">这一期没有支出记录</div>';
@@ -16715,10 +16749,11 @@ function reviewIncomeHTML(rows, inc) {
     if (!top.length) return `<div class="rr-kv">收入 ${_fmtY(inc)}</div>`;
     return `<div class="rr-kv">${top.map(c => `${_esc(c.name)} ${_fmtY(c.amount)}`).join(' · ')}</div>`;
 }
-function reviewBridgeFor(month, isYear) {
+function reviewBridgeForMonth(m) {
+    try { return netWorthBridge(m); } catch (e) { return null; }
+}
+function reviewBridgeForYear(y) {
     try {
-        if (!isYear) return netWorthBridge(month);
-        const y = Number(month.slice(0, 4));
         const all = balanceMonths();
         const inYear = all.filter(m => m.slice(0, 4) === String(y));
         if (inYear.length < 2) return null;
@@ -16729,7 +16764,34 @@ function reviewBridgeFor(month, isYear) {
         return netWorthBridge(cur, prev, range.length ? range : [cur]);
     } catch (e) { return null; }
 }
-function reviewBridgeHTML(b, isYear) {
+function reviewBridgeFor(month, isYear) {
+    return isYear ? reviewBridgeForYear(Number(month.slice(0, 4))) : reviewBridgeForMonth(month);
+}
+// 去年同一期：月报档 = 去年同月，年报档 = 上一年整年。
+function reviewPrevBridge(month, isYear) {
+    if (isYear) return reviewBridgeForYear(Number(month.slice(0, 4)) - 1);
+    const p = month.split('-');
+    return reviewBridgeForMonth(`${Number(p[0]) - 1}-${p[1]}`);
+}
+function reviewUsableBridge(b) {
+    return !!b && b.openKnown && b.closeKnown;
+}
+function reviewCompareHTML(b, prev, isYear) {
+    if (!reviewUsableBridge(b) || !reviewUsableBridge(prev)) {
+        return '<div class="rr-sec">跟去年比</div><div class="rr-empty">去年没有可对照的余额记录</div>';
+    }
+    const period = isYear ? '去年' : '去年同月';
+    const items = [
+        ['净结余', b.saved - prev.saved],
+        ['投资收益', b.profit - prev.profit],
+    ];
+    return `<div class="rr-sec">跟去年比</div><div class="rr-compare">${items.map(([k, d]) => {
+        const txt = d > 0 ? `比${period}多 ${_fmtY(d)}`
+            : (d < 0 ? `比${period}少 ${_fmtY(-d)}` : `跟${period}一样`);
+        return `<div class="rr-cmp-row"><span>${k}</span><b>${txt}</b></div>`;
+    }).join('')}</div>`;
+}
+function reviewBridgeHTML(b, isYear, prev) {
     if (!b) return '<div class="rr-empty">还没有足够的余额记录可对照</div>';
     const lab = isYear ? '这一年' : '这个月';
     const rows = [
@@ -16746,7 +16808,7 @@ function reviewBridgeHTML(b, isYear) {
         return `<div class="rr-br-row${total ? ' total' : ''}${diff ? ' diff' : ''}"><span>${k}</span><b>${_fmtY(v)}</b></div>`;
     }).join('')}
         <div class="rr-foot">拆解跟着资产负债页当前选的家人走；对不上的那部分只标出来，不猜它是什么。</div>
-    </div>`;
+    </div>` + (prev !== undefined ? reviewCompareHTML(b, prev, isYear) : '');
 }
 function reviewSavedNoteHTML(kind, key) {
     const rec = state.reviews && state.reviews[kind] && state.reviews[kind][key];
@@ -16754,7 +16816,12 @@ function reviewSavedNoteHTML(kind, key) {
     return `<div class="rr-note"><div class="rr-note-t">这一期你写过的话</div>
         <div class="rr-note-b">${text ? _esc(text) : '这一期还没写过说明'}</div></div>`;
 }
-function reviewReturnsHTML(months) {
+function reviewReturnMonths(month, isYear) {
+    return isYear
+        ? Array.from({ length: 12 }, (_, i) => `${month.slice(0, 4)}-${String(i + 1).padStart(2, '0')}`)
+        : [month];
+}
+function reviewReturnStats(months) {
     let profit = 0;
     (months || []).forEach(m => {
         const rm = returnsAtMonth(m, 'all');
@@ -16762,20 +16829,22 @@ function reviewReturnsHTML(months) {
     });
     let rate = null;
     try { const c = portfolioCumulative(months || [], 'all'); rate = c.cumulative; } catch (e) {}
-    return `<div class="rr-sec">这一期的收益</div>
-        <div class="rr-kv">投资收益 ${_fmtY(profit)} · 收益率 ${rate === null ? '—' : pctText(rate)}</div>`;
+    return { profit, rate };
 }
-function reviewFocusHTML(from, month, isYear, rows, exp, inc, bridge) {
+function reviewReturnsHTML(months, stats) {
+    const st = stats || reviewReturnStats(months);
+    return `<div class="rr-sec">这一期的投资收益金额</div>
+        <div class="rr-kv">投资收益 ${_fmtY(st.profit)}</div>`;
+}
+function reviewFocusHTML(from, month, isYear, rows, exp, inc, bridge, prev, stats) {
     if (from === 'balance') {
-        return `<div class="rr-sec">家底为什么变了</div>${reviewBridgeHTML(bridge, isYear)}`;
+        return `<div class="rr-sec">家底为什么变了</div>${reviewBridgeHTML(bridge, isYear, prev)}`;
     }
     if (from === 'returns') {
-        const months = isYear
-            ? Array.from({ length: 12 }, (_, i) => `${month.slice(0, 4)}-${String(i + 1).padStart(2, '0')}`)
-            : [month];
         const kind = isYear ? 'yearly' : 'monthly';
         const key = isYear ? month.slice(0, 4) : month;
-        return reviewSavedNoteHTML(kind, key) + reviewReturnsHTML(months);
+        return reviewReturnsHTML(reviewReturnMonths(month, isYear), stats)
+             + reviewSavedNoteHTML(kind, key);
     }
     return `<div class="rr-sec">钱花在哪</div>${reviewBarsHTML(reviewCatTop(rows, 'expense', 5), exp)}
         <div class="rr-sec">赚在哪</div>${reviewIncomeHTML(rows, inc)}`;
@@ -16789,6 +16858,8 @@ function reviewAutoHTML(month, year) {
     const net = inc - exp;
     const avg6 = reviewAvgExpense6(month);
     const bridge = from === 'balance' ? reviewBridgeFor(month, isYear) : null;
+    const prevBridge = from === 'balance' ? reviewPrevBridge(month, isYear) : null;
+    const retStats = from === 'returns' ? reviewReturnStats(reviewReturnMonths(month, isYear)) : null;
     let delta = null;
     if (isYear) {
         const withBal = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`)
@@ -16798,8 +16869,10 @@ function reviewAutoHTML(month, year) {
                   - totalsFromCat(balancesByCat(withBal[0], 'all')).net;
         }
     }
-    const hero = reviewHeroHTML(exp, avg6, isYear, net, exp, delta);
-    const focus = `<div class="rr-focus">${reviewFocusHTML(from, month, isYear, rows, exp, inc, bridge)}</div>`;
+    const hero = from === 'balance' ? reviewBalanceHeroHTML(bridge, prevBridge, isYear)
+        : (from === 'returns' ? reviewReturnsHeroHTML(retStats, isYear)
+            : reviewHeroHTML(exp, avg6, isYear, net, exp, delta));
+    const focus = `<div class="rr-focus">${reviewFocusHTML(from, month, isYear, rows, exp, inc, bridge, prevBridge, retStats)}</div>`;
     const rmap = returnsAtMonth(month, 'all');
     const profit = Object.keys(rmap).reduce((s, k) => s + (Number(rmap[k]) || 0), 0);
     const minor = isYear ? '' : `<div class="rr-minor">

@@ -6346,3 +6346,12 @@ html.mac-app #view-returns .view-header .report-controls .ym-review-btn {
     .rr-bar-row { grid-template-columns: 64px minmax(0, 1fr) 104px; gap: 6px; }
     .rr-minor { grid-template-columns: 1fr; }
 }
+
+/* ===== v1.41.58：回顾页细节 —— 家底开场对比去年、收益开场先看率 ===== */
+.rr-compare { display: grid; gap: 2px; }
+.rr-cmp-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); }
+.rr-cmp-row b { font-weight: 600; color: var(--text-primary); }
+.rr-cmp-row:last-child { border-bottom: 0; }
+@media (max-width: 640px) {
+    .rr-cmp-row { flex-direction: column; gap: 2px; }
+}

@@ -2552,6 +2552,58 @@ async function run() {
             ev(`(function(){openReviewModal('month','2025-06');return reviewFrom;})()`) === '' &&
             ev(`document.getElementById('reviewAuto').innerHTML`).indexOf('钱花在哪') >= 0);
 
+
+        // ---------- 50) v1.41.58：回顾页三处细节 ----------
+        stage = '50';
+        const app50 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        const css50 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const html50 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+        ok('弹窗里那句「先看这一期的重点…」已删，连整行副标题一起去掉',
+            html50.indexOf('先看这一期的重点，想记的话还是写在下面那一个框里') < 0 &&
+            html50.indexOf('id="reviewSub"') < 0);
+        const bS50 = css50.indexOf('/* ===== v1.41.58');
+        ok('v1.41.58 只有一个版本块头，同比对比样式在这一块',
+            bS50 >= 0 && (css50.match(/\/\* ===== v1\.41\.58/g) || []).length === 1 &&
+            css50.slice(bS50).indexOf('.rr-compare') >= 0);
+        ev(`(function(){var k=sheetAssetCats()[0].key;
+            state.balances.push(
+              {id:'qy1',member:'本人',accountId:'a',cur:'CNY',cat:k,amount:50,month:'2025-01',updatedAt:5},
+              {id:'qy2',member:'本人',accountId:'a',cur:'CNY',cat:k,amount:120,month:'2025-02',updatedAt:6});
+            state.balanceOwner='all';})();`);
+        ev(`openReviewModal('month','2026-02','balance');`);
+        const balHero50 = ev(`document.querySelector('#reviewAuto .rr-hero-val').textContent`);
+        const balSub50 = ev(`document.querySelector('#reviewAuto .rr-hero-sub').textContent`);
+        ok('从资产负债页进来，第一眼只看净资产增加 / 减少',
+            /^净资产(增加|减少|没变)/.test(balHero50) && balHero50.indexOf('100') >= 0, balHero50);
+        ok('重点块副行对比去年同月：去年多少、比去年多 / 少多少',
+            balSub50.indexOf('去年同月') >= 0 && balSub50.indexOf('70') >= 0 &&
+            /比去年同月(多|少) 30/.test(balSub50), balSub50);
+        const cmp50 = ev(`(function(){var e=document.querySelector('#reviewAuto .rr-compare');return e?e.textContent:'';})()`);
+        ok('下面显示净结余、投资收益比去年增加还是减少',
+            cmp50.indexOf('净结余') >= 0 && cmp50.indexOf('投资收益') >= 0 &&
+            /比去年同月(多|少)/.test(cmp50), cmp50);
+        ev(`openReviewModal('month','2026-02','returns');`);
+        const retHero50 = ev(`document.querySelector('#reviewAuto .rr-hero-val').textContent`);
+        const retFocus50 = ev(`document.querySelector('#reviewAuto .rr-focus').textContent`);
+        ok('从投资收益页进来，第一眼只看投资收益率',
+            retHero50.indexOf('投资收益率') >= 0 && retHero50.indexOf('投资收益 ') < 0, retHero50);
+        ok('有数据时重点块真显示百分比，不是永远一个破折号',
+            ev(`reviewReturnsHeroHTML({profit:3400,rate:0.0325},false)`).indexOf('投资收益率 3.25%') >= 0 &&
+            ev(`reviewReturnsHeroHTML({profit:-800,rate:-0.021},true)`).indexOf('投资收益率 -2.10%') >= 0);
+        ok('投资收益金额放在下面，不再跟收益率挤在一起',
+            retFocus50.indexOf('这一期的投资收益金额') >= 0 &&
+            retFocus50.indexOf('收益率') < 0 && retFocus50.indexOf('投资收益 ') >= 0, retFocus50);
+        ok('自己写过的那段话仍在，且排在金额后面',
+            retFocus50.indexOf('这一期你写过的话') >= 0 &&
+            retFocus50.indexOf('这一期的投资收益金额') < retFocus50.indexOf('这一期你写过的话'));
+        ev(`openReviewModal('month','2026-02','reports');`);
+        ok('报表分析来源的重点块没被带坏，仍是支出跟平时比',
+            /比平时(多花|少花)|和平时一样|这个月支出/.test(
+                ev(`document.querySelector('#reviewAuto .rr-hero-val').textContent`)));
+        ok('三处细节都没动填写侧，仍只有一个输入框',
+            ev(`document.querySelectorAll('#reviewModal #reviewText').length`) === 1 &&
+            app50.indexOf('function saveReviewText()') >= 0);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));
