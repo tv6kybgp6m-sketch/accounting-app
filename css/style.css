@@ -6355,3 +6355,51 @@ html.mac-app #view-returns .view-header .report-controls .ym-review-btn {
 @media (max-width: 640px) {
     .rr-cmp-row { flex-direction: column; gap: 2px; }
 }
+
+/* ===== v1.41.59：回顾弹窗紧凑化 —— Mac 一屏看完这一期，内容一条不删 ===== */
+/* 默认（手机）：单列、顶栏两行、整屏弹窗原样；大屏块最后再放宽可视区并排两栏。 */
+#reviewModal .rr-cols { display: grid; grid-template-columns: 1fr; gap: 10px; }
+#reviewModal .rr-cols .rr-sec:not(:first-child) { margin-top: 0; }
+#reviewModal .rr-hero { margin-bottom: 6px; padding: 8px 12px; }
+#reviewModal .rr-hero-val { margin: 1px 0; font-size: 21px; line-height: 1.25; }
+#reviewModal .rr-focus { padding: 8px 12px; }
+#reviewModal .rr-sec { margin: 0 0 5px; }
+#reviewModal .rr-sec:not(:first-child) { margin-top: 8px; }
+#reviewModal .rr-cols .rr-sec:not(:first-child) { margin-top: 0; }
+#reviewModal .rr-bars { gap: 5px; }
+#reviewModal .rr-br-row { padding: 2px 0; line-height: 1.45; }
+#reviewModal .rr-bridge .rr-foot { padding: 4px 0 0; font-size: 11px; line-height: 1.45; }
+#reviewModal .rr-cmp-row { padding: 2px 0; line-height: 1.45; }
+#reviewModal .rr-note { margin-bottom: 8px; padding: 8px 10px; }
+#reviewModal .rr-minor { margin: 6px 0; gap: 6px; }
+#reviewModal .rr-mini { padding: 7px 10px; }
+#reviewModal .rr-mini b { margin-top: 2px; font-size: 15px; }
+#reviewModal .rr-more { margin-top: 6px; }
+#reviewModal .rr-more summary { padding: 6px 10px; }
+#reviewModal .rr-legacy { margin-top: 6px; }
+#reviewModal .rr-legacy .rr-year { gap: 8px; }
+#reviewModal .rr-legacy .rr-big { gap: 3px; padding: 8px 10px; }
+#reviewModal .rr-legacy .rr-big b { font-size: 16px; }
+#reviewModal .review-write { margin-top: 8px; }
+#reviewModal .review-write label { margin-bottom: 4px; }
+#reviewModal .review-write textarea { padding: 8px; line-height: 1.5; }
+#reviewModal .review-write .scope-foot { margin-top: 8px; }
+/* ---- 同一版：以前写的那些期收进折叠，点开照旧全在 ---- */
+#reviewModal .rr-hist { margin-top: 6px; border-top: 1px solid var(--border); }
+#reviewModal .rr-hist > summary { padding: 6px 0 2px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
+#reviewModal .review-hist-row { padding: 5px 0; }
+/* ---- 同一版：大屏（Mac / 桌面）才放宽可视区、合并顶栏、两栏并排 ---- */
+@media (min-width: 641px) {
+    #reviewModal .review-modal { max-width: 840px; width: min(840px, 94vw); }
+    #reviewModal .modal-header { padding: 12px 18px; }
+    /* ID 选择器压住 .balance-modal .modal-body 的 66vh 老上限；拖过缩放仍走 .modal-resized 的 !important */
+    #reviewModal .modal-body { padding: 14px 18px; max-height: 88vh; }
+    #reviewModal .review-top { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    #reviewModal .review-top .review-tabs,
+    #reviewModal .review-top .review-ym { margin-bottom: 0; }
+    #reviewModal .review-top .review-ym { flex: 1 1 auto; min-width: 0; justify-content: center; gap: 8px; }
+    #reviewModal .review-top #reviewPeriodLabel { flex: 0 0 auto; min-width: 92px; text-align: center; }
+    #reviewModal .rr-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    #reviewModal .rr-cols .rr-bar-row { grid-template-columns: 64px minmax(0, 1fr) 96px; gap: 6px; }
+    #reviewModal .rr-compare { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+}

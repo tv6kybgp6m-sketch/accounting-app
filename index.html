@@ -1478,7 +1478,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.58').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.59').catch(() => {});
             });
         }
     </script>
@@ -1538,19 +1538,21 @@
                     <button class="modal-close" onclick="closeReviewModal()"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="modal-body">
-                    <div class="review-tabs">
-                        <button class="period-btn active" id="reviewTabMonth" onclick="setReviewTab('month')">月报</button>
-                        <button class="period-btn" id="reviewTabYear" onclick="setReviewTab('year')">年报</button>
-                    </div>
-                    <div class="review-ym">
-                        <button class="secondary-btn" onclick="stepReviewMonth(-1)">‹ 上一期</button>
-                        <span id="reviewPeriodLabel"></span>
-                        <button class="secondary-btn" onclick="stepReviewMonth(1)">下一期 ›</button>
+                    <div class="review-top">
+                        <div class="review-tabs">
+                            <button class="period-btn active" id="reviewTabMonth" onclick="setReviewTab('month')">月报</button>
+                            <button class="period-btn" id="reviewTabYear" onclick="setReviewTab('year')">年报</button>
+                        </div>
+                        <div class="review-ym">
+                            <button class="secondary-btn" onclick="stepReviewMonth(-1)">‹ 上一期</button>
+                            <span id="reviewPeriodLabel"></span>
+                            <button class="secondary-btn" onclick="stepReviewMonth(1)">下一期 ›</button>
+                        </div>
                     </div>
                     <div id="reviewAuto"></div>
                     <div class="review-write">
                         <label id="reviewTextLabel">这个月想记的话</label>
-                        <textarea id="reviewText" rows="3" placeholder="特殊的支出、大额、当时发生了什么……可不填"></textarea>
+                        <textarea id="reviewText" rows="2" placeholder="特殊的支出、大额、当时发生了什么……可不填"></textarea>
                         <div class="scope-foot">
                             <span class="review-saved" id="reviewSaved"></span>
                             <button class="primary-btn" onclick="saveReviewText()">保存这段话</button>

@@ -2604,6 +2604,71 @@ async function run() {
             ev(`document.querySelectorAll('#reviewModal #reviewText').length`) === 1 &&
             app50.indexOf('function saveReviewText()') >= 0);
 
+        // ---------- 51) v1.41.59：回顾弹窗紧凑化，一屏看完这一期 ----------
+        stage = '51';
+        const app51 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        const css51 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        const html51 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+        const bS51 = css51.indexOf('/* ===== v1.41.59');
+        const bE51 = css51.indexOf('/* ===== v1.', bS51 + 10);
+        const block59 = bS51 >= 0 ? css51.slice(bS51, bE51 > 0 ? bE51 : css51.length) : '';
+        const mediaTag51 = '@media (min-width: 641px) {';
+        const mAt51 = block59.indexOf(mediaTag51);
+        const rules51 = mAt51 >= 0 ? block59.slice(mAt51 + mediaTag51.length, block59.lastIndexOf('}')) : '';
+        const singleCol51 = '#reviewModal .rr-cols { display: grid; grid-template-columns: 1fr;';
+        ok('v1.41.59 只有一个版本块头，紧凑规则全在这一块',
+            bS51 >= 0 && (css51.match(/\/\* ===== v1\.41\.59/g) || []).length === 1 &&
+            block59.indexOf('#reviewModal .modal-body') >= 0 &&
+            block59.indexOf('max-height: 88vh') >= 0 &&
+            block59.indexOf('.review-top') >= 0 && block59.indexOf('.rr-hist') >= 0);
+        ok('加宽 / 加高用的是后代选择器（#reviewModal 是遮罩，.review-modal 才是弹窗）',
+            block59.indexOf('#reviewModal.review-modal') < 0 &&
+            block59.indexOf('#reviewModal .review-modal') >= 0 && block59.indexOf('840px') >= 0);
+        ok('单列是默认值、两栏只在大屏覆盖，顺序没写反',
+            mAt51 > 0 && mAt51 < block59.indexOf('max-height: 88vh') &&
+            block59.indexOf(singleCol51) >= 0 && block59.indexOf(singleCol51) < mAt51 &&
+            block59.indexOf('grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)') >= 0);
+        // jsdom 不匹配 media：剥掉外壳注入探针，确认选择器真的命中，而不是写错或写反
+        ev(`(function(){var s=document.createElement('style');s.id='probe59';s.textContent=${JSON.stringify(rules51)};document.head.appendChild(s);return 1;})()`);
+        const vh51 = Number(ev(`window.innerHeight`));
+        ev(`openReviewModal('month','2026-02','reports');`);
+        const mh51 = ev(`getComputedStyle(document.querySelector('#reviewModal .modal-body')).maxHeight`);
+        const cols51 = ev(`(function(){var c=document.querySelector('#reviewAuto .rr-cols');return c?getComputedStyle(c).gridTemplateColumns:'';})()`);
+        // jsdom 会把 vh 折算成 px（默认视口 768 → 88vh = 675.84px），按视口比例验而不是硬编码 88
+        ok('探针实测：可视区放宽到视口的 88%（不再是 66vh）、两栏真的生效',
+            Math.abs(parseFloat(mh51) - vh51 * 0.88) < 2 && String(cols51).indexOf('1fr') >= 0,
+            { mh51, vh51, cols51 });
+        const topSeg51 = html51.slice(html51.indexOf('<div class="review-top">'), html51.indexOf('id="reviewAuto"'));
+        ok('顶部 tab 与翻期合成一行，输入框缩到 2 行，三块内容容器都在',
+            topSeg51.indexOf('class="review-tabs"') >= 0 && topSeg51.indexOf('class="review-ym"') >= 0 &&
+            html51.indexOf('id="reviewText" rows="2"') >= 0 &&
+            html51.indexOf('id="reviewAuto"') >= 0 && html51.indexOf('id="reviewHistory"') >= 0);
+        ok('支出 / 收入两栏真的渲染出来，各自带自己的标题',
+            ev(`document.querySelectorAll('#reviewAuto .rr-cols .rr-col').length`) === 2 &&
+            ev(`(function(){var c=document.querySelectorAll('#reviewAuto .rr-cols .rr-col');
+                return c[0].textContent.indexOf('钱花在哪')>=0 && c[1].textContent.indexOf('赚在哪')>=0;})()`));
+        ok('历史默认收起，写过的每一期文字一条没丢',
+            ev(`(function(){document.getElementById('reviewText').value='四月记的一笔';saveReviewText();
+                var d=document.querySelector('#reviewHistory details.rr-hist'),h=document.getElementById('reviewHistory').innerHTML;
+                return JSON.stringify([!!d && !d.hasAttribute('open'),h.indexOf('以前写的 · ')>=0,h.indexOf('四月记的一笔')>=0]);})()`)
+            === '[true,true,true]');
+        const revBefore51 = ev(`JSON.stringify(state.reviews)`);
+        ok('三种来源开场没被紧凑化带坏，点开仍是只读',
+            ev(`(function(){var o=[];['reports','returns','balance'].forEach(function(p){
+                openReviewModal('month','2026-02',p);var h=document.getElementById('reviewAuto').innerHTML;
+                o.push([h.indexOf('钱花在哪')>=0,h.indexOf('这一期你写过的话')>=0,h.indexOf('家底为什么变了')>=0]);
+                });return JSON.stringify(o);})()`)
+            === JSON.stringify([[true, false, false], [false, true, false], [false, false, true]]) &&
+            ev(`JSON.stringify(state.reviews)`) === revBefore51);
+        ok('旧的四行事实和年报四个数都还在，紧凑没删任何事实',
+            ev(`(function(){reviewFrom='';reviewTab='month';reviewMonth='2026-02';renderReviewModal();
+                return document.querySelectorAll('#reviewAuto .rr-row').length;})()`) === 4 &&
+            ev(`(function(){reviewTab='year';reviewMonth='2026-01';renderReviewModal();
+                return document.querySelectorAll('#reviewAuto .rr-big').length;})()`) === 4);
+        ok('填写仍只有一处：一个输入框、一个保存按钮',
+            ev(`document.querySelectorAll('#reviewModal #reviewText').length`) === 1 &&
+            ev(`Array.prototype.filter.call(document.querySelectorAll('#reviewModal button'),function(b){return b.textContent.trim()==='保存这段话';}).length`) === 1);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.58';
+const APP_VERSION = '1.41.59';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -16567,8 +16567,11 @@ function renderReviewHistory(kind) {
     const map = (state.reviews && state.reviews[kind]) || {};
     const keys = Object.keys(map).filter(k => map[k] && map[k].text).sort().reverse();
     if (!keys.length) { box.innerHTML = ''; return; }
-    box.innerHTML = '<div class="review-history-title">以前写的</div>' + keys.slice(0, 24).map(k =>
-        `<div class="review-hist-row"><b>${_esc(k)}</b><span>${_esc(map[k].text)}</span></div>`).join('');
+    // v1.41.59：历史整段收进折叠，首屏留给「这一期的重点 + 一个输入框」；内容一条没删，点开照旧看。
+    box.innerHTML = `<details class="rr-hist"><summary>以前写的 · ${keys.length} 期</summary>`
+        + keys.slice(0, 24).map(k =>
+            `<div class="review-hist-row"><b>${_esc(k)}</b><span>${_esc(map[k].text)}</span></div>`).join('')
+        + '</details>';
 }
 // 一屏四行：收支结余（带近 6 个月均值）、分类前五、净资产与当月收益、习惯统计。
 // 全部是已有数据的加减和排序，不写任何数、不给「应该花多少」这类判断。
@@ -16846,8 +16849,11 @@ function reviewFocusHTML(from, month, isYear, rows, exp, inc, bridge, prev, stat
         return reviewReturnsHTML(reviewReturnMonths(month, isYear), stats)
              + reviewSavedNoteHTML(kind, key);
     }
-    return `<div class="rr-sec">钱花在哪</div>${reviewBarsHTML(reviewCatTop(rows, 'expense', 5), exp)}
-        <div class="rr-sec">赚在哪</div>${reviewIncomeHTML(rows, inc)}`;
+    // v1.41.59：支出 / 收入两栏并排，把原来上下两段压成一段高度（手机上仍回落单列）。
+    return `<div class="rr-cols">
+        <div class="rr-col"><div class="rr-sec">钱花在哪</div>${reviewBarsHTML(reviewCatTop(rows, 'expense', 5), exp)}</div>
+        <div class="rr-col"><div class="rr-sec">赚在哪</div>${reviewIncomeHTML(rows, inc)}</div>
+    </div>`;
 }
 function reviewAutoHTML(month, year) {
     const isYear = reviewTab === 'year';
