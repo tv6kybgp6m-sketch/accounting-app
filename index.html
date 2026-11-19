@@ -202,11 +202,14 @@
                     <!-- 月度结账清单：把每月重复的那几步集中成待办（原来藏在资产负债页最底下） -->
                     <div class="close-card hidden" id="closeCard">
                         <div class="close-head">
-                            <div class="close-head-text">
-                                <h3>月度结账 <select class="filter-select close-month" id="closeMonthSelect"></select></h3>
-                                <div class="close-sub" id="closeProgress"></div>
+                            <div class="close-head-text collapsible-head" id="closeToggle" role="button" tabindex="0" aria-expanded="false" onclick="toggleCloseCard()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleCloseCard();}">
+                                <i class="fa-solid fa-chevron-down close-caret"></i>
+                                <div class="close-titles">
+                                    <h3>月度结账 <select class="filter-select close-month" id="closeMonthSelect" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()"></select></h3>
+                                    <div class="close-sub" id="closeProgress"></div>
+                                </div>
                             </div>
-                            <button class="secondary-btn" onclick="renderCloseCard()"><i class="fa-solid fa-rotate"></i> 重新检查</button>
+                            <button class="secondary-btn close-recheck" onclick="renderCloseCard()"><i class="fa-solid fa-rotate"></i> 重新检查</button>
                         </div>
                         <div id="closeList"></div>
                     </div>
@@ -1478,7 +1481,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.60').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.61').catch(() => {});
             });
         }
     </script>

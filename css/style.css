@@ -6402,3 +6402,10 @@ html.mac-app #view-returns .view-header .report-controls .ym-review-btn {
     #reviewModal .rr-cols .rr-bar-row { grid-template-columns: 64px minmax(0, 1fr) 96px; gap: 6px; }
     #reviewModal .rr-compare { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 }
+
+/* ===== v1.41.61：报表「月度结账」清单可折叠 —— 默认收起只留标题 + 待办数，点标题展开 ===== */
+#closeCard .close-head-text.collapsible-head { flex: 1 1 auto; min-width: 0; gap: 6px; }
+#closeCard .close-head-text .close-caret { flex: 0 0 auto; font-size: 12px; color: var(--text-secondary); transition: transform 0.2s ease; }
+#closeCard .close-head-text .close-titles { min-width: 0; }
+#closeCard.collapsed .close-head-text .close-caret { transform: rotate(-90deg); }
+#closeCard.collapsed #closeList { display: none; }

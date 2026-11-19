@@ -2744,6 +2744,41 @@ async function run() {
             app53.indexOf('if (st.rate !== null && isFinite(st.rate)) { acc *= (1 + st.rate); n += 1; }') >= 0 &&
             app53.indexOf('const cumulative = n > 0 ? acc - 1 : null;') >= 0);
 
+        // ---------- 54) v1.41.61：报表「月度结账」可折叠，默认收起只留标题 + 待办数 ----------
+        stage = '54';
+        const app61 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        const html61 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+        const css61 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        ok('结账卡片有可点的折叠头，月份下拉点选不会误触折叠',
+            html61.indexOf('id="closeToggle"') >= 0 && html61.indexOf('onclick="toggleCloseCard()"') >= 0 &&
+            html61.indexOf('id="closeMonthSelect" onclick="event.stopPropagation()"') >= 0 &&
+            html61.indexOf('class="secondary-btn close-recheck"') >= 0);
+        ok('折叠状态走 uiPrefs 落盘（本地 UI 偏好，不进云同步），默认收起',
+            app61.indexOf('closeCollapsed: true,') >= 0 &&
+            app61.indexOf('closeCollapsed: !!state.closeCollapsed,') >= 0 &&
+            app61.indexOf("if (typeof ui.closeCollapsed === 'boolean') state.closeCollapsed = ui.closeCollapsed;") >= 0);
+        ok('CSS 收起时只藏清单、留标题；箭头旋转，版本块只写一次',
+            css61.indexOf('#closeCard.collapsed #closeList { display: none; }') >= 0 &&
+            css61.indexOf('#closeCard.collapsed .close-head-text .close-caret { transform: rotate(-90deg); }') >= 0 &&
+            (css61.match(/\/\* ===== v1\.41\.61/g) || []).length === 1);
+        ok('点标题真能切换折叠状态并落盘，标题的 aria-expanded 同步',
+            (function () {
+                const before = ev('state.closeCollapsed');
+                ev('toggleCloseCard()');
+                const after = ev('state.closeCollapsed');
+                const cardCls = ev("document.getElementById('closeCard').className");
+                const aria = ev("document.getElementById('closeToggle').getAttribute('aria-expanded')");
+                ev('toggleCloseCard()');
+                return before === true && after === false && cardCls.indexOf('collapsed') < 0 &&
+                    aria === 'true';
+            })());
+        ok('重绘后折叠状态保持：renderCloseCard 会按 state 拨回 collapsed 和 aria',
+            app61.indexOf("card.classList.toggle('collapsed', !!state.closeCollapsed);") >= 0 &&
+            app61.indexOf("toggle.setAttribute('aria-expanded', state.closeCollapsed ? 'false' : 'true');") >= 0);
+        ok('折叠只动展示，不动清单内容本身：待办数与导航红点照旧',
+            app61.indexOf('const todo = cl.items.filter(i => i.state === \'warn\').length;') >= 0 &&
+            app61.indexOf('dot.classList.toggle(\'hidden\', todo === 0);') >= 0);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

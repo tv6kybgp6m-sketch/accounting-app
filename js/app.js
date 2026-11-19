@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.60';
+const APP_VERSION = '1.41.61';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -318,6 +318,7 @@ let state = {
     returnGran: null,
     returnScopeOpen: false,      // 口径那行小字：详情是否展开
     closeMonth: null,            // 月度结账清单盯哪个月；null = 最近一个已过完的月
+    closeCollapsed: true,        // 报表页结账清单默认收起，只留标题 + 待办数（本地 UI 偏好，不进云同步）
     balancePeriod: 'month',
     balanceYear: null,
     balanceMonth: null,
@@ -684,6 +685,7 @@ function saveStateNow() {
             reportPeriod: state.reportPeriod,
             returnPeriod: state.returnPeriod,
             closeMonth: state.closeMonth,
+            closeCollapsed: !!state.closeCollapsed,
         },
     };
     // v1.39.67：先编码（短码+去 createdAt，只动浅拷贝）再压缩，然后才落盘。
@@ -3941,6 +3943,7 @@ function loadState() {
                 if (['month', 'year', 'all'].indexOf(ui[k]) >= 0) state[k] = ui[k];
             });
             if (typeof ui.closeMonth === 'string') state.closeMonth = ui.closeMonth;
+            if (typeof ui.closeCollapsed === 'boolean') state.closeCollapsed = ui.closeCollapsed;
             // 仪表盘页面已移除：旧设置迁移到交易记录
             if (state.settings.defaultView === 'dashboard') state.settings.defaultView = 'transactions';
 
@@ -8756,6 +8759,17 @@ function closeCheckMonth() {
     return past.length ? past[past.length - 1] : months[months.length - 1];
 }
 
+// 报表页「月度结账」折叠开关：默认收起，只留标题 + 待办数；点标题展开清单。
+// 折叠状态走 uiPrefs 落盘（本地 UI 偏好，不进云同步），刷新后保持。
+function toggleCloseCard() {
+    state.closeCollapsed = !state.closeCollapsed;
+    const card = document.getElementById('closeCard');
+    if (card) card.classList.toggle('collapsed', state.closeCollapsed);
+    const toggle = document.getElementById('closeToggle');
+    if (toggle) toggle.setAttribute('aria-expanded', state.closeCollapsed ? 'false' : 'true');
+    saveState();
+}
+
 function renderCloseCard() {
     const card = document.getElementById('closeCard');
     if (!card) return;
@@ -8768,6 +8782,10 @@ function renderCloseCard() {
     const excluded = cl.excludedCount || 0;
     if (todo === 0 && excluded === 0) { card.classList.add('hidden'); updateNavBadges(); return; }
     card.classList.remove('hidden');
+    // v1.41.61：折叠状态由 uiPrefs 决定，重绘后保持用户上次的选择
+    card.classList.toggle('collapsed', !!state.closeCollapsed);
+    const toggle = document.getElementById('closeToggle');
+    if (toggle) toggle.setAttribute('aria-expanded', state.closeCollapsed ? 'false' : 'true');
     const ms = document.getElementById('closeMonthSelect');
     if (ms) {
         const opts = balanceMonths().slice(-24).reverse();
