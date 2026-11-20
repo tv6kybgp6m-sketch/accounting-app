@@ -401,10 +401,23 @@
                                 <span class="chart-subtitle" id="bridgeSubtitle"></span>
                             </div>
                         </div>
-                        <!-- v1.41.62：重点块——第一眼就看「净资产增加/减少多少」，拆解退到下面佐证 -->
+                        <!-- v1.41.63：等式化——「变动 = 结余 + 投资收益」一眼看懂；涨跌上色、带符号；旧的「增加/减少」大字行删掉 -->
                         <div class="bridge-hero" id="bridgeHero">
-                            <div class="bridge-hero-label" id="bridgeHeroLabel">净资产变动</div>
-                            <div class="bridge-hero-val" id="bridgeHeroVal"></div>
+                            <div class="bridge-eq">
+                                <span class="be-part">
+                                    <b class="be-val" id="bridgeHeroVal"></b>
+                                </span>
+                                <span class="be-op">=</span>
+                                <span class="be-part">
+                                    <b class="be-val" id="bridgeSavedVal"></b>
+                                    <small class="be-lab">结余</small>
+                                </span>
+                                <span class="be-op" id="bridgeProfitOp">+</span>
+                                <span class="be-part">
+                                    <b class="be-val" id="bridgeProfitVal"></b>
+                                    <small class="be-lab">投资收益</small>
+                                </span>
+                            </div>
                             <div class="bridge-hero-sub" id="bridgeHeroSub"></div>
                         </div>
                         <!-- v1.41.62：明细默认收进折叠，只留一行「展开看明细」；展开才画瀑布图（隐藏容器里 canvas 量不到尺寸） -->
@@ -1497,7 +1510,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.62').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.63').catch(() => {});
             });
         }
     </script>

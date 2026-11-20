@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.62';
+const APP_VERSION = '1.41.63';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -8523,19 +8523,29 @@ function renderNetBridge() {
     const isRange = b.range.length > 1;
     const sign = v => maskMoneySigned(v);
 
-    // v1.41.62：顶部重点块——把「净资产变动了多少」从底部说明里拎出来，第一眼就看到。
-    // 三态配色沿用回顾页 hero（good/bad/flat），只动展示，delta 的算法一行没碰。
+    // v1.41.63：等式化——「变动 = 结余 + 投资收益」，涨跌上色（增加红/减少绿，跟随 --expense/--income），
+    // 减少带「−」号；副行从「从 X 到 Y」改成「X-Y」。旧的「净资产增加/减少」大字行删掉。算法一行没动。
     const hero = document.getElementById('bridgeHero');
     if (hero) {
-        hero.className = 'bridge-hero ' + (b.delta > 0.005 ? 'good' : (b.delta < -0.005 ? 'bad' : 'flat'));
-        const word = b.delta > 0.005 ? '净资产增加' : (b.delta < -0.005 ? '净资产减少' : '净资产基本没变');
-        document.getElementById('bridgeHeroLabel').textContent = word;
-        document.getElementById('bridgeHeroVal').textContent = maskMoney(Math.abs(b.delta));
-        document.getElementById('bridgeHeroSub').textContent = `从 ${maskMoney(b.open)} 到 ${maskMoney(b.close)}`;
+        const tone = v => v > 0.005 ? 'be-up' : (v < -0.005 ? 'be-down' : 'be-flat');
+        // 带符号的数：正数 +、负数 −，取绝对值，闭眼时打码
+        const signed = v => !moneyVisible ? '****'
+            : (v < -0.005 ? '−' : (v > 0.005 ? '+' : '')) + formatCurrency(Math.abs(v));
+        hero.className = 'bridge-hero';
+        const hv = document.getElementById('bridgeHeroVal');
+        hv.textContent = signed(b.delta); hv.className = 'be-val ' + tone(b.delta);
+        const sv = document.getElementById('bridgeSavedVal');
+        sv.textContent = signed(b.saved); sv.className = 'be-val ' + tone(b.saved);
+        const po = document.getElementById('bridgeProfitOp');
+        po.textContent = b.profit < -0.005 ? '−' : '+';
+        const pv = document.getElementById('bridgeProfitVal');
+        pv.textContent = moneyVisible ? formatCurrency(Math.abs(b.profit)) : '****';
+        pv.className = 'be-val ' + tone(b.profit);
+        document.getElementById('bridgeHeroSub').textContent = `${maskMoney(b.open)}-${maskMoney(b.close)}`;
     }
 
+    // 期初 / 期末净资产两行删掉（重点块已经写了 X-Y），明细只留驱动项与待核对
     const rows = [
-        { k: '期初净资产', v: b.open, cls: 'neutral', kind: 'base', plain: true },
         { k: isRange ? '本期储蓄（收入−支出）' : '本月储蓄（收入−支出）', v: b.saved, cls: b.saved >= 0 ? 'up' : 'down', kind: 'change', note: `${sign(b.income)} 收 / ${maskMoney(b.expense)} 支` },
         { k: '投资收益', v: b.profit, cls: b.profit >= 0 ? 'up' : 'down', kind: 'change' },
     ];
@@ -8549,7 +8559,6 @@ function renderNetBridge() {
                 ? '少了一笔支出或多记了一笔收入；也可能是分红既进了流水又算进了收益（重复计算）'
                 : '多了一笔收入，或有市值变动没录成收益'),
     });
-    rows.push({ k: '期末净资产', v: b.close, cls: 'neutral', kind: 'base', plain: true });
     document.getElementById('bridgeRows').innerHTML = rows.map(r => `
         <div class="bridge-row ${r.cls} ${r.kind}">
             <span class="br-key">${_esc(r.k)}</span>

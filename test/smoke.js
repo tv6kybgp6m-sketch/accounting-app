@@ -2784,45 +2784,51 @@ async function run() {
         const app62 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
         const html62 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
         const css62 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
-        ok('HTML 有重点块容器，标题/数字/副行各就各位，版本块只写一次',
-            html62.indexOf('id="bridgeHero"') >= 0 && html62.indexOf('id="bridgeHeroLabel"') >= 0 &&
-            html62.indexOf('id="bridgeHeroVal"') >= 0 && html62.indexOf('id="bridgeHeroSub"') >= 0 &&
-            (css62.match(/\/\* ===== v1\.41\.62/g) || []).length === 1);
-        ok('三态配色沿用回顾页 hero：增加绿、减少暖、持平蓝',
-            css62.indexOf('.bridge-hero.good') >= 0 && css62.indexOf('.bridge-hero.bad') >= 0 &&
-            css62.indexOf('.bridge-hero.flat') >= 0 &&
-            css62.indexOf('.bridge-hero.good .bridge-hero-val') >= 0 &&
-            css62.indexOf('.bridge-hero.bad .bridge-hero-val') >= 0);
-        ok('清单分主次：期初/期末归 base、变动项归 change，各自有样式',
-            css62.indexOf('.bridge-row.base') >= 0 && css62.indexOf('.bridge-row.change') >= 0 &&
-            app62.indexOf("kind: 'base', plain: true") >= 0 && app62.indexOf("kind: 'change'") >= 0);
-        // 造一增一减两个场景，重点块的文字/配色类必须对上 delta 符号
+        ok('等式结构：变动 = 结余 + 投资收益 三项齐全，旧的「增加/减少」大字行删掉，版本块只写一次',
+            html62.indexOf('id="bridgeHeroVal"') >= 0 &&
+            html62.indexOf('id="bridgeSavedVal"') >= 0 && html62.indexOf('id="bridgeProfitVal"') >= 0 &&
+            html62.indexOf('id="bridgeProfitOp"') >= 0 &&
+            html62.indexOf('id="bridgeHeroSub"') >= 0 &&
+            html62.indexOf('id="bridgeHeroLabel"') < 0 &&
+            html62.indexOf('class="be-lab">结余') >= 0 && html62.indexOf('class="be-lab">投资收益') >= 0 &&
+            html62.indexOf('class="be-lab">净资产变动') < 0 &&
+            (css62.match(/\/\* ===== v1\.41\.63/g) || []).length === 1);
+        ok('标签居中对齐数字：第一列无标签，整行改为顶部对齐让三个数字齐平',
+            css62.indexOf('.be-part { display: inline-flex; flex-direction: column; align-items: center;') >= 0 &&
+            css62.indexOf('.bridge-eq { display: flex; align-items: flex-start;') >= 0);
+        ok('涨跌配色：增加红(--expense-text)、减少绿(--income-text)，不再是旧的 good/bad/flat 三态',
+            css62.indexOf('.be-val.be-up { color: var(--expense-text); }') >= 0 &&
+            css62.indexOf('.be-val.be-down { color: var(--income-text); }') >= 0 &&
+            css62.indexOf('.bridge-hero.good') < 0);
+        // 造一增一减两个场景，等式三项的符号/配色类、副行格式必须对上
         const hero62 = ev(`(function(){
             var k=sheetAssetCats()[0].key;
             function bal(id,m,a){return {id:id,member:'本人',accountId:'a',cur:'CNY',cat:k,month:m,amount:a,updatedAt:1};}
             state.balanceOwner='all'; state.balancePeriod='month'; state.balanceYear=2026;
-            state.balanceMonth=9; moneyVisible=true;   // 必须指到真有余额的 9 月，且眼睛开着，否则 hero 拿不到 delta、数字被打成 ****
+            state.balanceMonth=9; moneyVisible=true;   // 必须指到真有余额的 9 月，且眼睛开着，否则拿不到 delta、数字被打成 ****
             state.accounts=[{id:'a',name:'账户',kind:'asset',bucket:'growth',group:'',cur:'CNY',updatedAt:1}];
             state.returns=[]; state.transactions=[];
             state.balances=[bal('x1','2026-08',100000),bal('x2','2026-09',120000)];
             renderNetBridge();
-            var up={t:document.getElementById('bridgeHeroLabel').textContent,
-                    c:document.getElementById('bridgeHero').className,
-                    v:document.getElementById('bridgeHeroVal').textContent};
+            function snap(){return {
+                v:document.getElementById('bridgeHeroVal').textContent,
+                vc:document.getElementById('bridgeHeroVal').className,
+                sub:document.getElementById('bridgeHeroSub').textContent,
+                rows:document.getElementById('bridgeRows').textContent};}
+            var up=snap();
             state.balances=[bal('x1','2026-08',100000),bal('x2','2026-09',80000)];
             renderNetBridge();
-            var down={t:document.getElementById('bridgeHeroLabel').textContent,
-                      c:document.getElementById('bridgeHero').className,
-                      v:document.getElementById('bridgeHeroVal').textContent};
+            var down=snap();
             return JSON.stringify({up:up,down:down});
         })()`);
         const h62 = JSON.parse(hero62 || '{}');
-        ok('增 2 万：写「净资产增加」+ 绿色类',
-            h62.up && h62.up.t === '净资产增加' && h62.up.c.indexOf('good') >= 0 &&
-            h62.up.v.indexOf('20000') >= 0, hero62);
-        ok('减 2 万：写「净资产减少」+ 暖色类，数字取绝对值不带负号',
-            h62.down && h62.down.t === '净资产减少' && h62.down.c.indexOf('bad') >= 0 &&
-            h62.down.v.indexOf('20000') >= 0 && h62.down.v.indexOf('-') < 0, hero62);
+        ok('增 2 万：带 + 号 + 红色 be-up 类，副行「100000-120000」，明细无期初/期末',
+            h62.up && h62.up.v === '+20000' && h62.up.vc.indexOf('be-up') >= 0 &&
+            h62.up.sub === '100000-120000' &&
+            h62.up.rows.indexOf('期初净资产') < 0 && h62.up.rows.indexOf('期末净资产') < 0, hero62);
+        ok('减 2 万：带 − 号 + 绿色 be-down 类，副行「100000-80000」',
+            h62.down && h62.down.v === '−20000' && h62.down.vc.indexOf('be-down') >= 0 &&
+            h62.down.sub === '100000-80000', hero62);
         ok('明细默认收进折叠：hero 在 details 外、瀑布图在里，展开/收起两态标签都在',
             html62.indexOf('class="bridge-hero" id="bridgeHero"') >= 0 &&
             html62.indexOf('<details class="bridge-detail" id="bridgeDetail" ontoggle="onBridgeDetailToggle()">') >= 0 &&
