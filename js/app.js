@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.63';
+const APP_VERSION = '1.41.64';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -8190,8 +8190,12 @@ function balancePeriodInfo() {
     const months = balanceMonths();
     const years = balanceYears();
     const period = state.balancePeriod;
-    const selYear = state.balanceYear || now.getFullYear();
-    const selMonth = state.balanceMonth || (now.getMonth() + 1);
+    // v1.41.64：默认月份统一取「上个月」（当月还没记，要下月才填）。
+    // 以前这里兜底用 now.getMonth()+1（当月），只有 renderBalanceSelectors 里回退上月，
+    // 两条口径不一致——某些先于 selector 的路径就落到当月。
+    const _pm = prevMonthYM();
+    const selYear = state.balanceYear || _pm.y;
+    const selMonth = state.balanceMonth || _pm.m;
 
     if (period === 'all') {
         const month = months[months.length - 1] || null;
@@ -8262,8 +8266,9 @@ function renderBalanceStats() {
 
     const now = new Date();
     const period = state.balancePeriod;
-    const selYear = state.balanceYear || now.getFullYear();
-    const selMonth = state.balanceMonth || (now.getMonth() + 1);
+    const _pm = prevMonthYM();
+    const selYear = state.balanceYear || _pm.y;
+    const selMonth = state.balanceMonth || _pm.m;
     const all = balanceMonths();
     const months = period === 'month'
         ? all.filter(m => m === `${selYear}-${String(selMonth).padStart(2, '0')}`)
@@ -14817,8 +14822,9 @@ function returnPeriodInfo() {
     const months = returnMonths();
     const years = returnYears();
     const period = state.returnPeriod;
-    const selYear = state.returnYear || now.getFullYear();
-    const selMonth = state.returnMonth || (now.getMonth() + 1);
+    const _pm = prevMonthYM();
+    const selYear = state.returnYear || _pm.y;
+    const selMonth = state.returnMonth || _pm.m;
 
     if (period === 'all') {
         return { period, title: '全部', months, month: months[months.length - 1] || null, year: years[years.length - 1] || null };
@@ -15960,7 +15966,7 @@ function initReturnListeners() {
         renderReturnCalendar();
     });
     bindYmAnchorBtn('returnYmBtn',
-        () => ({ y: state.returnYear || new Date().getFullYear(), m: state.returnMonth || (new Date().getMonth() + 1) }),
+        () => { const p = prevMonthYM(); return { y: state.returnYear || p.y, m: state.returnMonth || p.m }; },
         (y, m) => { state.returnYear = y; state.returnMonth = m; renderReturns(); },
         () => ({ withMonth: state.returnPeriod !== 'year' }));
 
@@ -16303,6 +16309,14 @@ async function init() {
     try { localStorage.setItem('bk_init', 'start|' + Date.now()); } catch (e) { /* 排障标记，失败无所谓 */ }
     loadRemoteSyncConfig();
     loadState();
+    // v1.41.64：每次冷启动（右键退出再开），资产负债页和投资收益页都回到「月档 + 上个月」。
+    // 当月钱还没记、要下月才填，显示当月/今年意义不大；年月本来就不落盘（启动即 null），
+    // 但「月/年/全部」档位是落盘的 —— 上次停在年档就会显示「2026年」。这里把两个档位归一到月，
+    // 具体月份由各处 prevMonthYM() 兜底成上月。只在这里设一次，运行期手动选的月份照旧保留。
+    state.balancePeriod = 'month';
+    state.returnPeriod = 'month';
+    state.balanceYear = null; state.balanceMonth = null;
+    state.returnYear = null; state.returnMonth = null;
     // 原生 Mac 壳已有系统真标题栏(含红绿灯)，网页这套假的(含红绿灯)直接藏掉，避免两套并存
     if (isElectron()) document.body.classList.add('native-shell');
     // 兜底：老账本 / 旧备份里的余额 id 统一成四段并清掉重复格（已在 loadState 内处理，这里不重复跑）。

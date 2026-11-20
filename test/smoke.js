@@ -2859,6 +2859,32 @@ async function run() {
             app62.indexOf("isRange ? '本期储蓄（收入−支出）'") >= 0 &&
             app62.indexOf('<b>数据说明</b>：统计区间') >= 0);
 
+        // ---------- 56) v1.41.64：冷启动两页默认「月档 + 上月」----------
+        stage = '56';
+        ok('冷启动归一：loadState 后把两个档位回月档、年月清空由 prevMonthYM 兜底',
+            app62.indexOf("state.balancePeriod = 'month';") >= 0 &&
+            app62.indexOf("state.returnPeriod = 'month';") >= 0 &&
+            app62.indexOf('state.balanceYear = null; state.balanceMonth = null;') >= 0 &&
+            app62.indexOf('state.returnYear = null; state.returnMonth = null;') >= 0);
+        ok('四处默认月份兜底统一成上月，不再有 now.getMonth()+1（当月）',
+            (app62.match(/state\.balanceYear \|\| _pm\.y/g) || []).length === 2 &&
+            app62.indexOf('state.returnYear || _pm.y') >= 0 &&
+            app62.indexOf('state.returnMonth || _pm.m') >= 0 &&
+            app62.indexOf('state.returnYear || new Date().getFullYear()') < 0);
+        ok('实测：三种启动场景（年档 / 全部档 / 当月）冷启动后两页都落到同一个上月',
+            (function () {
+                const set = s => ev(`(function(){${s}
+                    state.balancePeriod='month';state.returnPeriod='month';
+                    state.balanceYear=null;state.balanceMonth=null;state.returnYear=null;state.returnMonth=null;
+                    renderBalance();renderReturns();
+                    return document.getElementById('balanceYmLabel').textContent+'|'+document.getElementById('returnYmLabel').textContent;})()`);
+                const pm = ev('prevMonthYM().y+"年"+prevMonthYM().m+"月"');
+                const want = pm + '|' + pm;
+                return set("state.balancePeriod='year';state.returnPeriod='year';") === want &&
+                    set("state.balancePeriod='all';state.returnPeriod='all';") === want &&
+                    set("state.balanceYear=2026;state.balanceMonth=11;state.returnYear=2026;state.returnMonth=11;") === want;
+            })());
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));
