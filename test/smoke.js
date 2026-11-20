@@ -2796,6 +2796,10 @@ async function run() {
         ok('标签居中对齐数字：第一列无标签，整行改为顶部对齐让三个数字齐平',
             css62.indexOf('.be-part { display: inline-flex; flex-direction: column; align-items: center;') >= 0 &&
             css62.indexOf('.bridge-eq { display: flex; align-items: flex-start;') >= 0);
+        ok('副行 X-Y 上移到第一列数字下方做标签；明细不再写投资收益行',
+            html62.indexOf('<small class="be-lab be-range" id="bridgeHeroSub"></small>') >= 0 &&
+            html62.indexOf('class="bridge-hero-sub"') < 0 &&
+            app62.indexOf('投资收益已经在等式里，明细也删掉') >= 0);
         ok('涨跌配色：增加红(--expense-text)、减少绿(--income-text)，不再是旧的 good/bad/flat 三态',
             css62.indexOf('.be-val.be-up { color: var(--expense-text); }') >= 0 &&
             css62.indexOf('.be-val.be-down { color: var(--income-text); }') >= 0 &&
@@ -2822,10 +2826,11 @@ async function run() {
             return JSON.stringify({up:up,down:down});
         })()`);
         const h62 = JSON.parse(hero62 || '{}');
-        ok('增 2 万：带 + 号 + 红色 be-up 类，副行「100000-120000」，明细无期初/期末',
+        ok('增 2 万：带 + 号 + 红色 be-up 类，副行「100000-120000」，明细无期初/期末/投资收益',
             h62.up && h62.up.v === '+20000' && h62.up.vc.indexOf('be-up') >= 0 &&
             h62.up.sub === '100000-120000' &&
-            h62.up.rows.indexOf('期初净资产') < 0 && h62.up.rows.indexOf('期末净资产') < 0, hero62);
+            h62.up.rows.indexOf('期初净资产') < 0 && h62.up.rows.indexOf('期末净资产') < 0 &&
+            h62.up.rows.indexOf('投资收益') < 0, hero62);
         ok('减 2 万：带 − 号 + 绿色 be-down 类，副行「100000-80000」',
             h62.down && h62.down.v === '−20000' && h62.down.vc.indexOf('be-down') >= 0 &&
             h62.down.sub === '100000-80000', hero62);

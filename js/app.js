@@ -8544,10 +8544,9 @@ function renderNetBridge() {
         document.getElementById('bridgeHeroSub').textContent = `${maskMoney(b.open)}-${maskMoney(b.close)}`;
     }
 
-    // 期初 / 期末净资产两行删掉（重点块已经写了 X-Y），明细只留驱动项与待核对
+    // 期初 / 期末净资产两行删掉（重点块已经写了 X-Y），投资收益已经在等式里，明细也删掉
     const rows = [
         { k: isRange ? '本期储蓄（收入−支出）' : '本月储蓄（收入−支出）', v: b.saved, cls: b.saved >= 0 ? 'up' : 'down', kind: 'change', note: `${sign(b.income)} 收 / ${maskMoney(b.expense)} 支` },
-        { k: '投资收益', v: b.profit, cls: b.profit >= 0 ? 'up' : 'down', kind: 'change' },
     ];
     if (b.fixedTouched && Math.abs(b.fixedMove) > 0.005) {
         rows.push({ k: '固定资产市值变动', v: b.fixedMove, cls: b.fixedMove >= 0 ? 'up' : 'down', kind: 'change', note: '房产 / 车辆期末与期初余额的差值，不用另录收益' });

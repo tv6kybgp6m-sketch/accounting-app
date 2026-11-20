@@ -6419,9 +6419,8 @@ html.mac-app #view-returns .view-header .report-controls .ym-review-btn {
 .be-val.be-up { color: var(--expense-text); }
 .be-val.be-down { color: var(--income-text); }
 .be-val.be-flat { color: var(--text-secondary); }
-.be-lab { font-size: 12px; color: var(--text-secondary); }
+.be-lab { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .be-op { font-size: 20px; font-weight: 500; line-height: 1.2; color: var(--text-muted); align-self: flex-start; padding-top: 2px; }
-.bridge-hero-sub { margin-top: 8px; font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .bridge-card .bridge-rows { margin-top: 0; }
 .bridge-row.change { padding-left: 14px; border-left: 2px solid var(--border); }
 .bridge-row.check.ok .br-note { color: var(--income-text); }
