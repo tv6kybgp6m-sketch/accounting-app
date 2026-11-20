@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.61';
+const APP_VERSION = '1.41.62';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -8522,26 +8522,38 @@ function renderNetBridge() {
 
     const isRange = b.range.length > 1;
     const sign = v => maskMoneySigned(v);
+
+    // v1.41.62：顶部重点块——把「净资产变动了多少」从底部说明里拎出来，第一眼就看到。
+    // 三态配色沿用回顾页 hero（good/bad/flat），只动展示，delta 的算法一行没碰。
+    const hero = document.getElementById('bridgeHero');
+    if (hero) {
+        hero.className = 'bridge-hero ' + (b.delta > 0.005 ? 'good' : (b.delta < -0.005 ? 'bad' : 'flat'));
+        const word = b.delta > 0.005 ? '净资产增加' : (b.delta < -0.005 ? '净资产减少' : '净资产基本没变');
+        document.getElementById('bridgeHeroLabel').textContent = word;
+        document.getElementById('bridgeHeroVal').textContent = maskMoney(Math.abs(b.delta));
+        document.getElementById('bridgeHeroSub').textContent = `从 ${maskMoney(b.open)} 到 ${maskMoney(b.close)}`;
+    }
+
     const rows = [
-        { k: '期初净资产', v: b.open, cls: 'neutral' },
-        { k: isRange ? '本期储蓄（收入−支出）' : '本月储蓄（收入−支出）', v: b.saved, cls: b.saved >= 0 ? 'up' : 'down', note: `${sign(b.income)} 收 / ${maskMoney(b.expense)} 支` },
-        { k: '投资收益', v: b.profit, cls: b.profit >= 0 ? 'up' : 'down' },
+        { k: '期初净资产', v: b.open, cls: 'neutral', kind: 'base', plain: true },
+        { k: isRange ? '本期储蓄（收入−支出）' : '本月储蓄（收入−支出）', v: b.saved, cls: b.saved >= 0 ? 'up' : 'down', kind: 'change', note: `${sign(b.income)} 收 / ${maskMoney(b.expense)} 支` },
+        { k: '投资收益', v: b.profit, cls: b.profit >= 0 ? 'up' : 'down', kind: 'change' },
     ];
     if (b.fixedTouched && Math.abs(b.fixedMove) > 0.005) {
-        rows.push({ k: '固定资产市值变动', v: b.fixedMove, cls: b.fixedMove >= 0 ? 'up' : 'down', note: '房产 / 车辆期末与期初余额的差值，不用另录收益' });
+        rows.push({ k: '固定资产市值变动', v: b.fixedMove, cls: b.fixedMove >= 0 ? 'up' : 'down', kind: 'change', note: '房产 / 车辆期末与期初余额的差值，不用另录收益' });
     }
     rows.push({
-        k: '待核对差额', v: b.unexplained, cls: b.balanced ? 'ok' : 'warn',
+        k: '待核对差额', v: b.unexplained, cls: b.balanced ? 'ok' : 'warn', kind: 'check',
         note: b.balanced ? '两套记录对得上'
             : (b.unexplained < 0
                 ? '少了一笔支出或多记了一笔收入；也可能是分红既进了流水又算进了收益（重复计算）'
                 : '多了一笔收入，或有市值变动没录成收益'),
     });
-    rows.push({ k: '期末净资产', v: b.close, cls: 'neutral' });
+    rows.push({ k: '期末净资产', v: b.close, cls: 'neutral', kind: 'base', plain: true });
     document.getElementById('bridgeRows').innerHTML = rows.map(r => `
-        <div class="bridge-row ${r.cls}">
+        <div class="bridge-row ${r.cls} ${r.kind}">
             <span class="br-key">${_esc(r.k)}</span>
-            <span class="br-val">${r.k === '期末净资产' || r.k === '期初净资产' ? maskMoney(r.v) : sign(r.v)}</span>
+            <span class="br-val">${r.plain ? maskMoney(r.v) : sign(r.v)}</span>
             ${r.note ? `<span class="br-note">${_esc(r.note)}</span>` : ''}
         </div>`).join('');
 
@@ -8558,8 +8570,23 @@ function renderNetBridge() {
         ? `<i class="fa-solid fa-circle-info"></i> <b>数据说明</b>：统计区间 ${spanTxt}。${fallbackTxt}<br>本期净资产变动 ${sign(b.delta)}。账户之间互转不影响净资产，所以不出现在这张图里；"待核对"通常来自漏记流水、余额记错，或有账户升值但没录收益。`
         : `<i class="fa-solid fa-triangle-exclamation"></i> 缺少 ${b.prev ? fmtM(b.prev) : '上个月'} 的余额，期初按 0 算，"待核对"这一项没有意义 —— 补上上月余额后才有参考价值。<br><b>数据说明</b>：统计区间 ${spanTxt}。${fallbackTxt}`;
 
-    if (typeof Chart === 'undefined') { loadChartLib().then(() => drawBridgeChart(b)).catch(() => {}); return; }
+    // v1.41.62：明细收进折叠后，瀑布图所在的容器默认 display:none，
+    // Chart.js 在隐藏容器里量不到尺寸会画出空白图。所以先把 b 存起来，
+    // 展开时（onBridgeDetailToggle）或本就已展开时才真正绘制。
+    lastBridgeData = b;
+    const detailOpen = !!(document.getElementById('bridgeDetail') && document.getElementById('bridgeDetail').open);
+    if (!detailOpen) return;
+    if (typeof Chart === 'undefined') { loadChartLib().then(() => drawBridgeChart(lastBridgeData)).catch(() => {}); return; }
     drawBridgeChart(b);
+}
+
+// 存最近一次算出的桥数据，供「展开看明细」时补画瀑布图
+let lastBridgeData = null;
+function onBridgeDetailToggle() {
+    const detail = document.getElementById('bridgeDetail');
+    if (!detail || !detail.open || !lastBridgeData) return;
+    if (typeof Chart === 'undefined') { loadChartLib().then(() => drawBridgeChart(lastBridgeData)).catch(() => {}); return; }
+    drawBridgeChart(lastBridgeData);
 }
 
 function drawBridgeChart(b) {

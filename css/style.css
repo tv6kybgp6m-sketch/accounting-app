@@ -6409,3 +6409,33 @@ html.mac-app #view-returns .view-header .report-controls .ym-review-btn {
 #closeCard .close-head-text .close-titles { min-width: 0; }
 #closeCard.collapsed .close-head-text .close-caret { transform: rotate(-90deg); }
 #closeCard.collapsed #closeList { display: none; }
+
+/* ===== v1.41.62：净资产变动重点块 —— 第一眼看到「增加/减少多少」，拆解退到佐证 ===== */
+.bridge-hero { margin: 8px 0 14px; padding: 13px 16px; border: 1px solid var(--border); border-left-width: 3px; border-radius: var(--radius-md); background: var(--bg-input); }
+.bridge-hero.good { background: var(--income-light); border-color: var(--income); }
+.bridge-hero.bad { background: var(--warning-light); border-color: var(--warning); }
+.bridge-hero.flat { background: var(--accent-light); border-color: var(--accent); }
+.bridge-hero-label { font-size: 12px; color: var(--text-secondary); }
+.bridge-hero-val { margin: 2px 0 3px; font-size: 26px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.bridge-hero.good .bridge-hero-val { color: var(--income-text); }
+.bridge-hero.bad .bridge-hero-val { color: var(--warning-text); }
+.bridge-hero.flat .bridge-hero-val { color: var(--accent-text); }
+.bridge-hero-sub { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.bridge-card .bridge-rows { margin-top: 0; }
+.bridge-row.base { background: var(--bg-content); }
+.bridge-row.base .br-key { color: var(--text-primary); font-weight: 500; }
+.bridge-row.change { padding-left: 14px; border-left: 2px solid var(--border); }
+.bridge-row.check.ok .br-note { color: var(--income-text); }
+/* ---- 同一版：明细收进折叠，默认只露「展开看明细」一行 ---- */
+.bridge-detail { margin-top: 2px; border-top: 1px solid var(--border); }
+.bridge-detail > summary {
+    list-style: none; display: flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 10px 8px 2px; cursor: pointer; font-size: 12px; color: var(--text-secondary); user-select: none; white-space: nowrap;
+}
+.bridge-detail > summary::-webkit-details-marker { display: none; }
+.bridge-detail .bd-caret { font-size: 11px; flex: 0 0 auto; transition: transform 0.2s ease; }
+.bridge-detail[open] .bd-caret { transform: rotate(180deg); }
+.bridge-detail .bd-label-open { display: none; }
+.bridge-detail[open] .bd-label-closed { display: none; }
+.bridge-detail[open] .bd-label-open { display: inline; }
+.bridge-detail .bd-body { padding-top: 8px; }

@@ -401,11 +401,27 @@
                                 <span class="chart-subtitle" id="bridgeSubtitle"></span>
                             </div>
                         </div>
-                        <div class="bridge-rows" id="bridgeRows"></div>
-                        <div class="chart-container">
-                            <canvas id="bridgeChart"></canvas>
+                        <!-- v1.41.62：重点块——第一眼就看「净资产增加/减少多少」，拆解退到下面佐证 -->
+                        <div class="bridge-hero" id="bridgeHero">
+                            <div class="bridge-hero-label" id="bridgeHeroLabel">净资产变动</div>
+                            <div class="bridge-hero-val" id="bridgeHeroVal"></div>
+                            <div class="bridge-hero-sub" id="bridgeHeroSub"></div>
                         </div>
-                        <div class="bridge-note" id="bridgeNote"></div>
+                        <!-- v1.41.62：明细默认收进折叠，只留一行「展开看明细」；展开才画瀑布图（隐藏容器里 canvas 量不到尺寸） -->
+                        <details class="bridge-detail" id="bridgeDetail" ontoggle="onBridgeDetailToggle()">
+                            <summary>
+                                <i class="fa-solid fa-chevron-down bd-caret"></i>
+                                <span class="bd-label-closed">展开看明细</span>
+                                <span class="bd-label-open">收起明细</span>
+                            </summary>
+                            <div class="bd-body">
+                                <div class="bridge-rows" id="bridgeRows"></div>
+                                <div class="chart-container">
+                                    <canvas id="bridgeChart"></canvas>
+                                </div>
+                                <div class="bridge-note" id="bridgeNote"></div>
+                            </div>
+                        </details>
                     </div>
 
                     <div class="chart-card drill-card">
@@ -1481,7 +1497,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.61').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.62').catch(() => {});
             });
         }
     </script>

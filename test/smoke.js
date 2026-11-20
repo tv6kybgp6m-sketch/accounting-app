@@ -2779,6 +2779,75 @@ async function run() {
             app61.indexOf('const todo = cl.items.filter(i => i.state === \'warn\').length;') >= 0 &&
             app61.indexOf('dot.classList.toggle(\'hidden\', todo === 0);') >= 0);
 
+        // ---------- 55) v1.41.62：净资产变动重点块，第一眼看到增减多少 ----------
+        stage = '55';
+        const app62 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+        const html62 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+        const css62 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+        ok('HTML 有重点块容器，标题/数字/副行各就各位，版本块只写一次',
+            html62.indexOf('id="bridgeHero"') >= 0 && html62.indexOf('id="bridgeHeroLabel"') >= 0 &&
+            html62.indexOf('id="bridgeHeroVal"') >= 0 && html62.indexOf('id="bridgeHeroSub"') >= 0 &&
+            (css62.match(/\/\* ===== v1\.41\.62/g) || []).length === 1);
+        ok('三态配色沿用回顾页 hero：增加绿、减少暖、持平蓝',
+            css62.indexOf('.bridge-hero.good') >= 0 && css62.indexOf('.bridge-hero.bad') >= 0 &&
+            css62.indexOf('.bridge-hero.flat') >= 0 &&
+            css62.indexOf('.bridge-hero.good .bridge-hero-val') >= 0 &&
+            css62.indexOf('.bridge-hero.bad .bridge-hero-val') >= 0);
+        ok('清单分主次：期初/期末归 base、变动项归 change，各自有样式',
+            css62.indexOf('.bridge-row.base') >= 0 && css62.indexOf('.bridge-row.change') >= 0 &&
+            app62.indexOf("kind: 'base', plain: true") >= 0 && app62.indexOf("kind: 'change'") >= 0);
+        // 造一增一减两个场景，重点块的文字/配色类必须对上 delta 符号
+        const hero62 = ev(`(function(){
+            var k=sheetAssetCats()[0].key;
+            function bal(id,m,a){return {id:id,member:'本人',accountId:'a',cur:'CNY',cat:k,month:m,amount:a,updatedAt:1};}
+            state.balanceOwner='all'; state.balancePeriod='month'; state.balanceYear=2026;
+            state.balanceMonth=9; moneyVisible=true;   // 必须指到真有余额的 9 月，且眼睛开着，否则 hero 拿不到 delta、数字被打成 ****
+            state.accounts=[{id:'a',name:'账户',kind:'asset',bucket:'growth',group:'',cur:'CNY',updatedAt:1}];
+            state.returns=[]; state.transactions=[];
+            state.balances=[bal('x1','2026-08',100000),bal('x2','2026-09',120000)];
+            renderNetBridge();
+            var up={t:document.getElementById('bridgeHeroLabel').textContent,
+                    c:document.getElementById('bridgeHero').className,
+                    v:document.getElementById('bridgeHeroVal').textContent};
+            state.balances=[bal('x1','2026-08',100000),bal('x2','2026-09',80000)];
+            renderNetBridge();
+            var down={t:document.getElementById('bridgeHeroLabel').textContent,
+                      c:document.getElementById('bridgeHero').className,
+                      v:document.getElementById('bridgeHeroVal').textContent};
+            return JSON.stringify({up:up,down:down});
+        })()`);
+        const h62 = JSON.parse(hero62 || '{}');
+        ok('增 2 万：写「净资产增加」+ 绿色类',
+            h62.up && h62.up.t === '净资产增加' && h62.up.c.indexOf('good') >= 0 &&
+            h62.up.v.indexOf('20000') >= 0, hero62);
+        ok('减 2 万：写「净资产减少」+ 暖色类，数字取绝对值不带负号',
+            h62.down && h62.down.t === '净资产减少' && h62.down.c.indexOf('bad') >= 0 &&
+            h62.down.v.indexOf('20000') >= 0 && h62.down.v.indexOf('-') < 0, hero62);
+        ok('明细默认收进折叠：hero 在 details 外、瀑布图在里，展开/收起两态标签都在',
+            html62.indexOf('class="bridge-hero" id="bridgeHero"') >= 0 &&
+            html62.indexOf('<details class="bridge-detail" id="bridgeDetail" ontoggle="onBridgeDetailToggle()">') >= 0 &&
+            html62.indexOf('class="bd-label-closed">展开看明细') >= 0 &&
+            html62.indexOf('class="bd-label-open">收起明细') >= 0 &&
+            html62.indexOf('id="bridgeChart"') >= 0 &&
+            html62.indexOf('id="bridgeHero"') < html62.indexOf('id="bridgeDetail"') &&
+            html62.indexOf('id="bridgeDetail"') < html62.indexOf('id="bridgeChart"'));
+        ok('折叠态 CSS：箭头翻转、两态标签互斥、隐藏原生三角',
+            css62.indexOf('.bridge-detail[open] .bd-caret { transform: rotate(180deg); }') >= 0 &&
+            css62.indexOf('.bridge-detail[open] .bd-label-open { display: inline; }') >= 0 &&
+            css62.indexOf('.bridge-detail > summary::-webkit-details-marker { display: none; }') >= 0);
+        ok('隐藏容器里不画瀑布图：存下数据，展开时才补画（onBridgeDetailToggle）',
+            app62.indexOf('lastBridgeData = b;') >= 0 &&
+            app62.indexOf('if (!detailOpen) return;') >= 0 &&
+            app62.indexOf('function onBridgeDetailToggle()') >= 0 &&
+            app62.indexOf('drawBridgeChart(lastBridgeData)') >= 0);
+        ok('净资产变动的算法一行没碰：delta / unexplained 口径原样',
+            app62.indexOf('const delta = closeT.net - openT.net;') >= 0 &&
+            app62.indexOf('const unexplained = delta - saved - profit - fixedMove;') >= 0);
+        // 原文案（有口径语义）不能被视觉改动顺手删掉
+        ok('「本期储蓄」「数据说明」「统计区间」这些有语义的文案都还在',
+            app62.indexOf("isRange ? '本期储蓄（收入−支出）'") >= 0 &&
+            app62.indexOf('<b>数据说明</b>：统计区间') >= 0);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));
