@@ -1566,7 +1566,7 @@ async function run() {
         ok('同步失败提醒挂进同步周期收尾和切页面入口，任何页面都能弹出来',
             /function maybeAlertSyncIssue\(force\)/.test(app34) &&
             app34.indexOf('maybeAlertSyncIssue(reason === \'manual\');') >= 0 &&
-            /function switchView\(viewName(?:, slideDir)?\) \{\s*\n\s*maybeAlertSyncIssue\(false\);/.test(app34) &&
+            /function switchView\(viewName\) \{\s*\n\s*maybeAlertSyncIssue\(false\);/.test(app34) &&
             app34.indexOf("showToast('云同步没成功：' + __remoteLastError, 'error', 6000)") >= 0);
         ok('同一条错误 10 分钟内不重复弹，手动同步必弹',
             app34.indexOf('const quiet = !force && __remoteAlertedError === __remoteLastError') >= 0 &&
@@ -3009,13 +3009,15 @@ async function run() {
         })()`);
         ok('实测：多勾一个账户指纹变化（会推上去），重复勾选指纹稳定（不会来回推）',
             !!fp58 && fp58.changed === true && fp58.stable === true, fp58);
-        ok('横滑切页绑在内容区 .main-content（不是导航条），图表上不触发；Mac 端不生效',
+        ok('跟手翻页绑在内容区 .main-content（不是导航条），图表上不触发；Mac 端不生效',
             app62.indexOf("const content = document.querySelector('.main-content')") >= 0 &&
-            app62.indexOf("content.addEventListener('touchstart'") >= 0 &&
-            app62.indexOf("content.addEventListener('touchend'") >= 0 &&
+            app62.indexOf('function beginFlip(dx)') >= 0 &&
+            app62.indexOf('function moveFlip(dx)') >= 0 &&
+            app62.indexOf('function endFlip(dx, commit)') >= 0 &&
             app62.indexOf("e.target.closest('canvas, .chart-container, .chart-card')") >= 0 &&
-            app62.indexOf("Math.abs(dx) < 50") >= 0 &&
-            css62.indexOf('.chart-card, .chart-container, canvas { touch-action: auto; }') >= 0);
+            app62.indexOf("content.addEventListener('touchmove'") >= 0 &&
+            css62.indexOf('.view.page-flip-layer') >= 0 &&
+            css62.indexOf('.main-content.page-flipping') >= 0);
         ok('横滑不碰弹窗：所有 .modal-overlay 都在 </main> 之后，不在手势绑定的 .main-content 内',
             (function () {
                 const html = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
@@ -3027,40 +3029,37 @@ async function run() {
             var content=document.querySelector('.main-content');
             if(!content) return {err:'no content'};
             Object.defineProperty(window,'innerWidth',{value:375,configurable:true});
-            function swipe(from,x2,dy){
-                var s=new window.Event('touchstart',{bubbles:true});
-                s.touches=[{clientX:200,clientY:300}];
-                from.dispatchEvent(s);
-                var e=new window.Event('touchend',{bubbles:true});
-                e.changedTouches=[{clientX:x2,clientY:300+(dy||0)}];
-                content.dispatchEvent(e);
+            function fire(el,type,x,y){
+                var e=new window.Event(type,{bubbles:true,cancelable:true});
+                if(type==='touchend') e.changedTouches=[{clientX:x,clientY:y}];
+                else e.touches=[{clientX:x,clientY:y}];
+                el.dispatchEvent(e);
             }
-            switchView('reports'); swipe(content,120); var left=state.currentView;   // 左滑 -80
-            switchView('reports'); swipe(content,290); var right=state.currentView;  // 右滑 +90
-            switchView('reports'); swipe(content,200,120); var vertical=state.currentView;
-            switchView('reports'); swipe(content,230); var tiny=state.currentView;   // +30 < 50
-            // 起点在图表卡片上：横滑也不切
-            var chart=document.createElement('div'); chart.className='chart-card';
-            content.appendChild(chart);
-            switchView('reports'); swipe(chart,120); var onChart=state.currentView;
-            content.removeChild(chart);
-            return {left:left,right:right,vertical:vertical,tiny:tiny,onChart:onChart};
+            switchView('reports');
+            fire(content,'touchstart',250,300);
+            fire(content,'touchmove',50,300);              // 左滑 -200，进入跟手翻页
+            var mid=content.classList.contains('page-flipping');
+            var targetShown=!!document.querySelector('#view-balance.page-flip-layer');
+            fire(content,'touchend',50,300);               // 过半，落地翻到 balance
+            return {mid:mid, targetShown:targetShown};
         })()`);
-        ok('实测内容区横滑（翻书方向）：左滑切右页、右滑切左页；竖滑/小幅不切；图表上横滑不切',
-            !!swipe58 && swipe58.left === 'balance' && swipe58.right === 'transactions' &&
-            swipe58.vertical === 'reports' && swipe58.tiny === 'reports' && swipe58.onChart === 'reports', swipe58);
-        ok('横滑过渡改成弹窗式缩放淡入（pageSwapIn）：动画结束固化 view-settled，杜绝 fadeIn 重播晃动',
-            app62.indexOf("switchView(items[next].dataset.view, dx < 0 ? 'right' : 'left')") >= 0 &&
-            app62.indexOf("target.classList.add('page-swap-in')") >= 0 &&
-            app62.indexOf("target.addEventListener('animationend', settle)") >= 0 &&
-            app62.indexOf('setTimeout(settle, 500)') >= 0 &&
-            app62.indexOf("target.classList.add('view-settled')") >= 0 &&
-            app62.indexOf("view.classList.remove('active', 'page-swap-in', 'view-settled')") >= 0 &&
-            css62.indexOf('@keyframes pageSwapIn') >= 0 &&
-            css62.indexOf('.view.page-swap-in { animation: pageSwapIn') >= 0 &&
-            css62.indexOf('.view.view-settled { animation: none; }') >= 0 &&
-            css62.indexOf('/* ===== v1.41.70 横滑切页过渡') >= 0 &&
-            css62.indexOf('pageSlideInRight') < 0);
+        await new Promise(r => setTimeout(r, 320));
+        const landed58 = ev('state.currentView');
+        ok('实测跟手翻页：touchmove 两页并排跟随（翻页中间态），落地切到右页',
+            !!swipe58 && swipe58.mid === true && swipe58.targetShown === true &&
+            landed58 === 'balance',
+            Object.assign({}, swipe58, {landed: landed58}));
+        ok('图表上横滑不触发翻页（起点判断仍在），竖滑/轻点不进翻页',
+            app62.indexOf("blocked = !!(e.target && e.target.closest && e.target.closest('canvas, .chart-container, .chart-card'))") >= 0 &&
+            app62.indexOf('if (!tracking || blocked || !e.touches') >= 0 &&
+            app62.indexOf('if (Math.abs(dx) < 10 || Math.abs(dx) <= Math.abs(dy) * 1.2) return;') >= 0);
+        ok('无淡入回弹：CSS 不再有 fadeIn/pageSwapIn 动画；切页不传方向参数',
+            css62.indexOf('@keyframes fadeIn') < 0 &&
+            css62.indexOf('@keyframes pageSwapIn') < 0 &&
+            css62.indexOf('@keyframes pageSlideInRight') < 0 &&
+            css62.indexOf('/* ===== v1.41.71 跟手翻书') >= 0 &&
+            app62.indexOf('function switchView(viewName)') >= 0 &&
+            app62.indexOf('switchView(items[next].dataset.view,') < 0);
         ok('切页后回到顶部：switchView 在 renderView 后把 .main-content 的 scrollTop 清零',
             (function () {
                 const s = app62.slice(app62.indexOf('function switchView('), app62.indexOf('function renderView('));
@@ -3073,7 +3072,7 @@ async function run() {
                 const r = ev(`(function(){
                     var c=document.querySelector('.main-content');
                     switchView('reports'); c.scrollTop=800; var before=c.scrollTop;
-                    switchView('balance','left');
+                    switchView('balance');
                     return {before:before, after:c.scrollTop};
                 })()`);
                 return !!r && r.before > 0 && r.after === 0;

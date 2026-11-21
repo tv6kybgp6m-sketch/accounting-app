@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.70';
+const APP_VERSION = '1.41.71';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -4178,7 +4178,7 @@ function applyNavOrder() {
     byView.forEach(el => bar.appendChild(el));   // 新增的项（没在旧存档里）补到末尾
 }
 
-function switchView(viewName, slideDir) {
+function switchView(viewName) {
     maybeAlertSyncIssue(false);   // v1.41.26：同步还挂着错误时，切到任何页面都提醒一次
     if (viewName === 'reports') resetReportEntryDefaults();
     // v1.41.5：这三个页面的金额眼睛，每次「点进来」都回到闭着（隐私默认）。
@@ -4196,32 +4196,17 @@ function switchView(viewName, slideDir) {
         item.classList.toggle('active', item.dataset.view === viewName);
     });
     document.querySelectorAll('.view').forEach(view => {
-        view.classList.remove('active', 'page-swap-in', 'view-settled');
+        view.classList.remove('active', 'page-flip-layer', 'page-swap-in', 'view-settled');
+        view.style.transform = '';
+        view.style.transition = '';
     });
     const target = document.getElementById(`view-${viewName}`);
     target.classList.add('active');
     // Render the view
     renderView(viewName);
-    // v1.41.70：切页后回到顶部（横滑前页面可能已滚到中段，不回顶就沿用旧高度）。
+    // 切页后回到顶部（横滑前页面可能已滚到中段，不回顶就沿用旧高度）。
     const scroller = document.querySelector('.main-content');
     if (scroller) scroller.scrollTop = 0;
-    // 横滑切页：弹窗式缩放淡入。动画结束用 animationend 固化 animation:none，
-    // 绝不能再回退到 .view 基础 fadeIn 重播（那会让页面「晃动」一下）。
-    if (slideDir === 'right' || slideDir === 'left') {
-        target.classList.add('page-swap-in');
-        let settled = false;
-        const settle = () => {
-            if (settled) return;
-            settled = true;
-            target.classList.remove('page-swap-in');
-            target.classList.add('view-settled');
-            target.removeEventListener('animationend', settle);
-        };
-        target.addEventListener('animationend', settle);
-        // 兜底：极少数环境（Web View 后台/reduced-motion）不发 animationend，
-        // 500ms 后强制固化，绝不让页面停在 opacity:0。
-        setTimeout(settle, 500);
-    }
 }
 
 function renderView(viewName) {
@@ -16128,43 +16113,109 @@ function initEventListeners() {
         }, true);
     })();
 
-    // v1.41.68 手机端：在页面内容区横滑切换导航页（类似翻页）。手指起点若落在图表上
-    // （canvas / .chart-container / .chart-card）则整段手势作废，让给图表自身的横向交互。
-    // 只绑内容区，导航条、弹窗、图表都不拦；Mac 与窄窗口桌面端完全不生效。
+    // v1.41.71 手机端跟手翻书：横滑时当前页与目标页并排，随手指实时移动，
+    // 松手过半翻过去、不过半弹回。起点在图表上不触发（让给图表自身交互）。
+    // 只绑内容区，导航条/弹窗都不碰；Mac 与窄窗口桌面端不生效。
     (function bindSwipePages() {
         const content = document.querySelector('.main-content');
         if (!content) return;
         const isMobile = () => window.innerWidth <= 640 && !document.documentElement.classList.contains('mac-app');
-        let x0 = 0, y0 = 0, tracking = false, blocked = false, swiped = false;
+        let x0 = 0, y0 = 0, tracking = false, blocked = false, flipping = false, swiped = false;
+        let curView = null, nextView = null, nextName = null, width = 0;
+
+        function visibleItems() {
+            const bar = document.querySelector('.nav-menu');
+            if (!bar) return [];
+            return Array.from(bar.querySelectorAll('.nav-item'))
+                .filter(el => window.getComputedStyle(el).display !== 'none');   // 隐藏的预算管理不算
+        }
+        function beginFlip(dx) {
+            const items = visibleItems();
+            const cur = items.findIndex(el => el.classList.contains('active'));
+            if (cur < 0) return false;
+            const next = cur + (dx < 0 ? 1 : -1);   // 手往左滑 → 翻到右边那页；往右滑 → 左边那页
+            if (next < 0 || next >= items.length) return false;
+            curView = document.getElementById('view-' + items[cur].dataset.view);
+            nextView = document.getElementById('view-' + items[next].dataset.view);
+            nextName = items[next].dataset.view;
+            if (!curView || !nextView) return false;
+            width = content.clientWidth || window.innerWidth;
+            content.scrollTop = 0;                       // 翻页从两页顶部开始，避免定位错乱
+            content.style.height = content.scrollHeight + 'px';   // 冻结高度，防两页 absolute 后塌陷
+            content.classList.add('page-flipping');
+            curView.classList.add('page-flip-layer');
+            nextView.classList.add('page-flip-layer');
+            nextView.style.display = 'block';
+            curView.style.transition = 'none';
+            nextView.style.transition = 'none';
+            curView.style.transform = 'translateX(0)';
+            nextView.style.transform = 'translateX(' + (dx < 0 ? width : -width) + 'px)';
+            flipping = true;
+            return true;
+        }
+        function moveFlip(dx) {
+            if (!flipping) return;
+            const d = Math.max(-width, Math.min(width, dx));
+            curView.style.transform = 'translateX(' + d + 'px)';
+            const from = dx < 0 ? width : -width;        // 目标页起始位置：左滑从右侧进
+            nextView.style.transform = 'translateX(' + (from + d) + 'px)';
+        }
+        function endFlip(dx, commit) {
+            if (!flipping) return;
+            flipping = false;
+            const dur = 220;
+            [curView, nextView].forEach(v => { v.style.transition = 'transform ' + dur + 'ms ease-out'; });
+            if (commit) {
+                curView.style.transform = 'translateX(' + (dx < 0 ? -width : width) + 'px)';
+                nextView.style.transform = 'translateX(0)';
+            } else {
+                curView.style.transform = 'translateX(0)';
+                nextView.style.transform = 'translateX(' + (dx < 0 ? width : -width) + 'px)';
+            }
+            const fromView = curView, toView = nextView, toName = nextName;
+            setTimeout(() => {
+                content.classList.remove('page-flipping');
+                content.style.height = '';
+                [fromView, toView].forEach(v => {
+                    v.classList.remove('page-flip-layer');
+                    v.style.transition = ''; v.style.transform = ''; v.style.display = '';
+                });
+                if (commit) {
+                    swiped = true;
+                    setTimeout(() => { swiped = false; }, 400);
+                    switchView(toName);                  // 无动画落地（switchView 只切 active + 回顶）
+                }
+                curView = nextView = null; nextName = null;
+            }, dur + 20);
+        }
+
         content.addEventListener('touchstart', e => {
             if (!isMobile() || !e.touches || e.touches.length !== 1) { tracking = false; return; }
             const t = e.touches[0];
             blocked = !!(e.target && e.target.closest && e.target.closest('canvas, .chart-container, .chart-card'));
             x0 = t.clientX; y0 = t.clientY; tracking = true;
         }, { passive: true });
+        content.addEventListener('touchmove', e => {
+            if (!tracking || blocked || !e.touches || !e.touches[0]) return;
+            const t = e.touches[0];
+            const dx = t.clientX - x0, dy = t.clientY - y0;
+            if (!flipping) {
+                if (Math.abs(dx) < 10 || Math.abs(dx) <= Math.abs(dy) * 1.2) return;   // 竖滑/轻点不翻
+                if (!beginFlip(dx)) { tracking = false; return; }                      // 边界页没有下一页
+            }
+            if (e.cancelable) e.preventDefault();
+            moveFlip(dx);
+        }, { passive: false });
         content.addEventListener('touchend', e => {
             if (!tracking) return;
             tracking = false;
-            if (blocked) return;                       // 起点在图表上：不切页
+            if (!flipping) return;
             const t = e.changedTouches && e.changedTouches[0];
-            if (!t) return;
-            const dx = t.clientX - x0, dy = t.clientY - y0;
-            // 横向够大且明显压过纵向，避免把竖向滚动/点按误判成翻页
-            if (Math.abs(dx) < 50 || Math.abs(dx) <= Math.abs(dy) * 1.4) return;
-            const bar = document.querySelector('.nav-menu');
-            if (!bar) return;
-            const items = Array.from(bar.querySelectorAll('.nav-item'))
-                .filter(el => window.getComputedStyle(el).display !== 'none');   // 隐藏的预算管理不算
-            const cur = items.findIndex(el => el.classList.contains('active'));
-            if (cur < 0) return;
-            // v1.41.69 翻书方向：手往左滑 → 翻到右边那页（新页从右侧滑入）；手往右滑 → 左边那页。
-            const next = cur + (dx < 0 ? 1 : -1);
-            if (next < 0 || next >= items.length) return;
-            swiped = true;
-            setTimeout(() => { swiped = false; }, 400);
-            switchView(items[next].dataset.view, dx < 0 ? 'right' : 'left');
+            const dx = t ? t.clientX - x0 : 0;
+            endFlip(dx, Math.abs(dx) > width * 0.35);
         });
-        // 横滑后紧跟的 click 吞掉，防止误点开列表行/按钮
+        content.addEventListener('touchcancel', () => { tracking = false; if (flipping) endFlip(0, false); });
+        // 翻页后紧跟的 click 吞掉，防止误点开列表行/按钮
         content.addEventListener('click', e => {
             if (swiped) { e.stopPropagation(); e.preventDefault(); swiped = false; }
         }, true);
