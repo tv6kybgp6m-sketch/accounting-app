@@ -2992,6 +2992,142 @@ async function run() {
         ok('实测五档：5位→len-a、7位→len-b、8位→len-c、闭眼→len-a（位数越多字号越小填满宽度）',
             c57.d5 === 'be-len-a' && c57.d7 === 'be-len-b' && c57.d8 === 'be-len-c' && c57.hidden === 'be-len-a', compact57);
 
+        // ---------- 58) v1.41.68：口径勾选进同步指纹 + 手机底部导航左右滑切页 ----------
+        stage = '58';
+        ok('同步指纹纳入 settings（收益页口径勾选变化能被 remotePush 识别并上传）',
+            app62.indexOf('JSON.stringify(d.settings || {})') >= 0 &&
+            app62.indexOf('收益页「口径」里勾的账户存在 settings.returnAccountIds') >= 0);
+        const fp58 = ev(`(function(){
+            state.settings.returnAccountMode='manual';
+            state.settings.returnAccountIds=['a1'];
+            var a=fingerprintOfPayload(buildSyncPayload());
+            state.settings.returnAccountIds=['a1','a2'];
+            var b=fingerprintOfPayload(buildSyncPayload());
+            state.settings.returnAccountIds=['a1','a2'];
+            var c=fingerprintOfPayload(buildSyncPayload());
+            return {changed:a!==b, stable:b===c};
+        })()`);
+        ok('实测：多勾一个账户指纹变化（会推上去），重复勾选指纹稳定（不会来回推）',
+            !!fp58 && fp58.changed === true && fp58.stable === true, fp58);
+        ok('横滑切页绑在内容区 .main-content（不是导航条），图表上不触发；Mac 端不生效',
+            app62.indexOf("const content = document.querySelector('.main-content')") >= 0 &&
+            app62.indexOf("content.addEventListener('touchstart'") >= 0 &&
+            app62.indexOf("content.addEventListener('touchend'") >= 0 &&
+            app62.indexOf("e.target.closest('canvas, .chart-container, .chart-card')") >= 0 &&
+            app62.indexOf("Math.abs(dx) < 50") >= 0 &&
+            css62.indexOf('.chart-card, .chart-container, canvas { touch-action: auto; }') >= 0);
+        ok('横滑不碰弹窗：所有 .modal-overlay 都在 </main> 之后，不在手势绑定的 .main-content 内',
+            (function () {
+                const html = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+                const mainEnd = html.indexOf('</main>');
+                const firstModal = html.indexOf('class="modal-overlay');
+                return mainEnd > 0 && firstModal > mainEnd;
+            })());
+        const swipe58 = ev(`(function(){
+            var content=document.querySelector('.main-content');
+            if(!content) return {err:'no content'};
+            Object.defineProperty(window,'innerWidth',{value:375,configurable:true});
+            function swipe(from,x2,dy){
+                var s=new window.Event('touchstart',{bubbles:true});
+                s.touches=[{clientX:200,clientY:300}];
+                from.dispatchEvent(s);
+                var e=new window.Event('touchend',{bubbles:true});
+                e.changedTouches=[{clientX:x2,clientY:300+(dy||0)}];
+                content.dispatchEvent(e);
+            }
+            switchView('reports'); swipe(content,120); var left=state.currentView;   // 左滑 -80
+            switchView('reports'); swipe(content,290); var right=state.currentView;  // 右滑 +90
+            switchView('reports'); swipe(content,200,120); var vertical=state.currentView;
+            switchView('reports'); swipe(content,230); var tiny=state.currentView;   // +30 < 50
+            // 起点在图表卡片上：横滑也不切
+            var chart=document.createElement('div'); chart.className='chart-card';
+            content.appendChild(chart);
+            switchView('reports'); swipe(chart,120); var onChart=state.currentView;
+            content.removeChild(chart);
+            return {left:left,right:right,vertical:vertical,tiny:tiny,onChart:onChart};
+        })()`);
+        ok('实测内容区横滑：左滑切左页、右滑切右页；竖滑/小幅不切；图表上横滑不切',
+            !!swipe58 && swipe58.left === 'transactions' && swipe58.right === 'balance' &&
+            swipe58.vertical === 'reports' && swipe58.tiny === 'reports' && swipe58.onChart === 'reports', swipe58);
+
+        ok('端到端：Mac 勾选账户 → 同步包 → 手机合并后勾选一致',
+            (function () {
+                const r = ev(`(function(){
+                    try {
+                        state.settings.returnAccountMode='manual';
+                        state.settings.returnAccountIds=['acct-new'];
+                        var payload=buildSyncPayload();
+                        state.settings.returnAccountIds=[];
+                        iCloudLastSyncTime=0;
+                        mergeRemoteData(payload);
+                        return {ids:(state.settings.returnAccountIds||[]).join(','),mode:state.settings.returnAccountMode};
+                    } catch(err) { return {err:String(err)}; }
+                })()`);
+                return !!r && r.ids === 'acct-new' && r.mode === 'manual';
+            })(), ev(`JSON.stringify({ids:state.settings.returnAccountIds,mode:state.settings.returnAccountMode})`));
+
+        // ---------- 59) v1.41.68：口径面板「记收益」勾选（账户 earnsReturn）是否同步 ----------
+        stage = '59';
+        ok('「记收益」勾选写在账户上且刷新 updatedAt（账户在指纹 sig 里，改动能被识别）',
+            app62.indexOf('a.earnsReturn = !!on;') >= 0 &&
+            app62.indexOf('a.updatedAt = Date.now();') >= 0 &&
+            app62.indexOf('sig(d.accounts), sig(d.balances)') >= 0);
+        const earn59 = ev(`(function(){
+            try {
+                function acc(withEarn){return {id:'ea',name:'测试',kind:'asset',bucket:'growth',group:'',color:'#007aff',icon:'fa-wallet',order:1,updatedAt:100,members:['本人'],earnsReturn:withEarn};}
+                state.accounts=[acc(false)];
+                var a=accountById('ea');
+                setAccountEarnsReturn(a, true);
+                var fBefore=fingerprintOfPayload(buildSyncPayload());
+                var fAfter=fingerprintOfPayload(buildSyncPayload());
+                var payload=buildSyncPayload();
+                // 模拟手机：那笔账户还是没勾
+                state.accounts=[acc(false)];
+                iCloudLastSyncTime=0;
+                mergeRemoteData(payload);
+                var got=accountById('ea');
+                return {earns:got.earnsReturn, updated:got.updatedAt>100, fpStable:fBefore===fAfter};
+            } catch(err) { return {err:String(err)}; }
+        })()`);
+        ok('端到端：Mac 勾「记收益」→ 同步包 → 手机合并后勾选一致（updatedAt 较新胜）',
+            !!earn59 && earn59.earns === true && earn59.updated === true && earn59.fpStable === true, earn59);
+
+        // ---------- 60) v1.41.68：导航栏长按拖动排序，手机/Mac 各自独立 ----------
+        stage = '60';
+        ok('导航顺序按设备分开存（mobile / desktop 两个 key），不进同步包',
+            app62.indexOf("localStorage.getItem('bookkeeping_nav_order_' + (isElectron() ? 'desktop' : 'mobile'))") >= 0 &&
+            app62.indexOf("localStorage.setItem(orderKey()") >= 0 &&
+            app62.indexOf("'bookkeeping_nav_order_' + (isElectron() ? 'desktop' : 'mobile')") >= 0 &&
+            // 顺序 key 绝不能出现在同步载荷里
+            app62.indexOf('nav_order_') >= 0 &&
+            (function () { const p = ev('buildSyncPayload()'); return p && JSON.stringify(p).indexOf('nav_order') < 0; })());
+        ok('applyNavOrder 在 init 冷启动恢复顺序，新增项补到末尾',
+            app62.indexOf('function applyNavOrder()') >= 0 &&
+            app62.indexOf('applyNavOrder();   // v1.41.68') >= 0 &&
+            app62.indexOf('byView.forEach(el => bar.appendChild(el));') >= 0);
+        ok('长按 500ms 才进拖动，拖动时吞 click；两端都绑鼠标+触摸',
+            app62.indexOf('}, 500);') >= 0 &&
+            app62.indexOf("el.classList.add('nav-dragging')") >= 0 &&
+            app62.indexOf("bar.addEventListener('mousedown'") >= 0 &&
+            app62.indexOf("document.addEventListener('mouseup'") >= 0 &&
+            css62.indexOf('.nav-item.nav-dragging') >= 0);
+        ok('实测：applyNavOrder 按存档重排 DOM，未列出的新项补末尾',
+            (function () {
+                const r = ev(`(function(){
+                    try {
+                        var bar=document.querySelector('.nav-menu');
+                        var all=Array.from(bar.querySelectorAll('.nav-item')).map(function(el){return el.dataset.view;});
+                        localStorage.setItem('bookkeeping_nav_order_'+(isElectron()?'desktop':'mobile'), JSON.stringify(['settings','transactions']));
+                        applyNavOrder();
+                        var after=Array.from(bar.querySelectorAll('.nav-item')).map(function(el){return el.dataset.view;});
+                        localStorage.removeItem('bookkeeping_nav_order_'+(isElectron()?'desktop':'mobile'));
+                        applyNavOrder();
+                        return {first:after[0],second:after[1],tail:after[after.length-1],all:all.length};
+                    } catch(err){ return {err:String(err)}; }
+                })()`);
+                return !!r && r.first === 'settings' && r.second === 'transactions' && r.all >= 6;
+            })(), ev(`(function(){var b=document.querySelector('.nav-menu');return Array.from(b.querySelectorAll('.nav-item')).map(function(e){return e.dataset.view;}).join(',');})()`));
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

@@ -314,6 +314,14 @@ body.native-shell .sidebar {
     color: var(--text-on-accent);
 }
 
+/* v1.41.68：长按拖动排序时被抓起的项 —— 两端通用 */
+.nav-item.nav-dragging {
+    opacity: 0.55;
+    transform: scale(1.04);
+    z-index: 10;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+    cursor: grabbing;
+}
 .sidebar-footer {
     padding: 12px;
 }
@@ -356,7 +364,11 @@ body.native-shell .sidebar {
     flex: 1;
     overflow-y: auto;
     background: var(--bg-content);
+    /* v1.41.68 手机横滑切页：纵向滚动归浏览器，横向手势交给 JS；图表卡片单独放开（见下方媒体查询） */
+    touch-action: pan-y;
 }
+/* v1.41.68：图表要保留自己的横向交互（拖动/缩放），不被内容区的 pan-y 限制 */
+.chart-card, .chart-container, canvas { touch-action: auto; }
 
 /* Views */
 .view {

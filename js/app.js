@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.67';
+const APP_VERSION = '1.41.68';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1842,6 +1842,12 @@ function fingerprintOfPayload(p) {
         (d.insuranceMembers || []).slice().sort().join(','),
         JSON.stringify(d.fundTargets || {}),
         sig(d.recurring),
+        // v1.41.68：settings 必须进指纹。收益页「口径」里勾的账户存在 settings.returnAccountIds，
+        // 以前指纹完全不看 settings → 勾完 saveState 算出的指纹和云端一样 → remotePush 判定
+        // 「远端已是这份」直接跳过上传，手机上永远看不到 Mac 勾的那一项（updatedAtSeed 白设）。
+        // buildSyncPayload 已把 autoOpenAdd / theme 这两个本机偏好摘掉，这里 stringify 不会
+        // 把它们带进来，不会造成两台设备互盖外观。
+        JSON.stringify(d.settings || {}),
         // 异常订单"排除"列表（txnId -> true）：必须进指纹，否则某台设备排除后
         // 指纹不变、remotePush 误判"远端已是这份"而跳过上传（v1.39.66 修复，
         // 与 v1.39.43 的 tokenExpiresAt 漏字段同类）。排序保证与设备无关。
@@ -4156,6 +4162,20 @@ function resetReportEntryDefaults() {
     document.querySelectorAll('#view-reports .period-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.period === state.reportPeriod);
     });
+}
+
+// v1.41.68：启动时把本机保存的导航顺序贴回去。手机 / Mac 各存各的 key，互不覆盖，
+// 也不进云同步（顺序是"这台设备怎么用"的偏好，不该被另一台设备改掉）。
+function applyNavOrder() {
+    const bar = document.querySelector('.nav-menu');
+    if (!bar) return;
+    let order;
+    try { order = JSON.parse(localStorage.getItem('bookkeeping_nav_order_' + (isElectron() ? 'desktop' : 'mobile')) || 'null'); } catch (e) {}
+    if (!Array.isArray(order) || !order.length) return;
+    const byView = new Map();
+    Array.from(bar.querySelectorAll('.nav-item')).forEach(el => byView.set(el.dataset.view, el));
+    order.forEach(v => { const el = byView.get(v); if (el) { bar.appendChild(el); byView.delete(v); } });
+    byView.forEach(el => bar.appendChild(el));   // 新增的项（没在旧存档里）补到末尾
 }
 
 function switchView(viewName) {
@@ -16013,6 +16033,117 @@ function initEventListeners() {
             switchView(item.dataset.view);
         });
     });
+    // v1.41.68 两端通用：长按导航项 500ms 拖动排序。手机 / Mac 各存各的顺序，不进同步。
+    // 横滑切页是另一套手势，绑在内容区 .main-content 上（见 bindSwipePages），两者互不干扰。
+    (function bindNavReorder() {
+        const bar = document.querySelector('.nav-menu');
+        if (!bar) return;
+        let sx = 0, sy = 0, holdTimer = null, dragging = false, dragEl = null, suppressed = false;
+        const orderKey = () => 'bookkeeping_nav_order_' + (isElectron() ? 'desktop' : 'mobile');
+        const cancelHold = () => { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } };
+        const swallowClick = () => { suppressed = true; setTimeout(() => { suppressed = false; }, 400); };
+
+        function startHold(el, x, y) {
+            if (!el || dragging) return;
+            sx = x; sy = y;
+            cancelHold();
+            holdTimer = setTimeout(() => {
+                holdTimer = null;
+                dragging = true; dragEl = el;
+                el.classList.add('nav-dragging');
+                if (navigator.vibrate) navigator.vibrate(20);
+            }, 500);
+        }
+        function move(x, y, ev) {
+            if (dragging && dragEl) {
+                if (ev && ev.cancelable) ev.preventDefault();
+                const under = document.elementFromPoint(x, y);
+                const target = under && under.closest ? under.closest('.nav-item') : null;
+                if (!target || target === dragEl || target.parentNode !== bar) return;
+                const rect = target.getBoundingClientRect();
+                const vertical = window.getComputedStyle(bar).flexDirection === 'column';
+                const before = vertical ? y < rect.top + rect.height / 2 : x < rect.left + rect.width / 2;
+                bar.insertBefore(dragEl, before ? target : target.nextSibling);
+            } else if (holdTimer && (Math.abs(x - sx) > 10 || Math.abs(y - sy) > 10)) {
+                cancelHold();     // 移动了 = 不是长按
+            }
+        }
+        function end() {
+            cancelHold();
+            if (!dragging) return;
+            dragging = false;
+            if (dragEl) dragEl.classList.remove('nav-dragging');
+            const order = Array.from(bar.querySelectorAll('.nav-item')).map(el => el.dataset.view);
+            try { localStorage.setItem(orderKey(), JSON.stringify(order)); } catch (e) {}
+            dragEl = null; swallowClick();
+        }
+
+        bar.addEventListener('touchstart', e => {
+            const t = e.touches && e.touches[0];
+            if (t) startHold(e.target, t.clientX, t.clientY);
+        }, { passive: true });
+        bar.addEventListener('touchmove', e => {
+            const t = e.touches && e.touches[0];
+            if (t) move(t.clientX, t.clientY, e);
+        }, { passive: false });
+        bar.addEventListener('touchend', end);
+        bar.addEventListener('touchcancel', () => {
+            cancelHold();
+            if (dragging && dragEl) dragEl.classList.remove('nav-dragging');
+            dragging = false; dragEl = null;
+        });
+        // Mac 鼠标长按拖动（按住 500ms 再移）
+        bar.addEventListener('mousedown', e => {
+            if (e.button === 0) startHold(e.target, e.clientX, e.clientY);
+        });
+        document.addEventListener('mousemove', e => { if (holdTimer || dragging) move(e.clientX, e.clientY, null); });
+        document.addEventListener('mouseup', end);
+        // 吞掉拖动后紧跟的那次 click，避免误切页
+        bar.addEventListener('click', e => {
+            if (suppressed) { e.stopPropagation(); e.preventDefault(); suppressed = false; }
+        }, true);
+    })();
+
+    // v1.41.68 手机端：在页面内容区横滑切换导航页（类似翻页）。手指起点若落在图表上
+    // （canvas / .chart-container / .chart-card）则整段手势作废，让给图表自身的横向交互。
+    // 只绑内容区，导航条、弹窗、图表都不拦；Mac 与窄窗口桌面端完全不生效。
+    (function bindSwipePages() {
+        const content = document.querySelector('.main-content');
+        if (!content) return;
+        const isMobile = () => window.innerWidth <= 640 && !document.documentElement.classList.contains('mac-app');
+        let x0 = 0, y0 = 0, tracking = false, blocked = false, swiped = false;
+        content.addEventListener('touchstart', e => {
+            if (!isMobile() || !e.touches || e.touches.length !== 1) { tracking = false; return; }
+            const t = e.touches[0];
+            blocked = !!(e.target && e.target.closest && e.target.closest('canvas, .chart-container, .chart-card'));
+            x0 = t.clientX; y0 = t.clientY; tracking = true;
+        }, { passive: true });
+        content.addEventListener('touchend', e => {
+            if (!tracking) return;
+            tracking = false;
+            if (blocked) return;                       // 起点在图表上：不切页
+            const t = e.changedTouches && e.changedTouches[0];
+            if (!t) return;
+            const dx = t.clientX - x0, dy = t.clientY - y0;
+            // 横向够大且明显压过纵向，避免把竖向滚动/点按误判成翻页
+            if (Math.abs(dx) < 50 || Math.abs(dx) <= Math.abs(dy) * 1.4) return;
+            const bar = document.querySelector('.nav-menu');
+            if (!bar) return;
+            const items = Array.from(bar.querySelectorAll('.nav-item'))
+                .filter(el => window.getComputedStyle(el).display !== 'none');   // 隐藏的预算管理不算
+            const cur = items.findIndex(el => el.classList.contains('active'));
+            if (cur < 0) return;
+            const next = cur + (dx < 0 ? -1 : 1);      // 往左滑切左边那页，往右滑切右边那页
+            if (next < 0 || next >= items.length) return;
+            swiped = true;
+            setTimeout(() => { swiped = false; }, 400);
+            switchView(items[next].dataset.view);
+        });
+        // 横滑后紧跟的 click 吞掉，防止误点开列表行/按钮
+        content.addEventListener('click', e => {
+            if (swiped) { e.stopPropagation(); e.preventDefault(); swiped = false; }
+        }, true);
+    })();
 
     // Link buttons
     document.querySelectorAll('[data-goto]').forEach(btn => {
@@ -16320,6 +16451,7 @@ async function init() {
     state.returnPeriod = 'month';
     state.balanceYear = null; state.balanceMonth = null;
     state.returnYear = null; state.returnMonth = null;
+    applyNavOrder();   // v1.41.68：恢复本机导航顺序（手机/Mac 各自独立）
     // 原生 Mac 壳已有系统真标题栏(含红绿灯)，网页这套假的(含红绿灯)直接藏掉，避免两套并存
     if (isElectron()) document.body.classList.add('native-shell');
     // 兜底：老账本 / 旧备份里的余额 id 统一成四段并清掉重复格（已在 loadState 内处理，这里不重复跑）。
