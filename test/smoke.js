@@ -2826,8 +2826,8 @@ async function run() {
             return JSON.stringify({up:up,down:down});
         })()`);
         const h62 = JSON.parse(hero62 || '{}');
-        ok('增 2 万：带 + 号 + 红色 be-up 类，副行「100000-120000」，明细无期初/期末/投资收益',
-            h62.up && h62.up.v === '+20000' && h62.up.vc.indexOf('be-up') >= 0 &&
+        ok('增 2 万：正数不带 + 号 + 红色 be-up 类，副行「100000-120000」，明细无期初/期末/投资收益',
+            h62.up && h62.up.v === '20000' && h62.up.vc.indexOf('be-up') >= 0 &&
             h62.up.sub === '100000-120000' &&
             h62.up.rows.indexOf('期初净资产') < 0 && h62.up.rows.indexOf('期末净资产') < 0 &&
             h62.up.rows.indexOf('投资收益') < 0, hero62);
@@ -2884,6 +2884,57 @@ async function run() {
                     set("state.balancePeriod='all';state.returnPeriod='all';") === want &&
                     set("state.balanceYear=2026;state.balanceMonth=11;state.returnYear=2026;state.returnMonth=11;") === want;
             })());
+
+        // ---------- 57) v1.41.65：手机端净资产变动等式一行 + 正数不带 + 号 ----------
+        stage = '57';
+        ok('正数不带 + 号：signed 里只对负数加「−」，等式中间的 + / − 运算符照旧',
+            app62.indexOf("(v < -0.005 ? '−' : '') + formatCurrency(Math.abs(v))") >= 0 &&
+            app62.indexOf("(v > 0.005 ? '+' : '')") < 0 &&
+            app62.indexOf("po.textContent = b.profit < -0.005 ? '−' : '+';") >= 0);
+        ok('手机端（≤640px 且非 Mac 壳）等式强制 nowrap 不折行 + 数字/标签略缩小 + 防副行断行',
+            (css62.match(/\/\* ===== v1\.41\.65/g) || []).length === 1 &&
+            css62.indexOf('html:not(.mac-app) .bridge-eq { flex-wrap: nowrap; gap: 5px; overflow-x: auto; scrollbar-width: none; }') >= 0 &&
+            css62.indexOf('html:not(.mac-app) .bridge-eq::-webkit-scrollbar { display: none; }') >= 0 &&
+            css62.indexOf('html:not(.mac-app) .be-val { font-size: 18px; white-space: nowrap; }') >= 0 &&
+            css62.indexOf('html:not(.mac-app) #bridgeHeroVal { font-size: 20px; }') >= 0 &&
+            css62.indexOf('html:not(.mac-app) .be-lab { font-size: 10px; white-space: nowrap; }') >= 0 &&
+            css62.indexOf('html:not(.mac-app) .be-op { font-size: 16px; padding-top: 3px; }') >= 0);
+        ok('桌面规则原样保留（wrap + 22px/26px），手机块只在 @media 里覆盖，不改全局',
+            css62.indexOf('.bridge-eq { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }') >= 0 &&
+            css62.indexOf('.be-val { font-size: 22px;') >= 0 &&
+            css62.indexOf('#bridgeHeroVal { font-size: 26px; }') >= 0 &&
+            css62.indexOf('@media (max-width: 640px)') >= 0);
+        // 运行时：造真正带正数结余/收益的场景，才能验到「三个数值都不带 + 号」
+        const eq57 = ev(`(function(){
+            var k=sheetAssetCats()[0].key;
+            function bal(id,m,a){return {id:id,member:'本人',accountId:'a',cur:'CNY',cat:k,month:m,amount:a,updatedAt:1};}
+            state.balanceOwner='all'; state.balancePeriod='month'; state.balanceYear=2026;
+            state.balanceMonth=9; moneyVisible=true;
+            state.accounts=[{id:'a',name:'账户',kind:'asset',bucket:'growth',group:'',cur:'CNY',updatedAt:1}];
+            function snap(){return {
+                v:document.getElementById('bridgeHeroVal').textContent,
+                sv:document.getElementById('bridgeSavedVal').textContent,
+                op:document.getElementById('bridgeProfitOp').textContent,
+                pv:document.getElementById('bridgeProfitVal').textContent};}
+            // 增：余额 10万→12万，结余 +12000、收益 +8000 → 等式 20000 = 12000 + 8000
+            state.transactions=[{id:'t1',date:'2026-09-15',type:'income',amount:12000,member:'本人',updatedAt:1}];
+            state.returns=[{id:'r1',month:'2026-09',accountId:'a',amount:8000,member:'本人',updatedAt:1}];
+            state.balances=[bal('x1','2026-08',100000),bal('x2','2026-09',120000)];
+            renderNetBridge(); var up=snap();
+            // 减：结余 -12000（支出）、收益 -8000 → 等式 −20000 = −12000 − 8000
+            state.transactions=[{id:'t2',date:'2026-09-15',type:'expense',amount:12000,member:'本人',updatedAt:1}];
+            state.returns=[{id:'r2',month:'2026-09',accountId:'a',amount:-8000,member:'本人',updatedAt:1}];
+            state.balances=[bal('x1','2026-08',100000),bal('x2','2026-09',80000)];
+            renderNetBridge(); var down=snap();
+            return JSON.stringify({up:up,down:down});
+        })()`);
+        const e57 = JSON.parse(eq57 || '{}');
+        ok('实测：正数三个数值都不带 + 号（20000 = 12000 + 8000），运算符仍是 +',
+            e57.up && e57.up.v === '20000' && e57.up.sv === '12000' &&
+            e57.up.op === '+' && e57.up.pv === '8000', eq57);
+        ok('实测：负数主数字/结余带 −，收益为负时运算符切 −（−20000 = −12000 − 8000）',
+            e57.down && e57.down.v === '−20000' && e57.down.sv === '−12000' &&
+            e57.down.op === '−' && e57.down.pv === '8000', eq57);
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {

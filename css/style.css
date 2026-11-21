@@ -6437,3 +6437,18 @@ html.mac-app #view-returns .view-header .report-controls .ym-review-btn {
 .bridge-detail[open] .bd-label-closed { display: none; }
 .bridge-detail[open] .bd-label-open { display: inline; }
 .bridge-detail .bd-body { padding-top: 8px; }
+
+/* ===== v1.41.65：手机端净资产变动等式强制一行 —— 数字略缩小、防断行 =====
+   只在手机（≤640px 且非 Mac 壳）生效：等式原本 flex-wrap:wrap + 数字/副行允许断行，
+   窄屏上第三个数字会掉到第二行、X-Y 副行还会在连字符处被拆开，看起来很散。
+   这里改成不换行 + 字号各缩一档 + 收紧间距/padding，保证一行放得下；正数不再带 + 号由 JS 处理。 */
+@media (max-width: 640px) {
+    html:not(.mac-app) .bridge-hero { padding: 12px 10px; }
+    html:not(.mac-app) .bridge-eq { flex-wrap: nowrap; gap: 5px; overflow-x: auto; scrollbar-width: none; }
+    html:not(.mac-app) .bridge-eq::-webkit-scrollbar { display: none; }
+    html:not(.mac-app) .be-part { flex: 0 0 auto; }
+    html:not(.mac-app) .be-val { font-size: 18px; white-space: nowrap; }
+    html:not(.mac-app) #bridgeHeroVal { font-size: 20px; }
+    html:not(.mac-app) .be-op { font-size: 16px; padding-top: 3px; }
+    html:not(.mac-app) .be-lab { font-size: 10px; white-space: nowrap; }
+}
