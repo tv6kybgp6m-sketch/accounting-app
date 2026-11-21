@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.65';
+const APP_VERSION = '1.41.66';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -8548,6 +8548,15 @@ function renderNetBridge() {
         pv.textContent = moneyVisible ? formatCurrency(Math.abs(b.profit)) : '****';
         pv.className = 'be-val ' + tone(b.profit);
         document.getElementById('bridgeHeroSub').textContent = `${maskMoney(b.open)}-${maskMoney(b.close)}`;
+        // v1.41.66：某一项到 9 位（百万级带小数）时打 compact 标记，手机端据此再降一档字号，
+        // 让三个数在窄屏一行放得下；Mac 端 CSS 不读这个标记，桌面字号原样。闭眼全是 **** 不算长。
+        const eq = hero.querySelector('.bridge-eq');
+        if (eq) {
+            const maxLen = moneyVisible
+                ? Math.max(...[b.delta, b.saved, b.profit].map(v => formatCurrency(Math.abs(v)).length))
+                : 0;
+            eq.classList.toggle('be-compact', maxLen >= 9);
+        }
     }
 
     // 期初 / 期末净资产两行删掉（重点块已经写了 X-Y），投资收益已经在等式里，明细也删掉
@@ -12888,7 +12897,8 @@ function toggleAccountMembers() {
 
 function refreshAccountsViewMode() {
     accountsHasData = state.accounts.length > 0;
-    accountsViewMode = accountsHasData;   // 有账户默认查看（只读防误触）；一个都没有就直接编辑（要加）
+    // v1.41.66：点「账户」进去就是要改，默认直接进编辑模式；想只看再点右上角切到查看。
+    accountsViewMode = false;
 }
 function applyAccountsViewMode() {
     const modal = document.getElementById('accountsModal');

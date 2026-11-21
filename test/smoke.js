@@ -1312,10 +1312,11 @@ async function run() {
             listHtml31.indexOf('acct-member-fold') >= 0 &&
             listHtml31.indexOf('acct-member-fold') < listHtml31.indexOf('account-section-title') &&
             css31.indexOf('#accountsModal .acct-member-fold { margin: 0 0 12px;') >= 0);
-        ok('默认进只读查看模式，编辑按钮在标题栏可见',
-            ev(`document.getElementById('accountsModal').classList.contains('acc-viewmode')`) === true &&
-            ev(`document.getElementById('accEditBtn').style.display`) !== 'none');
-        ok('只读模式下每行只剩图标 + 名字 + 小标签（分组下拉藏起来）',
+        ok('默认直接进编辑模式（点账户就是要改），完成按钮在标题栏可见',
+            ev(`document.getElementById('accountsModal').classList.contains('acc-viewmode')`) === false &&
+            ev(`document.getElementById('accEditBtn').style.display`) !== 'none' &&
+            ev(`document.getElementById('accEditBtnLabel').textContent`) === '完成');
+        ok('编辑态每行有可选分组下拉；只读样式仍在（点「完成」切过去用）',
             css31.indexOf('#accountsModal.acc-viewmode .acct-group-select { display: none; }') >= 0 &&
             ev(`document.querySelectorAll('#accountManageList .account-row').length`) === 2 &&
             ev(`document.querySelectorAll('#accountManageList .ar-title').length`) === 2);
@@ -2893,12 +2894,19 @@ async function run() {
             app62.indexOf("po.textContent = b.profit < -0.005 ? '−' : '+';") >= 0);
         ok('手机端（≤640px 且非 Mac 壳）等式强制 nowrap 不折行 + 数字/标签略缩小 + 防副行断行',
             (css62.match(/\/\* ===== v1\.41\.65/g) || []).length === 1 &&
-            css62.indexOf('html:not(.mac-app) .bridge-eq { flex-wrap: nowrap; gap: 5px; overflow-x: auto; scrollbar-width: none; }') >= 0 &&
+            css62.indexOf('html:not(.mac-app) .bridge-eq { flex-wrap: nowrap; gap: 4px; overflow-x: auto; scrollbar-width: none; }') >= 0 &&
             css62.indexOf('html:not(.mac-app) .bridge-eq::-webkit-scrollbar { display: none; }') >= 0 &&
-            css62.indexOf('html:not(.mac-app) .be-val { font-size: 18px; white-space: nowrap; }') >= 0 &&
-            css62.indexOf('html:not(.mac-app) #bridgeHeroVal { font-size: 20px; }') >= 0 &&
-            css62.indexOf('html:not(.mac-app) .be-lab { font-size: 10px; white-space: nowrap; }') >= 0 &&
-            css62.indexOf('html:not(.mac-app) .be-op { font-size: 16px; padding-top: 3px; }') >= 0);
+            css62.indexOf('html:not(.mac-app) .be-val { font-size: 15px; white-space: nowrap; }') >= 0 &&
+            css62.indexOf('html:not(.mac-app) #bridgeHeroVal { font-size: 17px; }') >= 0 &&
+            css62.indexOf('html:not(.mac-app) .be-lab { font-size: 9px; white-space: nowrap; }') >= 0 &&
+            css62.indexOf('html:not(.mac-app) .be-op { font-size: 14px; padding-top: 2px; }') >= 0);
+        ok('长数字分档只在手机生效：JS 打 be-compact，CSS 缩到 11/12px；Mac 端不读标记',
+            app62.indexOf("eq.classList.toggle('be-compact', maxLen >= 9)") >= 0 &&
+            app62.indexOf('formatCurrency(Math.abs(v)).length') >= 0 &&
+            css62.indexOf('html:not(.mac-app) .bridge-eq.be-compact .be-val { font-size: 11px; }') >= 0 &&
+            css62.indexOf('html:not(.mac-app) .bridge-eq.be-compact #bridgeHeroVal { font-size: 12px; }') >= 0 &&
+            (css62.match(/\/\* ===== v1\.41\.65/g) || []).length === 1 &&
+            (css62.match(/\/\* ---- 同一版：长数字/g) || []).length === 1);
         ok('桌面规则原样保留（wrap + 22px/26px），手机块只在 @media 里覆盖，不改全局',
             css62.indexOf('.bridge-eq { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }') >= 0 &&
             css62.indexOf('.be-val { font-size: 22px;') >= 0 &&
@@ -2935,6 +2943,36 @@ async function run() {
         ok('实测：负数主数字/结余带 −，收益为负时运算符切 −（−20000 = −12000 − 8000）',
             e57.down && e57.down.v === '−20000' && e57.down.sv === '−12000' &&
             e57.down.op === '−' && e57.down.pv === '8000', eq57);
+        // v1.41.66：资产负债 / 投资收益页点「账户」进去，默认直接编辑（不再只读防误触）
+        ok('账户管理弹窗默认进编辑模式：refreshAccountsViewMode 固定置 false',
+            app62.indexOf('accountsViewMode = false;') >= 0 &&
+            app62.indexOf('accountsViewMode = accountsHasData;') < 0);
+        ok('实测：openAccountsModal 后不进 acc-viewmode，标题按钮显示「完成」',
+            (function () {
+                ev(`state.accounts=[{id:'ac1',name:'测试',kind:'asset',group:'现金',color:'#007aff',icon:'fa-wallet',order:1,members:['本人']}];
+                    state.balanceMembers=['本人']; openAccountsModal();`);
+                const view = ev(`document.getElementById('accountsModal').classList.contains('acc-viewmode')`);
+                const label = ev(`document.getElementById('accEditBtnLabel').textContent`);
+                return view === false && label === '完成';
+            })());
+        // 分档实测：百万级带小数（≥9 位）打 be-compact，万级小数不打；闭眼不打
+        const compact57 = ev(`(function(){
+            var k=sheetAssetCats()[0].key;
+            function bal(a){return {id:'b'+Math.random(),member:'本人',accountId:'a',cur:'CNY',cat:k,month:a.m,amount:a.v,updatedAt:1};}
+            state.balanceOwner='all';state.balancePeriod='month';state.balanceYear=2026;state.balanceMonth=9;moneyVisible=true;
+            state.accounts=[{id:'a',name:'账户',kind:'asset',bucket:'growth',group:'',cur:'CNY',updatedAt:1}];
+            state.transactions=[];state.returns=[];
+            function cls(){return document.querySelector('#bridgeHero .bridge-eq').classList.contains('be-compact');}
+            state.balances=[bal({m:'2026-08',v:100000.55}),bal({m:'2026-09',v:120000.55})];
+            renderNetBridge(); var small=cls();
+            state.balances=[bal({m:'2026-08',v:3800000.55}),bal({m:'2026-09',v:5050000.88})];
+            renderNetBridge(); var big=cls();
+            moneyVisible=false; renderNetBridge(); var hidden=cls();
+            return JSON.stringify({small:small,big:big,hidden:hidden});
+        })()`);
+        const c57 = JSON.parse(compact57 || '{}');
+        ok('实测分档：万级小数不打标记，百万级带小数打标记，闭眼不打',
+            c57.small === false && c57.big === true && c57.hidden === false, compact57);
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
