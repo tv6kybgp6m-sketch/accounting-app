@@ -3049,13 +3049,35 @@ async function run() {
         ok('实测内容区横滑（翻书方向）：左滑切右页、右滑切左页；竖滑/小幅不切；图表上横滑不切',
             !!swipe58 && swipe58.left === 'balance' && swipe58.right === 'transactions' &&
             swipe58.vertical === 'reports' && swipe58.tiny === 'reports' && swipe58.onChart === 'reports', swipe58);
-        ok('翻书过渡：横滑给新页加 page-slide-right/left class + CSS keyframes；点导航不传方向保持 fadeIn',
+        ok('横滑过渡改成弹窗式缩放淡入（pageSwapIn）：动画结束固化 view-settled，杜绝 fadeIn 重播晃动',
             app62.indexOf("switchView(items[next].dataset.view, dx < 0 ? 'right' : 'left')") >= 0 &&
-            app62.indexOf("const cls = slideDir === 'right' ? 'page-slide-right' : 'page-slide-left'") >= 0 &&
-            app62.indexOf("setTimeout(() => target.classList.remove(cls), 420)") >= 0 &&
-            css62.indexOf('@keyframes pageSlideInRight') >= 0 &&
-            css62.indexOf('.view.page-slide-right { animation: pageSlideInRight') >= 0 &&
-            css62.indexOf('/* ===== v1.41.69 横滑切页翻书过渡') >= 0);
+            app62.indexOf("target.classList.add('page-swap-in')") >= 0 &&
+            app62.indexOf("target.addEventListener('animationend', settle)") >= 0 &&
+            app62.indexOf('setTimeout(settle, 500)') >= 0 &&
+            app62.indexOf("target.classList.add('view-settled')") >= 0 &&
+            app62.indexOf("view.classList.remove('active', 'page-swap-in', 'view-settled')") >= 0 &&
+            css62.indexOf('@keyframes pageSwapIn') >= 0 &&
+            css62.indexOf('.view.page-swap-in { animation: pageSwapIn') >= 0 &&
+            css62.indexOf('.view.view-settled { animation: none; }') >= 0 &&
+            css62.indexOf('/* ===== v1.41.70 横滑切页过渡') >= 0 &&
+            css62.indexOf('pageSlideInRight') < 0);
+        ok('切页后回到顶部：switchView 在 renderView 后把 .main-content 的 scrollTop 清零',
+            (function () {
+                const s = app62.slice(app62.indexOf('function switchView('), app62.indexOf('function renderView('));
+                return s.indexOf("document.querySelector('.main-content')") >= 0 &&
+                    s.indexOf('scroller.scrollTop = 0') >= 0 &&
+                    s.indexOf('renderView(viewName);') < s.indexOf('scroller.scrollTop = 0');
+            })());
+        ok('实测横滑切页后滚动位置归零',
+            (function () {
+                const r = ev(`(function(){
+                    var c=document.querySelector('.main-content');
+                    switchView('reports'); c.scrollTop=800; var before=c.scrollTop;
+                    switchView('balance','left');
+                    return {before:before, after:c.scrollTop};
+                })()`);
+                return !!r && r.before > 0 && r.after === 0;
+            })());
         ok('长按拖动 bug 修复：startHold 归一到整个 .nav-item（按在图标/文字上也拖整项），被拖项 pointer-events:none',
             app62.indexOf("const el = target.closest ? target.closest('.nav-item') : target;") >= 0 &&
             app62.indexOf("if (!el || el.parentNode !== bar) return;") >= 0 &&

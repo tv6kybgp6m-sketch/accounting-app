@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.69';
+const APP_VERSION = '1.41.70';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -4196,20 +4196,32 @@ function switchView(viewName, slideDir) {
         item.classList.toggle('active', item.dataset.view === viewName);
     });
     document.querySelectorAll('.view').forEach(view => {
-        view.classList.remove('active');
-        view.classList.remove('page-slide-right', 'page-slide-left');
+        view.classList.remove('active', 'page-swap-in', 'view-settled');
     });
     const target = document.getElementById(`view-${viewName}`);
     target.classList.add('active');
-    // v1.41.69 翻书过渡：仅横滑切页传 slideDir（'right'=新页从右滑入）；点导航/其它调用不传，保持原 fadeIn。
-    if (slideDir === 'right' || slideDir === 'left') {
-        const cls = slideDir === 'right' ? 'page-slide-right' : 'page-slide-left';
-        target.classList.add(cls);
-        setTimeout(() => target.classList.remove(cls), 420);
-    }
-
     // Render the view
     renderView(viewName);
+    // v1.41.70：切页后回到顶部（横滑前页面可能已滚到中段，不回顶就沿用旧高度）。
+    const scroller = document.querySelector('.main-content');
+    if (scroller) scroller.scrollTop = 0;
+    // 横滑切页：弹窗式缩放淡入。动画结束用 animationend 固化 animation:none，
+    // 绝不能再回退到 .view 基础 fadeIn 重播（那会让页面「晃动」一下）。
+    if (slideDir === 'right' || slideDir === 'left') {
+        target.classList.add('page-swap-in');
+        let settled = false;
+        const settle = () => {
+            if (settled) return;
+            settled = true;
+            target.classList.remove('page-swap-in');
+            target.classList.add('view-settled');
+            target.removeEventListener('animationend', settle);
+        };
+        target.addEventListener('animationend', settle);
+        // 兜底：极少数环境（Web View 后台/reduced-motion）不发 animationend，
+        // 500ms 后强制固化，绝不让页面停在 opacity:0。
+        setTimeout(settle, 500);
+    }
 }
 
 function renderView(viewName) {
