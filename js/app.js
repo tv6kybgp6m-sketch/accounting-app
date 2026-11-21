@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.68';
+const APP_VERSION = '1.41.69';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -4178,7 +4178,7 @@ function applyNavOrder() {
     byView.forEach(el => bar.appendChild(el));   // 新增的项（没在旧存档里）补到末尾
 }
 
-function switchView(viewName) {
+function switchView(viewName, slideDir) {
     maybeAlertSyncIssue(false);   // v1.41.26：同步还挂着错误时，切到任何页面都提醒一次
     if (viewName === 'reports') resetReportEntryDefaults();
     // v1.41.5：这三个页面的金额眼睛，每次「点进来」都回到闭着（隐私默认）。
@@ -4197,8 +4197,16 @@ function switchView(viewName) {
     });
     document.querySelectorAll('.view').forEach(view => {
         view.classList.remove('active');
+        view.classList.remove('page-slide-right', 'page-slide-left');
     });
-    document.getElementById(`view-${viewName}`).classList.add('active');
+    const target = document.getElementById(`view-${viewName}`);
+    target.classList.add('active');
+    // v1.41.69 翻书过渡：仅横滑切页传 slideDir（'right'=新页从右滑入）；点导航/其它调用不传，保持原 fadeIn。
+    if (slideDir === 'right' || slideDir === 'left') {
+        const cls = slideDir === 'right' ? 'page-slide-right' : 'page-slide-left';
+        target.classList.add(cls);
+        setTimeout(() => target.classList.remove(cls), 420);
+    }
 
     // Render the view
     renderView(viewName);
@@ -16043,8 +16051,12 @@ function initEventListeners() {
         const cancelHold = () => { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } };
         const swallowClick = () => { suppressed = true; setTimeout(() => { suppressed = false; }, 400); };
 
-        function startHold(el, x, y) {
-            if (!el || dragging) return;
+        function startHold(target, x, y) {
+            if (!target || dragging) return;
+            // ⚠️ 必须归一到整个 .nav-item：手指常按在 <i> 图标或 <span> 文字上，
+            // 直接拿 e.target 当拖动元素就会「只拖走图标、文字留在原地」。
+            const el = target.closest ? target.closest('.nav-item') : target;
+            if (!el || el.parentNode !== bar) return;
             sx = x; sy = y;
             cancelHold();
             holdTimer = setTimeout(() => {
@@ -16133,11 +16145,12 @@ function initEventListeners() {
                 .filter(el => window.getComputedStyle(el).display !== 'none');   // 隐藏的预算管理不算
             const cur = items.findIndex(el => el.classList.contains('active'));
             if (cur < 0) return;
-            const next = cur + (dx < 0 ? -1 : 1);      // 往左滑切左边那页，往右滑切右边那页
+            // v1.41.69 翻书方向：手往左滑 → 翻到右边那页（新页从右侧滑入）；手往右滑 → 左边那页。
+            const next = cur + (dx < 0 ? 1 : -1);
             if (next < 0 || next >= items.length) return;
             swiped = true;
             setTimeout(() => { swiped = false; }, 400);
-            switchView(items[next].dataset.view);
+            switchView(items[next].dataset.view, dx < 0 ? 'right' : 'left');
         });
         // 横滑后紧跟的 click 吞掉，防止误点开列表行/按钮
         content.addEventListener('click', e => {

@@ -1566,7 +1566,7 @@ async function run() {
         ok('同步失败提醒挂进同步周期收尾和切页面入口，任何页面都能弹出来',
             /function maybeAlertSyncIssue\(force\)/.test(app34) &&
             app34.indexOf('maybeAlertSyncIssue(reason === \'manual\');') >= 0 &&
-            /function switchView\(viewName\) \{\s*\n\s*maybeAlertSyncIssue\(false\);/.test(app34) &&
+            /function switchView\(viewName(?:, slideDir)?\) \{\s*\n\s*maybeAlertSyncIssue\(false\);/.test(app34) &&
             app34.indexOf("showToast('云同步没成功：' + __remoteLastError, 'error', 6000)") >= 0);
         ok('同一条错误 10 分钟内不重复弹，手动同步必弹',
             app34.indexOf('const quiet = !force && __remoteAlertedError === __remoteLastError') >= 0 &&
@@ -3046,9 +3046,20 @@ async function run() {
             content.removeChild(chart);
             return {left:left,right:right,vertical:vertical,tiny:tiny,onChart:onChart};
         })()`);
-        ok('实测内容区横滑：左滑切左页、右滑切右页；竖滑/小幅不切；图表上横滑不切',
-            !!swipe58 && swipe58.left === 'transactions' && swipe58.right === 'balance' &&
+        ok('实测内容区横滑（翻书方向）：左滑切右页、右滑切左页；竖滑/小幅不切；图表上横滑不切',
+            !!swipe58 && swipe58.left === 'balance' && swipe58.right === 'transactions' &&
             swipe58.vertical === 'reports' && swipe58.tiny === 'reports' && swipe58.onChart === 'reports', swipe58);
+        ok('翻书过渡：横滑给新页加 page-slide-right/left class + CSS keyframes；点导航不传方向保持 fadeIn',
+            app62.indexOf("switchView(items[next].dataset.view, dx < 0 ? 'right' : 'left')") >= 0 &&
+            app62.indexOf("const cls = slideDir === 'right' ? 'page-slide-right' : 'page-slide-left'") >= 0 &&
+            app62.indexOf("setTimeout(() => target.classList.remove(cls), 420)") >= 0 &&
+            css62.indexOf('@keyframes pageSlideInRight') >= 0 &&
+            css62.indexOf('.view.page-slide-right { animation: pageSlideInRight') >= 0 &&
+            css62.indexOf('/* ===== v1.41.69 横滑切页翻书过渡') >= 0);
+        ok('长按拖动 bug 修复：startHold 归一到整个 .nav-item（按在图标/文字上也拖整项），被拖项 pointer-events:none',
+            app62.indexOf("const el = target.closest ? target.closest('.nav-item') : target;") >= 0 &&
+            app62.indexOf("if (!el || el.parentNode !== bar) return;") >= 0 &&
+            css62.indexOf('pointer-events: none;   /* 让 elementFromPoint 看穿被拖项') >= 0);
 
         ok('端到端：Mac 勾选账户 → 同步包 → 手机合并后勾选一致',
             (function () {

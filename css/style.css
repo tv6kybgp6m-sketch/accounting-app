@@ -321,6 +321,7 @@ body.native-shell .sidebar {
     z-index: 10;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
     cursor: grabbing;
+    pointer-events: none;   /* 让 elementFromPoint 看穿被拖项，命中它下面的目标项 */
 }
 .sidebar-footer {
     padding: 12px;
@@ -385,6 +386,19 @@ body.native-shell .sidebar {
     from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: translateY(0); }
 }
+
+/* ===== v1.41.69 横滑切页翻书过渡：只由横滑传入 class 触发，点导航/其它调用仍走上面的 fadeIn ===== */
+/* 手往左滑 = 翻到右边那页，新页从右侧滑入；手往右滑 = 左边那页从左侧滑入 */
+@keyframes pageSlideInRight {
+    from { opacity: 0.35; transform: translateX(72px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes pageSlideInLeft {
+    from { opacity: 0.35; transform: translateX(-72px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+.view.page-slide-right { animation: pageSlideInRight 0.38s cubic-bezier(0.22, 0.61, 0.36, 1); }
+.view.page-slide-left  { animation: pageSlideInLeft  0.38s cubic-bezier(0.22, 0.61, 0.36, 1); }
 
 .view-header {
     display: flex;
