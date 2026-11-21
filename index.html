@@ -1186,8 +1186,8 @@
                         <h2>账户管理</h2>
                     </div>
                     <div class="acct-head-actions">
-                        <span class="acc-viewtag" id="accViewTag" style="display:none">只读查看</span>
-                        <button class="secondary-btn acc-mode-btn" id="accEditBtn" onclick="toggleAccountsViewMode()" style="display:none"><i class="fa-solid fa-pen"></i> <span id="accEditBtnLabel">编辑</span></button>
+                        <!-- v1.41.67：删掉「完成/编辑」切换按钮 —— 默认已是编辑态、只读模式用户不需要，
+                             「完成」又和右上角 × 挨着容易误认成关闭。关窗口统一走 ×。 -->
                         <button class="modal-close" onclick="closeAccountsModal()"><i class="fa-solid fa-xmark"></i></button>
                     </div>
                 </div>
@@ -1510,7 +1510,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.66').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.67').catch(() => {});
             });
         }
     </script>

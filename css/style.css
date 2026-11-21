@@ -6441,22 +6441,46 @@ html.mac-app #view-returns .view-header .report-controls .ym-review-btn {
 /* ===== v1.41.65：手机端净资产变动等式强制一行 —— 数字略缩小、防断行 =====
    只在手机（≤640px 且非 Mac 壳）生效：等式原本 flex-wrap:wrap + 数字/副行允许断行，
    窄屏上第三个数字会掉到第二行、X-Y 副行还会在连字符处被拆开，看起来很散。
-   这里改成不换行 + 字号各缩一档 + 收紧间距/padding，保证一行放得下；正数不再带 + 号由 JS 处理。 */
+   这里改成不换行 + 字号各缩一档 + 收紧间距/padding，保证一行放得下；正数不再带 + 号由 JS 处理。
+   v1.41.67：用户嫌 v1.41.66 的 15/17px 太小看不清 → 调回接近前版（v1.41.65 的 18/20px）
+   但各小 1px（17/19px），间距/padding 回到前版值；仍只改手机，Mac 桌面规则不动。 */
 @media (max-width: 640px) {
-    html:not(.mac-app) .bridge-hero { padding: 10px 8px; }
-    html:not(.mac-app) .bridge-eq { flex-wrap: nowrap; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+    html:not(.mac-app) .bridge-hero { padding: 12px 10px; }
+    html:not(.mac-app) .bridge-eq { flex-wrap: nowrap; gap: 5px; overflow-x: auto; scrollbar-width: none; }
     html:not(.mac-app) .bridge-eq::-webkit-scrollbar { display: none; }
     html:not(.mac-app) .be-part { flex: 0 0 auto; }
-    html:not(.mac-app) .be-val { font-size: 15px; white-space: nowrap; }
-    html:not(.mac-app) #bridgeHeroVal { font-size: 17px; }
-    html:not(.mac-app) .be-op { font-size: 14px; padding-top: 2px; }
-    html:not(.mac-app) .be-lab { font-size: 9px; white-space: nowrap; }
+    html:not(.mac-app) .be-val { font-size: 17px; white-space: nowrap; }
+    html:not(.mac-app) #bridgeHeroVal { font-size: 19px; }
+    html:not(.mac-app) .be-op { font-size: 15px; padding-top: 2px; }
+    html:not(.mac-app) .be-lab { font-size: 10px; white-space: nowrap; }
 }
-/* ---- 同一版：长数字（百万级带小数，≥9 位）按 JS 的 be-compact 标记再降一档，仍只在手机；Mac 桌面字号不受影响 ---- */
+/* ---- 同一版：按数字位数分档（JS 打 be-len-a/b/c、be-compact、be-len-d），让每档都尽量填满卡片宽度，
+       左右留白均衡。实测 375px 卡片内宽 335px，各档字号调到内容宽≈内宽。仍只在手机；Mac 桌面字号不受影响。 ---- */
 @media (max-width: 640px) {
-    html:not(.mac-app) .bridge-eq.be-compact { gap: 3px; }
-    html:not(.mac-app) .bridge-eq.be-compact .be-val { font-size: 11px; }
-    html:not(.mac-app) .bridge-eq.be-compact #bridgeHeroVal { font-size: 12px; }
-    html:not(.mac-app) .bridge-eq.be-compact .be-op { font-size: 11px; padding-top: 1px; }
-    html:not(.mac-app) .bridge-eq.be-compact .be-lab { font-size: 8px; }
+    /* 5 位（月档小数字）：30/32px */
+    html:not(.mac-app) .bridge-eq.be-len-a .be-val { font-size: 30px; }
+    html:not(.mac-app) .bridge-eq.be-len-a #bridgeHeroVal { font-size: 32px; }
+    html:not(.mac-app) .bridge-eq.be-len-a .be-op { font-size: 26px; }
+    html:not(.mac-app) .bridge-eq.be-len-a .be-lab { font-size: 12px; }
+    /* 6-7 位（年档）：23/25px */
+    html:not(.mac-app) .bridge-eq.be-len-b .be-val { font-size: 23px; }
+    html:not(.mac-app) .bridge-eq.be-len-b #bridgeHeroVal { font-size: 25px; }
+    html:not(.mac-app) .bridge-eq.be-len-b .be-op { font-size: 20px; }
+    html:not(.mac-app) .bridge-eq.be-len-b .be-lab { font-size: 11px; }
+    /* 8 位（全部档）：20/22px */
+    html:not(.mac-app) .bridge-eq.be-len-c .be-val { font-size: 20px; }
+    html:not(.mac-app) .bridge-eq.be-len-c #bridgeHeroVal { font-size: 22px; }
+    html:not(.mac-app) .bridge-eq.be-len-c .be-op { font-size: 18px; }
+    html:not(.mac-app) .bridge-eq.be-len-c .be-lab { font-size: 10px; }
+    /* 9-10 位（百万级带小数 compact）：17/19px，gap 收紧 */
+    html:not(.mac-app) .bridge-eq.be-compact { gap: 4px; }
+    html:not(.mac-app) .bridge-eq.be-compact .be-val { font-size: 17px; }
+    html:not(.mac-app) .bridge-eq.be-compact #bridgeHeroVal { font-size: 19px; }
+    html:not(.mac-app) .bridge-eq.be-compact .be-op { font-size: 15px; padding-top: 2px; }
+    html:not(.mac-app) .bridge-eq.be-compact .be-lab { font-size: 10px; }
+    /* ≥11 位（极端值）：15/17px */
+    html:not(.mac-app) .bridge-eq.be-len-d .be-val { font-size: 15px; }
+    html:not(.mac-app) .bridge-eq.be-len-d #bridgeHeroVal { font-size: 17px; }
+    html:not(.mac-app) .bridge-eq.be-len-d .be-op { font-size: 13px; }
+    html:not(.mac-app) .bridge-eq.be-len-d .be-lab { font-size: 9px; }
 }

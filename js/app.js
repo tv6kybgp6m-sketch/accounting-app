@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.66';
+const APP_VERSION = '1.41.67';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -8548,14 +8548,19 @@ function renderNetBridge() {
         pv.textContent = moneyVisible ? formatCurrency(Math.abs(b.profit)) : '****';
         pv.className = 'be-val ' + tone(b.profit);
         document.getElementById('bridgeHeroSub').textContent = `${maskMoney(b.open)}-${maskMoney(b.close)}`;
-        // v1.41.66：某一项到 9 位（百万级带小数）时打 compact 标记，手机端据此再降一档字号，
-        // 让三个数在窄屏一行放得下；Mac 端 CSS 不读这个标记，桌面字号原样。闭眼全是 **** 不算长。
+        // v1.41.68：按最长数字位数分档，让手机端每档都尽量填满一行、左右留白均衡（短数字放大、长数字缩小）。
+        // Mac 端 CSS 不读这些标记，桌面字号原样。闭眼全是 **** 时按最短档处理。
         const eq = hero.querySelector('.bridge-eq');
         if (eq) {
             const maxLen = moneyVisible
                 ? Math.max(...[b.delta, b.saved, b.profit].map(v => formatCurrency(Math.abs(v)).length))
                 : 0;
-            eq.classList.toggle('be-compact', maxLen >= 9);
+            eq.classList.remove('be-len-a', 'be-len-b', 'be-len-c', 'be-compact', 'be-len-d');
+            if (maxLen <= 5) eq.classList.add('be-len-a');
+            else if (maxLen <= 7) eq.classList.add('be-len-b');
+            else if (maxLen <= 8) eq.classList.add('be-len-c');
+            else if (maxLen <= 10) eq.classList.add('be-compact');
+            else eq.classList.add('be-compact', 'be-len-d');
         }
     }
 
@@ -12901,27 +12906,14 @@ function refreshAccountsViewMode() {
     accountsViewMode = false;
 }
 function applyAccountsViewMode() {
+    // v1.41.67：删掉了「完成/编辑」切换按钮，弹窗固定编辑态。保留 class toggle 仅为兼容只读 CSS，
+    // accountsViewMode 恒为 false，不会再进只读；不再有按钮 DOM 需要同步。
     const modal = document.getElementById('accountsModal');
     if (modal) modal.classList.toggle('acc-viewmode', accountsViewMode);
-    const btn = document.getElementById('accEditBtn');
-    const label = document.getElementById('accEditBtnLabel');
-    const tag = document.getElementById('accViewTag');
-    if (!btn) { if (tag) tag.style.display = 'none'; return; }
-    if (!accountsHasData) { btn.style.display = 'none'; if (tag) tag.style.display = 'none'; return; }
-    btn.style.display = '';
-    if (label) label.textContent = accountsViewMode ? '编辑' : '完成';
-    const ic = btn.querySelector('i');
-    if (ic) ic.className = accountsViewMode ? 'fa-solid fa-pen' : 'fa-solid fa-check';
-    if (tag) tag.style.display = accountsViewMode ? '' : 'none';
-}
-function toggleAccountsViewMode() {
-    accountsViewMode = !accountsViewMode;
-    renderAccountManageList();
-    showToast(accountsViewMode ? '已切到查看模式（只读，防误触）' : '已进入编辑模式', 'info');
 }
 
 function openAccountsModal() {
-    refreshAccountsViewMode();   // v1.39.39：有账户时默认「查看模式」（只读防误触）
+    refreshAccountsViewMode();   // v1.41.66 起固定编辑态（只读模式与切换按钮 v1.41.67 已移除）
     renderAccountManageList();
     // v1.41.24：新增按钮常驻可见，空账户也不会把唯一入口藏起来（v1.41.16 借出款踩过这个死锁）。
     document.getElementById('accountsModal').classList.remove('hidden');

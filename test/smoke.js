@@ -1287,12 +1287,13 @@ async function run() {
         ok('新增按钮在账户清单之前，清单容器还在原位',
             acctModalHtml.indexOf('id="acctAddToggle"') > 0 &&
             acctModalHtml.indexOf('id="acctAddToggle"') < acctModalHtml.indexOf('id="accountManageList"'));
-        ok('编辑 / 只读开关仍在标题栏右侧',
+        ok('v1.41.67：标题栏右侧只留 × 关闭，切只读的「完成/编辑」按钮已删除',
             acctModalHtml.indexOf('class="acct-head-actions"') >= 0 &&
-            acctModalHtml.indexOf('id="accEditBtn"') > acctModalHtml.indexOf('class="modal-header"') &&
-            acctModalHtml.indexOf('id="accEditBtn"') < acctModalHtml.indexOf('class="modal-body"') &&
-            acctModalHtml.indexOf('onclick="toggleAccountsViewMode()"') >= 0 &&
-            ['accountManageList', 'accViewTag', 'accEditBtnLabel'].every(id => acctModalHtml.indexOf('id="' + id + '"') >= 0));
+            acctModalHtml.indexOf('onclick="closeAccountsModal()"') > acctModalHtml.indexOf('class="modal-header"') &&
+            acctModalHtml.indexOf('onclick="closeAccountsModal()"') < acctModalHtml.indexOf('class="modal-body"') &&
+            acctModalHtml.indexOf('id="accEditBtn"') < 0 &&
+            acctModalHtml.indexOf('toggleAccountsViewMode()') < 0 &&
+            acctModalHtml.indexOf('id="accountManageList"') >= 0);
         ok('添加账户弹窗新增模式不再有那段引导文字（副标题只留编辑模式的统计）',
             app31.indexOf('新账户：起个名字（放钱的地方）、选好分类就能记了') < 0);
         ok('月度账单副标题不再堆说明，只留「成员 · 年月」',
@@ -1312,11 +1313,10 @@ async function run() {
             listHtml31.indexOf('acct-member-fold') >= 0 &&
             listHtml31.indexOf('acct-member-fold') < listHtml31.indexOf('account-section-title') &&
             css31.indexOf('#accountsModal .acct-member-fold { margin: 0 0 12px;') >= 0);
-        ok('默认直接进编辑模式（点账户就是要改），完成按钮在标题栏可见',
+        ok('默认直接进编辑模式（点账户就是要改），无切换按钮，关窗口走 ×',
             ev(`document.getElementById('accountsModal').classList.contains('acc-viewmode')`) === false &&
-            ev(`document.getElementById('accEditBtn').style.display`) !== 'none' &&
-            ev(`document.getElementById('accEditBtnLabel').textContent`) === '完成');
-        ok('编辑态每行有可选分组下拉；只读样式仍在（点「完成」切过去用）',
+            ev(`!document.getElementById('accEditBtn')`) === true);
+        ok('编辑态每行有可选分组下拉；只读 CSS 保留兼容但已无入口',
             css31.indexOf('#accountsModal.acc-viewmode .acct-group-select { display: none; }') >= 0 &&
             ev(`document.querySelectorAll('#accountManageList .account-row').length`) === 2 &&
             ev(`document.querySelectorAll('#accountManageList .ar-title').length`) === 2);
@@ -2892,21 +2892,27 @@ async function run() {
             app62.indexOf("(v < -0.005 ? '−' : '') + formatCurrency(Math.abs(v))") >= 0 &&
             app62.indexOf("(v > 0.005 ? '+' : '')") < 0 &&
             app62.indexOf("po.textContent = b.profit < -0.005 ? '−' : '+';") >= 0);
-        ok('手机端（≤640px 且非 Mac 壳）等式强制 nowrap 不折行 + 数字/标签略缩小 + 防副行断行',
+        ok('手机端（≤640px 且非 Mac 壳）等式强制 nowrap 不折行 + 基础档 nowrap 防断行',
             (css62.match(/\/\* ===== v1\.41\.65/g) || []).length === 1 &&
-            css62.indexOf('html:not(.mac-app) .bridge-eq { flex-wrap: nowrap; gap: 4px; overflow-x: auto; scrollbar-width: none; }') >= 0 &&
+            css62.indexOf('html:not(.mac-app) .bridge-eq { flex-wrap: nowrap; gap: 5px; overflow-x: auto; scrollbar-width: none; }') >= 0 &&
             css62.indexOf('html:not(.mac-app) .bridge-eq::-webkit-scrollbar { display: none; }') >= 0 &&
-            css62.indexOf('html:not(.mac-app) .be-val { font-size: 15px; white-space: nowrap; }') >= 0 &&
-            css62.indexOf('html:not(.mac-app) #bridgeHeroVal { font-size: 17px; }') >= 0 &&
-            css62.indexOf('html:not(.mac-app) .be-lab { font-size: 9px; white-space: nowrap; }') >= 0 &&
-            css62.indexOf('html:not(.mac-app) .be-op { font-size: 14px; padding-top: 2px; }') >= 0);
-        ok('长数字分档只在手机生效：JS 打 be-compact，CSS 缩到 11/12px；Mac 端不读标记',
-            app62.indexOf("eq.classList.toggle('be-compact', maxLen >= 9)") >= 0 &&
+            css62.indexOf('html:not(.mac-app) .be-val { font-size: 17px; white-space: nowrap; }') >= 0 &&
+            css62.indexOf('html:not(.mac-app) #bridgeHeroVal { font-size: 19px; }') >= 0 &&
+            css62.indexOf('html:not(.mac-app) .be-lab { font-size: 10px; white-space: nowrap; }') >= 0 &&
+            css62.indexOf('html:not(.mac-app) .be-op { font-size: 15px; padding-top: 2px; }') >= 0);
+        ok('v1.41.68：按位数分五档（be-len-a/b/c、be-compact、be-len-d），让每档尽量填满、左右留白均衡；Mac 端不读标记',
+            ['be-len-a', 'be-len-b', 'be-len-c', 'be-compact', 'be-len-d'].every(c => app62.indexOf("'" + c + "'") >= 0) &&
+            app62.indexOf('eq.classList.remove(') >= 0 &&
             app62.indexOf('formatCurrency(Math.abs(v)).length') >= 0 &&
-            css62.indexOf('html:not(.mac-app) .bridge-eq.be-compact .be-val { font-size: 11px; }') >= 0 &&
-            css62.indexOf('html:not(.mac-app) .bridge-eq.be-compact #bridgeHeroVal { font-size: 12px; }') >= 0 &&
+            app62.indexOf('maxLen <= 5') >= 0 && app62.indexOf('maxLen <= 7') >= 0 &&
+            app62.indexOf('maxLen <= 8') >= 0 && app62.indexOf('maxLen <= 10') >= 0 &&
+            ['be-len-a .be-val { font-size: 30px; }',
+             'be-len-b .be-val { font-size: 23px; }',
+             'be-len-c .be-val { font-size: 20px; }',
+             'be-compact .be-val { font-size: 17px; }',
+             'be-len-d .be-val { font-size: 15px; }'].every(s => css62.indexOf('html:not(.mac-app) .bridge-eq.' + s) >= 0) &&
             (css62.match(/\/\* ===== v1\.41\.65/g) || []).length === 1 &&
-            (css62.match(/\/\* ---- 同一版：长数字/g) || []).length === 1);
+            (css62.match(/\/\* ---- 同一版：按数字位数分档/g) || []).length === 1);
         ok('桌面规则原样保留（wrap + 22px/26px），手机块只在 @media 里覆盖，不改全局',
             css62.indexOf('.bridge-eq { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }') >= 0 &&
             css62.indexOf('.be-val { font-size: 22px;') >= 0 &&
@@ -2947,32 +2953,44 @@ async function run() {
         ok('账户管理弹窗默认进编辑模式：refreshAccountsViewMode 固定置 false',
             app62.indexOf('accountsViewMode = false;') >= 0 &&
             app62.indexOf('accountsViewMode = accountsHasData;') < 0);
-        ok('实测：openAccountsModal 后不进 acc-viewmode，标题按钮显示「完成」',
+        ok('v1.41.67：账户弹窗标题栏删掉了「完成/编辑」切换按钮，只留 × 关闭',
+            html62.indexOf('id="accEditBtn"') < 0 &&
+            html62.indexOf('id="accEditBtnLabel"') < 0 &&
+            html62.indexOf('id="accViewTag"') < 0 &&
+            html62.indexOf('toggleAccountsViewMode()') < 0 &&
+            app62.indexOf('function toggleAccountsViewMode') < 0 &&
+            html62.indexOf('onclick="closeAccountsModal()"') >= 0);
+        ok('实测：openAccountsModal 后仍是编辑态（不进 acc-viewmode），且没有切换按钮',
             (function () {
                 ev(`state.accounts=[{id:'ac1',name:'测试',kind:'asset',group:'现金',color:'#007aff',icon:'fa-wallet',order:1,members:['本人']}];
                     state.balanceMembers=['本人']; openAccountsModal();`);
                 const view = ev(`document.getElementById('accountsModal').classList.contains('acc-viewmode')`);
-                const label = ev(`document.getElementById('accEditBtnLabel').textContent`);
-                return view === false && label === '完成';
+                const btnGone = ev(`!document.getElementById('accEditBtn')`);
+                return view === false && btnGone === true;
             })());
-        // 分档实测：百万级带小数（≥9 位）打 be-compact，万级小数不打；闭眼不打
+        // 分档实测：按最长数字位数落进对应档位 class；闭眼按最短档（be-len-a）
         const compact57 = ev(`(function(){
             var k=sheetAssetCats()[0].key;
             function bal(a){return {id:'b'+Math.random(),member:'本人',accountId:'a',cur:'CNY',cat:k,month:a.m,amount:a.v,updatedAt:1};}
             state.balanceOwner='all';state.balancePeriod='month';state.balanceYear=2026;state.balanceMonth=9;moneyVisible=true;
             state.accounts=[{id:'a',name:'账户',kind:'asset',bucket:'growth',group:'',cur:'CNY',updatedAt:1}];
             state.transactions=[];state.returns=[];
-            function cls(){return document.querySelector('#bridgeHero .bridge-eq').classList.contains('be-compact');}
-            state.balances=[bal({m:'2026-08',v:100000.55}),bal({m:'2026-09',v:120000.55})];
-            renderNetBridge(); var small=cls();
-            state.balances=[bal({m:'2026-08',v:3800000.55}),bal({m:'2026-09',v:5050000.88})];
-            renderNetBridge(); var big=cls();
+            function cls(){var e=document.querySelector('#bridgeHero .bridge-eq');return ['be-len-a','be-len-b','be-len-c','be-compact','be-len-d'].filter(function(c){return e.classList.contains(c);}).join(',');}
+            // 余额差 2 万 → 5 位 → be-len-a
+            state.balances=[bal({m:'2026-08',v:100000}),bal({m:'2026-09',v:120000})];
+            renderNetBridge(); var d5=cls();
+            // 余额差 125 万 → 7 位 → be-len-b
+            state.balances=[bal({m:'2026-08',v:3800000}),bal({m:'2026-09',v:5050000})];
+            renderNetBridge(); var d7=cls();
+            // 余额差 8500 万 → 8 位 → be-len-c
+            state.balances=[bal({m:'2026-08',v:10000000}),bal({m:'2026-09',v:95000000})];
+            renderNetBridge(); var d8=cls();
             moneyVisible=false; renderNetBridge(); var hidden=cls();
-            return JSON.stringify({small:small,big:big,hidden:hidden});
+            return JSON.stringify({d5:d5,d7:d7,d8:d8,hidden:hidden});
         })()`);
         const c57 = JSON.parse(compact57 || '{}');
-        ok('实测分档：万级小数不打标记，百万级带小数打标记，闭眼不打',
-            c57.small === false && c57.big === true && c57.hidden === false, compact57);
+        ok('实测五档：5位→len-a、7位→len-b、8位→len-c、闭眼→len-a（位数越多字号越小填满宽度）',
+            c57.d5 === 'be-len-a' && c57.d7 === 'be-len-b' && c57.d8 === 'be-len-c' && c57.hidden === 'be-len-a', compact57);
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
