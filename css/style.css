@@ -6507,3 +6507,76 @@ html.mac-app #view-returns .view-header .report-controls .ym-review-btn {
     html:not(.mac-app) .bridge-eq.be-len-d .be-op { font-size: 13px; }
     html:not(.mac-app) .bridge-eq.be-len-d .be-lab { font-size: 9px; }
 }
+
+/* ===== v1.41.72：报表页支出日历热力图 —— 月报档按天铺支出，颜色越深花得越多 ===== */
+.heatmap-wrap { padding: 4px 2px 2px; }
+.heatmap-weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+    margin-bottom: 6px;
+}
+.heatmap-weekdays span {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-tertiary);
+}
+.heatmap-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+}
+.hm-blank { aspect-ratio: 1 / 1; }
+.hm-cell {
+    aspect-ratio: 1 / 1;
+    border-radius: 8px;
+    border: 0.5px solid var(--border);
+    background: var(--bg-card-hover);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    cursor: pointer;
+    overflow: hidden;
+    transition: transform 0.15s var(--transition), box-shadow 0.15s var(--transition);
+    user-select: none;
+}
+.hm-cell:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+.hm-cell:active { transform: translateY(0); }
+.hm-day { font-size: 12px; font-weight: 500; color: var(--text-primary); line-height: 1; }
+.hm-amt { font-size: 11px; color: var(--expense-text); line-height: 1.1; max-width: 100%; padding: 0 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 深浅 5 档：0 没花钱=卡片底色；1~4 递增红色。深色主题下 --expense 已换亮红，无需另外覆盖 */
+.hm-cell.hm-lv0 { background: var(--bg-card-hover); }
+.hm-cell.hm-lv0 .hm-day { color: var(--text-tertiary); }
+.hm-cell.hm-lv1 { background: var(--expense-light); }
+.hm-cell.hm-lv2 { background: rgba(255, 59, 48, 0.24); }
+.hm-cell.hm-lv3 { background: rgba(255, 59, 48, 0.45); }
+.hm-cell.hm-lv4 { background: rgba(255, 59, 48, 0.72); }
+.hm-cell.hm-lv3 .hm-day, .hm-cell.hm-lv4 .hm-day { color: #fff; }
+.hm-cell.hm-lv3 .hm-amt, .hm-cell.hm-lv4 .hm-amt { color: #fff; }
+[data-theme="dark"] .hm-cell.hm-lv2 { background: rgba(255, 69, 58, 0.30); }
+[data-theme="dark"] .hm-cell.hm-lv3 { background: rgba(255, 69, 58, 0.52); }
+[data-theme="dark"] .hm-cell.hm-lv4 { background: rgba(255, 69, 58, 0.78); }
+.heatmap-legend {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+}
+.heatmap-legend i { width: 14px; height: 14px; border-radius: 4px; border: 0.5px solid var(--border); display: inline-block; }
+.heatmap-legend i.hm-lv0 { background: var(--bg-card-hover); }
+.heatmap-legend i.hm-lv1 { background: var(--expense-light); }
+.heatmap-legend i.hm-lv2 { background: rgba(255, 59, 48, 0.24); }
+.heatmap-legend i.hm-lv3 { background: rgba(255, 59, 48, 0.45); }
+.heatmap-legend i.hm-lv4 { background: rgba(255, 59, 48, 0.72); }
+/* ---- 同一版：手机端格子金额再缩小一档，防长数字溢出 ---- */
+@media (max-width: 640px) {
+    html:not(.mac-app) .heatmap-grid, html:not(.mac-app) .heatmap-weekdays { gap: 4px; }
+    html:not(.mac-app) .hm-cell { border-radius: 6px; }
+    html:not(.mac-app) .hm-day { font-size: 11px; }
+    html:not(.mac-app) .hm-amt { font-size: 10px; }
+}

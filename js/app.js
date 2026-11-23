@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.71';
+const APP_VERSION = '1.41.72';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -5703,7 +5703,54 @@ function renderReports() {
     document.getElementById('reportDailyAvg').textContent = formatCurrency(dailyAvg);
 
     renderDrillChart();
+    renderHeatmap();
     renderBillStats();
+}
+
+// ---- Reports: 支出日历热力图 ----
+// 只在月报档显示：把当月每天的支出铺进日历格子，颜色越深花得越多。
+// 只读聚合 state.transactions，不写任何数据；点某天复用现有 openBillStatsLedger 看当天流水。
+function renderHeatmap() {
+    const card = document.getElementById('heatmapCard');
+    const grid = document.getElementById('heatmapGrid');
+    if (!card || !grid) return;
+    const { range, txns } = getReportFiltered();
+
+    // 年报 / 全部档收起：日历按天铺，跨年跨月没有「某月哪天花得多」的意义
+    if (range.period !== 'month') {
+        card.classList.add('hidden');
+        return;
+    }
+    card.classList.remove('hidden');
+
+    const y = range.selYear, m = range.selMonth;
+    const days = monthDays(y, m);
+    const byDay = new Array(days + 1).fill(0);
+    txns.forEach(t => {
+        if (t.type !== 'expense') return;
+        const d = parseLocalDate(t.date);
+        if (d.getFullYear() === y && d.getMonth() + 1 === m) byDay[d.getDate()] += t.amount;
+    });
+
+    const maxExp = Math.max(0, ...byDay);
+    // 0 = 没花钱（浅底）；有花钱按占当月最高日的比例分 4 档（越深花得越多）
+    const level = v => v <= 0 ? 0 : maxExp <= 0 ? 0 : Math.min(4, 1 + Math.floor(v / maxExp * 4));
+    const firstDow = (new Date(y, m - 1, 1).getDay() + 6) % 7; // 周一=0，前面补空格
+
+    let html = '';
+    for (let i = 0; i < firstDow; i++) html += '<div class="hm-blank"></div>';
+    for (let d = 1; d <= days; d++) {
+        const v = byDay[d];
+        const lv = level(v);
+        const amt = v > 0 ? formatCurrency(v) : '';
+        const title = `${m}月${d}日 · 支出 ¥${v > 0 ? formatCurrency(v) : '0'}`;
+        html += `<div class="hm-cell hm-lv${lv}" data-day="${d}" title="${title}" `
+              + `onclick="openBillStatsLedger(${y},${m},${d},'${m}月${d}日')">`
+              + `<span class="hm-day">${d}</span>`
+              + (amt ? `<span class="hm-amt">${amt}</span>` : '')
+              + `</div>`;
+    }
+    grid.innerHTML = html;
 }
 
 // 年报分组（"全部"视图）：按年折叠，默认收起，点年份展开看各月

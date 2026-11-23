@@ -268,6 +268,20 @@
                         <div class="pie-legend hidden" id="pieLegend"></div>
                         <div class="drill-chart-empty hidden" id="drillChartEmpty"></div>
                     </div>
+                    <!-- 支出日历热力图：只在月报档显示，把当月每天的支出铺在日历格子里，颜色越深花得越多 -->
+                    <div class="chart-card hidden" id="heatmapCard">
+                        <div class="chart-header">
+                            <div class="drill-title-wrap">
+                                <h3>支出日历</h3>
+                                <span class="chart-subtitle">颜色越深花得越多 · 点某天看当天流水</span>
+                            </div>
+                        </div>
+                        <div class="heatmap-wrap">
+                            <div class="heatmap-weekdays"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+                            <div class="heatmap-grid" id="heatmapGrid"></div>
+                        </div>
+                        <div class="heatmap-legend"><span>少</span><i class="hm-lv0"></i><i class="hm-lv1"></i><i class="hm-lv2"></i><i class="hm-lv3"></i><i class="hm-lv4"></i><span>多</span></div>
+                    </div>
                     <div class="chart-card">
                         <div class="chart-header">
                             <div class="drill-title-wrap">
@@ -1510,7 +1524,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.71').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.72').catch(() => {});
             });
         }
     </script>

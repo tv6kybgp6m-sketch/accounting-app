@@ -3160,6 +3160,62 @@ async function run() {
                 return !!r && r.first === 'settings' && r.second === 'transactions' && r.all >= 6;
             })(), ev(`(function(){var b=document.querySelector('.nav-menu');return Array.from(b.querySelectorAll('.nav-item')).map(function(e){return e.dataset.view;}).join(',');})()`));
 
+        stage = '61';
+        ok('报表页支出日历热力图：容器 / renderHeatmap 挂在 renderReports / 月报档门控 / 点格子复用当天流水弹窗',
+            (function () {
+                const html61 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+                return html61.indexOf('id="heatmapCard"') >= 0 &&
+                    html61.indexOf('id="heatmapGrid"') >= 0 &&
+                    app62.indexOf('function renderHeatmap()') >= 0 &&
+                    app62.indexOf('    renderHeatmap();') >= 0 &&
+                    app62.indexOf("if (range.period !== 'month')") >= 0 &&
+                    app62.indexOf("openBillStatsLedger(${y},${m},${d},'${m}月${d}日')") >= 0 &&
+                    css62.indexOf('.hm-cell.hm-lv4') >= 0 &&
+                    css62.indexOf('/* ===== v1.41.72') >= 0;
+            })());
+        ok('实测热力图：月报档按天汇总支出、按金额分深浅档；年报档收起（只读不改数据）',
+            (function () {
+                const r = ev(`(function(){
+                    try {
+                        var old = state.transactions, oldP = state.reportPeriod, oldY = state.reportYear, oldM = state.reportMonth;
+                        state.reportPeriod='month'; state.reportYear=2026; state.reportMonth=5;
+                        state.transactions = [
+                            {type:'expense', amount:100, date:'2026-05-02'},
+                            {type:'expense', amount:600, date:'2026-05-02'},
+                            {type:'expense', amount:50, date:'2026-05-10'},
+                            {type:'income', amount:5000, date:'2026-05-10'},
+                            {type:'expense', amount:999, date:'2026-04-30'}
+                        ];
+                        renderHeatmap();
+                        var card = document.getElementById('heatmapCard');
+                        var grid = document.getElementById('heatmapGrid');
+                        var d2 = grid.querySelector('.hm-cell[data-day="2"]');
+                        var d10 = grid.querySelector('.hm-cell[data-day="10"]');
+                        var d1 = grid.querySelector('.hm-cell[data-day="1"]');
+                        var res = {
+                            shown: !card.classList.contains('hidden'),
+                            cellCount: grid.querySelectorAll('.hm-cell').length,
+                            d2amt: d2 && d2.querySelector('.hm-amt') ? d2.querySelector('.hm-amt').textContent : '',
+                            d2lv4: d2 ? d2.classList.contains('hm-lv4') : false,
+                            d10amt: d10 && d10.querySelector('.hm-amt') ? d10.querySelector('.hm-amt').textContent : '',
+                            d10lv1: d10 ? d10.classList.contains('hm-lv1') : false,
+                            d1lv0: d1 ? d1.classList.contains('hm-lv0') : false,
+                            onclick: d2 ? d2.getAttribute('onclick') : ''
+                        };
+                        state.reportPeriod='year'; renderHeatmap();
+                        res.yearHidden = card.classList.contains('hidden');
+                        state.transactions=old; state.reportPeriod=oldP; state.reportYear=oldY; state.reportMonth=oldM;
+                        return res;
+                    } catch(err){ return {err:String(err)}; }
+                })()`);
+                ok('  ↳ 月报 5 月 31 格、5/2 合计 700 为最深档、5/10 仅 50 为浅档、空日子 lv0、点格子看当天',
+                    !!r && !r.err && r.shown === true && r.cellCount === 31 &&
+                    r.d2amt === '700' && r.d2lv4 === true && r.d10amt === '50' && r.d10lv1 === true &&
+                    r.d1lv0 === true && /openBillStatsLedger\(2026,5,2/.test(r.onclick || '') && r.yearHidden === true,
+                    r);
+                return !!r && !r.err && r.shown === true && r.cellCount === 31;
+            })());
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));
