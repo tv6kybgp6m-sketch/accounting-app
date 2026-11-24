@@ -4602,8 +4602,11 @@ table.bill-stats {
 .bridge-row:nth-child(odd) { background: var(--bg-content); }
 .br-key { color: var(--text-secondary); }
 .br-val { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-primary); }
-.bridge-row.up .br-val { color: var(--income-text); }
-.bridge-row.down .br-val { color: var(--expense-text); }
+/* v1.41.77：和上面等式（hero）用同一套涨跌口径 —— 增加红、减少绿。
+   以前这里沿用旧的"收入绿"，于是同一张卡里「本期储蓄」上面红、下面绿，
+   同一个数字两种颜色，看着像两个数。 */
+.bridge-row.up .br-val { color: var(--expense-text); }
+.bridge-row.down .br-val { color: var(--income-text); }
 .bridge-row.warn .br-val { color: #d9822b; }
 .bridge-row.ok .br-val { color: var(--income-text); }
 .br-note { grid-column: 1 / -1; font-size: 12px; color: var(--text-muted); }
@@ -6588,3 +6591,9 @@ html.mac-app #view-returns .view-header .report-controls .ym-review-btn {
 .ym-wheel-col:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; border-radius: 8px; }
 /* 点某格时给一下按压反馈，让「点了就选中」这件事有手感 */
 .ym-wheel-col > div:active { color: var(--primary); }
+
+/* ===== v1.41.77：回顾弹窗的时间也能直接选年月（和报表分析同一个轮盘） ===== */
+/* 以前中间那块是一行纯文字，只能一期期按「上一期 / 下一期」翻，想跳到半年前要点六下。 */
+/* 现在它和报表页的 #reportYmBtn 同一套：胶囊 + 小箭头，点开是年月轮盘。 */
+#reviewModal .review-ym .ym-anchor-btn { flex: 0 0 auto; white-space: nowrap; }
+#reviewModal .review-ym .ym-anchor-btn #reviewPeriodLabel { font-weight: 600; }

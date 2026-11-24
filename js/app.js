@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.76';
+const APP_VERSION = '1.41.77';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1453,7 +1453,9 @@ function closeTopmostOverlay() {
     if (!top) return;
     // v1.41.74：会丢草稿的两个弹窗必须走各自的"未保存确认"。
     // 以前只特判了两个 id，其余一律 classList.add('hidden') —— 于是按 Esc 关月度盘点会绕过
-    // confirmCloseMonthlyModal，整屏没保存的数就这么没了（鼠标点遮罩是走确认的，只有键盘中招）。
+    // confirmCloseMonthlyModal，整屏没保存的数就这么没了。
+    // v1.41.77：点遮罩那条路（16806 附近的通用处理器）当时漏了，现在统一调这个函数，
+    // 键盘、鼠标、触屏三条路走同一套收尾。
     if (top.id === 'categoryTxnModal') closeCategoryTxnModal();
     else if (top.id === 'accountHistoryModal') closeAccountHistoryModal();
     else if (top.id === 'transactionModal') confirmCloseTransactionModal();
@@ -2619,6 +2621,18 @@ function dataHealthCheck() {
     const dups = [].concat(
         dupIds(state.transactions), dupIds(state.balances), dupIds(state.returns),
         dupIds(state.categories), dupIds(state.accounts), dupIds(state.insurancePolicies));
+    // v1.41.77：保单 id 是「险种__成员」，险种/成员改名后旧 id 与新 id 是**两个不同 id**，
+    // dupIds 查不出来（它比的是同一个 id 重复）。但业务上是同一份保障，会被算两遍保费。
+    {
+        const seen = new Map(), clash = new Set();
+        state.insurancePolicies.forEach(p => {
+            const k = `${p.member}｜${p.type}`;
+            if (seen.has(k)) clash.add(k); else seen.set(k, p.id);
+        });
+        // 保留更新的一条，其余交给「去重」清掉（台账按险种渲染，重复那条在界面上看不见）。
+        if (clash.size) add('warn', `${clash.size} 份保单重复（同一险种同一成员有两条，保费会算两遍）`,
+            shorten([...clash]), { label: '去重', kind: 'dups' });
+    }
     // 预算是按 categoryId 存的，同一个分类出现两条就是脏数据
     const dupBud = dupIds(state.budgets.map(b => ({ id: b.categoryId })));
     if (dupBud.length) add('warn', `${dupBud.length} 个分类有重复的预算条目`, shorten(dupBud), { label: '去重', kind: 'dups' });
@@ -2781,6 +2795,32 @@ function applyDataFix(kind) {
             removed += r.dropped;
             take(coll, r.keep);
         });
+        // v1.41.77：险种/成员改名会留下「同一险种同一成员」的两条保单（id 不同，dupIds 查不出）。
+        // 保留 updatedAt 较新的那条，其余打墓碑 —— 不打墓碑的话下次合并又被并回来。
+        // 台账按险种渲染、insPolicy() 用 find，所以重复的那条在界面上根本看不见，只能在这里清。
+        {
+            const byKey = new Map();
+            const droppedIds = [];
+            const kept = [];
+            state.insurancePolicies.slice()
+                .sort((a, b) => (Number(b && b.updatedAt) || 0) - (Number(a && a.updatedAt) || 0))
+                .forEach(p => {
+                    if (!p) return;
+                    const k = `${p.member}｜${p.type}`;
+                    if (byKey.has(k)) { droppedIds.push(p.id); return; }
+                    byKey.set(k, p);
+                    kept.push(p);
+                });
+            if (droppedIds.length) {
+                // 墓碑也要进快照，否则撤销把保单放回来了、墓碑还在，下次 applyTombstones 又把它抹掉
+                if (!snaps.some(x => x.snapColl === 'deleted')) {
+                    snaps.push({ snapColl: 'deleted', rows: JSON.parse(JSON.stringify(state.deleted || {})) });
+                }
+                droppedIds.forEach(id => addTombstone('insurance', id));
+                removed += droppedIds.length;
+                take('insurancePolicies', kept);
+            }
+        }
         const seenB = new Set();
         const buds = state.budgets.filter(b => {
             if (b && b.categoryId && seenB.has(b.categoryId)) { removed++; return false; }
@@ -2921,12 +2961,12 @@ async function encSetupAdvance() {
     try {
         if (__encMode === 'setup') {
             const r = await LedgerCrypto.setup(p1);
-            await scheduleRemoteSync();                 // 让云端那份也尽快变成密文
+            await rewriteCloudAfterCrypto('加密设置');    // 云端那份必须从明文换成密文
             revealRecoveryCode(r.recoveryCode);
             showToast('加密已开启', 'success');
         } else {
             await LedgerCrypto.changePassphrase(null, p1);
-            await scheduleRemoteSync();
+            await rewriteCloudAfterCrypto('口令');         // 旧口令不该还能解开云端那份
             showToast('口令已修改', 'success');
             closeEncSetup();
         }
@@ -2936,7 +2976,7 @@ async function encSetupAdvance() {
             try {
                 await ensureUnlocked(null, '修改口令需要先解锁');
                 await LedgerCrypto.changePassphrase(null, p1);
-                await scheduleRemoteSync();
+                await rewriteCloudAfterCrypto('口令');
                 showToast('口令已修改', 'success');
                 closeEncSetup();
             } catch (e2) {
@@ -2989,7 +3029,7 @@ async function disableEncryptionClick() {
     if (!confirm('关闭加密？之后的备份与同步退回明文。已经导出的加密文件仍需口令或恢复码才能打开。')) return;
     try {
         await LedgerCrypto.disable();
-        await scheduleRemoteSync();          // 用明文覆盖云端那份密文，免得下次没口令打不开
+        await rewriteCloudAfterCrypto('设置');        // 用明文覆盖云端那份密文，免得下次没口令打不开
         showToast('已关闭加密', 'success');
     } catch (e) { showToast('关闭失败：' + (e && e.message || e), 'error'); }
     renderEncryptionSection();
@@ -3713,6 +3753,33 @@ async function remotePush() {
     remoteSyncCfg.lastSyncAt = Date.now();
     saveRemoteSyncConfig();
     return true;
+}
+
+// v1.41.77：加密开关 / 改口令之后，必须把云端那一份强制重写一次。
+// 以前这三个动作只调了 scheduleRemoteSync()，而它有两条都会把这次重写挡掉：
+//   ① `if (syncFingerprint() === __lastPushedFingerprint) return;` —— 加密状态变了，
+//      但账本内容一个字没变，指纹当然一样，于是连 remoteSyncCycle 都不会被调用；
+//   ② remotePush 里 `mine === __remoteSeenFingerprint` 同样短路。
+// 后果：开了加密，云端那份一直是明文；改了口令，旧口令仍然能解开云端那份。
+// 这里直接推（不走"先拉后推"）：改口令后旧封套可能拉不开，先拉会把推送一起挡掉。
+async function rewriteCloudAfterCrypto(reason) {
+    __remoteNeedRewrite = true;
+    __remoteSeenFingerprint = null;
+    if (!remoteSyncReady()) return true;                 // 没配同步就没什么可重写的
+    if (storageBlocked() || __remoteBusy) return false;
+    __remoteBusy = true;
+    try {
+        const ok = await remotePush();
+        if (ok) showToast(`云端那份已按新的${reason}重写`, 'success');
+        else if (__remoteLastError) showToast('云端那份还没重写成功：' + __remoteLastError + '（下次同步会再试）', 'error', 8000);
+        return ok;
+    } catch (e) {
+        showToast('云端那份还没重写成功：' + ((e && e.message) || e) + '（下次同步会再试）', 'error', 8000);
+        return false;
+    } finally {
+        __remoteBusy = false;
+        updateRemoteSyncUI();
+    }
 }
 
 // 一次完整同步：先拉后推。串行加锁，避免定时器叠起来。
@@ -4697,19 +4764,40 @@ function renderTransactions() {
     empty.classList.add('hidden');
     // Render in day-sized chunks instead of the whole history at once. With many
     // records, one giant innerHTML was what made switching to this view stall.
+    //
+    // v1.41.77：同一份列表被"后台刷新"重画时（云同步 60 秒轮询拉到自己刚改的数、
+    // 或者别处 saveState 触发 renderView），不要把人踹回顶部。
+    // 以前无条件 scrollTop = 0：正翻到 3 月的时候同步跑一轮，眼睛就跳回最新一笔。
+    // 判据是"筛选条件 + 条数 + 首尾 id 都没变"＝还是同一份列表，只是重画一遍。
+    const scroller = document.querySelector('.main-content');
+    const txnKey = [
+        state.monthFilter || '', state.searchQuery || '', state.transactionFilter || '',
+        txnAnomalyOnly ? '1' : '0', filtered.length,
+        filtered.length ? filtered[0].id : '', filtered.length ? filtered[filtered.length - 1].id : '',
+    ].join('|');
+    const keepPos = (txnKey === txnRenderKey) && txnRenderedTo > 0;
+    const prevRendered = txnRenderedTo;
+    const prevScroll = scroller ? scroller.scrollTop : 0;
+    txnRenderKey = txnKey;
     txnRenderList = filtered;
     txnRenderedTo = 0;
     container.innerHTML = '';
-    // start from the top so a lingering bottom scroll position doesn't
-    // immediately cascade-load several chunks
-    const scroller = document.querySelector('.main-content');
-    if (scroller) scroller.scrollTop = 0;
-    appendTxnChunk();
+    if (keepPos) {
+        // 补画到原来那么多条，再放回原来的位置（否则滚动高度不够，设了也会被夹到顶部）
+        const want = Math.min(prevRendered, filtered.length);
+        let guard = 0;
+        while (txnRenderedTo < want && guard++ < 2000) appendTxnChunk();
+        if (scroller) scroller.scrollTop = prevScroll;
+    } else {
+        if (scroller) scroller.scrollTop = 0;
+        appendTxnChunk();
+    }
 }
 
 // ---- Transactions infinite render ----
 let txnRenderList = [];
 let txnRenderedTo = 0;
+let txnRenderKey = '';                 // v1.41.77：上一份列表的"身份"，用来判断这次是重画还是换了筛选
 const TXN_CHUNK = 60;
 let txnAnomalyOnly = false;            // 交易记录「只看异常订单」模式开关（只读增强，不写数据）
 let txnCurrentAnomalyReasons = null;   // 当前列表每笔异常原因 Map，供徽标渲染复用
@@ -7307,8 +7395,18 @@ function deleteCategory(id) {
     const cat = state.categories.find(c => c.id === id);
     if (!cat) return;
     const count = state.transactions.filter(t => t.categoryId === id).length;
+    const goneBudgets = state.budgets.filter(b => b.categoryId === id);
     if (count > 0) {
-        showToast(`该分类下有 ${count} 笔交易，无法删除`, 'error');
+        // v1.41.77：和删账户同一套。以前只弹一句 toast「无法删除」，用户不知道该去哪儿处理；
+        // 现在给一个带直达按钮的弹窗（账户那边一直是这么做的）。
+        showDeleteGuard({
+            title: `「${cat.name}」下还有 ${count} 笔交易，删不掉`,
+            sub: '把这些交易改成别的分类（或删掉），这个分类就能删了。'
+                + (goneBudgets.length ? `\n注意：这个分类还挂着 ${goneBudgets.length} 条预算，删分类时会一起删掉。` : ''),
+            rows: [{ k: '交易记录', v: count + ' 笔' }]
+                .concat(goneBudgets.length ? [{ k: '预算条目（删分类时一起删）', v: goneBudgets.length + ' 条' }] : []),
+            actions: [{ label: '去看这些交易', fn: () => { switchView('reports'); openLedgerForCategory(id); } }],
+        });
         return;
     }
     const sameTypeCount = state.categories.filter(c => c.type === cat.type).length;
@@ -7316,8 +7414,11 @@ function deleteCategory(id) {
         showToast(cat.type === 'income' ? '至少保留一个收入分类' : '至少保留一个支出分类', 'error');
         return;
     }
-    if (!confirm(`确定删除分类「${cat.name}」吗？`)) return;
-    const goneBudgets = state.budgets.filter(b => b.categoryId === id);
+    // v1.41.77：确认框要说清连带删掉的预算。以前只说"确定删除分类吗"，
+    // 实际却把它的预算一起删了 —— 用户是按"只删一个分类"点的确定。
+    if (!confirm(`确定删除分类「${cat.name}」吗？`
+        + (goneBudgets.length ? `\n\n它的 ${goneBudgets.length} 条预算会一起删掉。` : '')
+        + '\n删除后 8 秒内可以撤销。')) return;
     addTombstone('categories', id);
     goneBudgets.forEach(b => addTombstone('budgets', b.id));
     state.categories = state.categories.filter(c => c.id !== id);
@@ -7415,6 +7516,13 @@ function onCatTouchEnd() {
     if (catPress) { clearTimeout(catPress.timer); catPress = null; }
 }
 
+// v1.41.77：来电、切后台、系统手势打断时浏览器发的是 touchcancel，不是 touchend。
+// 以前两者共用一个处理函数 —— 拖到一半被系统打断，顺序照样按落点写进了账本。
+function onCatTouchCancel() {
+    if (catDrag) { endCatDrag(false); return; }
+    if (catPress) { clearTimeout(catPress.timer); catPress = null; }
+}
+
 function startCatDrag(clientX, clientY) {
     if (!catPress) return;
     const card = catPress.card;
@@ -7469,9 +7577,22 @@ function moveCatDrag(x, y) {
     catDrag.list.appendChild(catDrag.placeholder);
 }
 
-function endCatDrag() {
+function endCatDrag(commit = true) {
     if (!catDrag) return;
     const { id, type, list, ghost, placeholder } = catDrag;
+
+    // v1.41.77：被系统打断（touchcancel）时只收拾现场，不按当前落点落盘
+    if (!commit) {
+        if (ghost && ghost.remove) ghost.remove();
+        if (placeholder && placeholder.remove) placeholder.remove();
+        document.body.classList.remove('cat-dragging');
+        if (list) {
+            list.classList.remove('cat-drag-active');
+            list.querySelectorAll('.category-card').forEach(c => c.classList.remove('dragging'));
+        }
+        catDrag = null;
+        return;
+    }
 
     // Which card comes right after the drop slot? (skip the hidden source card)
     let nextEl = placeholder.nextElementSibling;
@@ -7499,6 +7620,9 @@ function endCatDrag() {
 
     catDrag = null;
     catSuppressClick = true; // swallow the click that follows pointerup
+    // v1.41.77：万一这次没跟出 click（touchmove 调过 preventDefault 时浏览器就可能不发），
+    // 这个标记会一直挂着，把用户下一次真实的点击吃掉。给个上限，只吞紧随其后的那一下。
+    setTimeout(() => { catSuppressClick = false; }, 500);
     saveState();
     renderCategories();
     showToast('分类顺序已更新', 'success');
@@ -7513,7 +7637,7 @@ function initCategoryInteractions() {
         list.addEventListener('touchstart', onCatTouchStart, { passive: true });
         list.addEventListener('touchmove', onCatTouchMove, { passive: false });
         list.addEventListener('touchend', onCatTouchEnd);
-        list.addEventListener('touchcancel', onCatTouchEnd);
+        list.addEventListener('touchcancel', onCatTouchCancel);   // v1.41.77：打断 ≠ 松手
         // 桌面：整卡立即可拖（不再长按 0.45 秒），和月度账单 / 账户列表同一套观感
         // —— 卡片跟手 + 落点高亮线。
         list.addEventListener('dragstart', e => {
@@ -8003,7 +8127,38 @@ function pickLocalFile(extensions) {
 }
 
 // 把一本工作簿解析进 state（与文件从哪来无关）
+// v1.41.77：导入前整份快照，任何异常都整体还原。
+// 以前 applyWorkbook 是"边解析边往 state 里写"，中途抛错（真实例子：「支付方式」那格是数字 2080，
+// `.trim()` 直接 TypeError）会把已经加进去的半截交易留在内存里，catch 只弹一句"导入失败"，
+// 之后任何一次保存（包括退出 App 的 flushState）就把半截结果落盘了 —— 用户以为没导进去。
+const IMPORT_SNAPSHOT_KEYS = ['transactions', 'categories', 'budgets', 'accounts', 'balances', 'returns',
+    'paymentMethods', 'pmAddedAt', 'balanceMembers', 'memberAddedAt',
+    'insurancePolicies', 'insuranceMembers', 'insuranceMemberAddedAt',
+    'insuranceTypes', 'insuranceTypeAddedAt', 'fundTargets', 'deleted', 'sheetCols'];
+
 function applyWorkbook(wb) {
+    let snap = null;
+    try {
+        const o = {};
+        IMPORT_SNAPSHOT_KEYS.forEach(k => { if (state[k] !== undefined) o[k] = state[k]; });
+        snap = JSON.stringify(o);
+    } catch (e) { snap = null; }         // 快照失败也照常导入，只是没有回滚能力
+    try {
+        return applyWorkbookInner(wb);
+    } catch (e) {
+        if (snap) {
+            try {
+                const back = JSON.parse(snap);
+                IMPORT_SNAPSHOT_KEYS.forEach(k => { if (back[k] !== undefined) state[k] = back[k]; });
+                ensureArrayFields();
+                saveState();             // 把还原后的状态盖回去，别让半截数据留在存档里
+            } catch (e2) { /* 还原失败就只能报错了，至少别再继续写 */ }
+        }
+        throw e;
+    }
+}
+
+function applyWorkbookInner(wb) {
             let txnAdded = 0, txnUpdated = 0, txnInvalid = 0;
             let accAdded = 0, insAdded = 0;
 
@@ -8113,7 +8268,9 @@ function applyWorkbook(wb) {
                 });
                 // Auto-register unknown payment methods from imported data
                 txnRows.forEach(row => {
-                    const pm = (row['支付方式'] || '').trim();
+                    // v1.41.77：先把值 String() 化再 trim。单元格里是数字（真实数据里有 2080）
+                    // 时 `(2080 || '').trim()` 直接 TypeError，整份导入就此中断。
+                    const pm = String(row['支付方式'] == null ? '' : row['支付方式']).trim();
                     if (pm && !state.paymentMethods.includes(pm)) {
                         state.paymentMethods.push(pm);
                         state.pmAddedAt[pm] = Date.now();
@@ -9496,7 +9653,9 @@ function renderBalanceTrend(ctx, chartType, meta, metric) {
             },
             plugins: {
                 legend: { display: false },
-                tooltip: { callbacks: { label: (c) => `${meta.name}: ${mm(c.raw)}` } },
+                // v1.41.77：没记余额的月份是 null，这里以前直接 mm(null) ——
+                // formatCurrency 里 Math.abs(null) = 0，于是悬停显示"0"，看着像那月真的一分没有。
+                tooltip: { callbacks: { label: (c) => `${meta.name}: ${(c.raw === null || c.raw === undefined) ? '—' : mm(c.raw)}` } },
             },
             scales: {
                 x: {
@@ -10921,7 +11080,14 @@ function ymWheelOutsideClose(e) {
     const anchor = root._anchor;
     // 点锚点自己不算「点外面」——由锚点的 click 自己 toggle，避免开关打架
     if (anchor && (e.target === anchor || anchor.contains(e.target))) return;
-    if (!root.contains(e.target)) closeYmWheel();
+    if (root.contains(e.target)) return;
+    // v1.41.77：轮盘开在弹窗里时（回顾 / 记余额 / 记收益），点遮罩的本意是「收起轮盘」。
+    // 遮罩自己的 click 在冒泡阶段统一关最上层弹窗，这里趁捕获阶段先把这一下吃掉，
+    // 否则收个轮盘顺手把整个弹窗关了，用户还得重新点开。
+    if (e.target && e.target.classList && e.target.classList.contains('modal-overlay')) {
+        e.stopPropagation();
+    }
+    closeYmWheel();
 }
 
 function closeYmWheel() {
@@ -13874,14 +14040,16 @@ function renderFundQuadrant() {
     const cells = FUND_BUCKETS.map(bk => {
         const act = actual[bk.key] || 0;
         const tgt = state.fundTargets[bk.key] || 0;
-        const pct = tgt > 0 ? Math.min(act / tgt, 1) : (act > 0 ? 1 : 0);
+        // v1.41.77：没设目标就不画进度条。以前 `act > 0 ? 1 : 0` 会让"活钱 8 万、目标没填"
+        // 画成满格，看着像已达成 —— 算不出就别给一个看似合理的数字，和全站口径一致。
+        const pct = tgt > 0 ? Math.min(act / tgt, 1) : 0;
         const share = total > 0 ? Math.round(act / total * 100) : 0;
         return `
         <div class="fq-cell" style="--fq-color:${bk.color}">
             <div class="fq-fill" style="width:${(pct * 100).toFixed(0)}%"></div>
             <div class="fq-name"><i class="fa-solid ${bk.icon}"></i> ${bk.name}</div>
             <div class="fq-act">${maskMoney(act)}</div>
-            <div class="fq-meta">目标 ${maskMoney(tgt)} · 占 ${share}%</div>
+            <div class="fq-meta">目标 ${tgt > 0 ? maskMoney(tgt) : '—'} · 占 ${share}%</div>
         </div>`;
     });
     const insDone = insCoveredCount();
@@ -14362,6 +14530,10 @@ function renameInsuranceMember(old) {
     state.insuranceMembers = state.insuranceMembers.map(m => m === old ? n : m);
     state.insurancePolicies.forEach(p => {
         if (p.member !== old) return;
+        // v1.41.77：旧保单 id 必须打墓碑。保单 id 是「险种__成员」，改名后新 id 会被
+        // 推给别的设备、按 id 并集合并，而旧 id 那份没有墓碑就永远留着 ——
+        // 于是同一个人同一份保障变成两条，保费/保额算成两倍，而列表按险种只显示一行。
+        addTombstone('insurance', p.id);
         p.member = n;
         p.id = insurancePolicyId(p.type, n);
         p.updatedAt = Date.now();
@@ -14419,6 +14591,9 @@ function renameInsuranceType(oldType) {
     // 保单 id 是 险种__成员，改名要连保单一起改，否则旧 id 的保单会悬空。
     state.insurancePolicies.forEach(p => {
         if (p.type !== oldType) return;
+        // v1.41.77：同成员改名——旧 id 一定要打墓碑，否则别的设备并集合并后
+        // 同一份保障留下两条（旧 id + 新 id），保费算成两倍而列表只显示一行。
+        addTombstone('insurance', p.id);
         p.type = n;
         p.id = insurancePolicyId(n, p.member);
         p.updatedAt = Date.now();
@@ -16777,6 +16952,21 @@ function initEventListeners() {
     // 投资收益
     initReturnListeners();
 
+    // v1.41.77：回顾弹窗的「2026 年 10 月」也能直接点了 —— 和报表分析同一个年月轮盘。
+    // 以前只能一期期按「上一期 / 下一期」翻，想跳到半年前要点六下。
+    // 年报档不给月份列（月份没参与统计），和报表那边同一条规则。
+    bindYmAnchorBtn('reviewYmBtn',
+        () => {
+            const mm = reviewMonth || _monthKeyNow();
+            return { y: Number(mm.slice(0, 4)), m: Number(mm.slice(5, 7)) };
+        },
+        (y, m) => {
+            const mm = String(m || 1).padStart(2, '0');
+            reviewMonth = `${y}-${mm}`;
+            renderReviewModal();
+        },
+        () => ({ withMonth: reviewTab !== 'year' }));
+
     // Report year/month selectors
     bindYmAnchorBtn('reportYmBtn',
         () => ({ y: state.reportYear || new Date().getFullYear(), m: state.reportMonth || (new Date().getMonth() + 1) }),
@@ -16802,13 +16992,30 @@ function initEventListeners() {
         btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
     });
 
+    // v1.41.77：全站模态补上无障碍语义。以前一个 role="dialog" 都没有，
+    // 读屏软件把弹窗内容当成普通正文念，也不会报"打开了一个对话框"。
+    // 这里只补属性（零风险）；焦点陷阱要逐个弹窗改，另说。
+    document.querySelectorAll('.modal-overlay').forEach(overlay => {
+        const panel = overlay.querySelector('.modal');
+        if (!panel) return;
+        if (!panel.getAttribute('role')) panel.setAttribute('role', 'dialog');
+        if (!panel.hasAttribute('aria-modal')) panel.setAttribute('aria-modal', 'true');
+        const title = panel.querySelector('.modal-header h2, .modal-header h3');
+        if (title && title.id && !panel.getAttribute('aria-labelledby')) {
+            panel.setAttribute('aria-labelledby', title.id);
+        }
+    });
+
     // Modal overlay click to close
     document.querySelectorAll('.modal-overlay').forEach(overlay => {
         overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) {
-                if (overlay.id === 'categoryTxnModal') closeCategoryTxnModal();
-                else overlay.classList.add('hidden');
-            }
+            if (e.target !== overlay) return;
+            // v1.41.77：统一走「关最上层」，别再自己切 class。
+            // 以前这里只特判 categoryTxnModal，其余一律 classList.add('hidden') ——
+            // 而「记一笔」「月度盘点」都是普通 .modal-overlay，于是手机上点一下外面
+            // 就把整屏没保存的草稿丢了，连问都不问，还跳过 closeMonthlyModal 的月份回写。
+            // 上一轮修 Esc 时写的注释「鼠标点遮罩是走确认的」正好说反了，这里一并改掉。
+            closeTopmostOverlay();
         });
     });
 
@@ -17353,7 +17560,14 @@ function renderReviewHistory(kind) {
 // 一屏四行：收支结余（带近 6 个月均值）、分类前五、净资产与当月收益、习惯统计。
 // 全部是已有数据的加减和排序，不写任何数、不给「应该花多少」这类判断。
 function reviewMonthReportHTML(month) {
-    const txns = state.transactions.filter(t => getMonthKey(t.date) === month);
+    // v1.41.77：口径跟随当前成员筛选，不再写死全家。
+    // 以前收支按全家、家底也按 'all'，而旁边的净资产桥按 state.balanceOwner 过滤 ——
+    // 家庭模式下从资产负债页点回顾，同一个月的净资产两个地方对不上。
+    // 收支一起按成员过滤，不然报告内部就自相矛盾（收支全家、家底只有本人）。
+    const owner = state.balanceOwner || 'all';
+    const inScope = t => owner === 'all' || t.member === owner;
+    const scopeTxt = owner === 'all' ? '全家' : `${owner}（当前筛选）`;
+    const txns = state.transactions.filter(t => getMonthKey(t.date) === month && inScope(t));
     const sumOf = (rows) => rows.reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const inc = sumOf(txns.filter(t => t.type === 'income'));
     const exp = sumOf(txns.filter(t => t.type === 'expense'));
@@ -17361,7 +17575,7 @@ function reviewMonthReportHTML(month) {
     for (let i = 0; i < 6; i++) {
         cursor = previousMonthOf(cursor);
         if (!cursor) break;
-        const rows = state.transactions.filter(t => t.type === 'expense' && getMonthKey(t.date) === cursor);
+        const rows = state.transactions.filter(t => t.type === 'expense' && getMonthKey(t.date) === cursor && inScope(t));
         if (rows.length) { sum6 += sumOf(rows); n6++; }
     }
     const avg6 = n6 ? sum6 / n6 : null;
@@ -17376,36 +17590,39 @@ function reviewMonthReportHTML(month) {
     };
     const top5 = Object.keys(byCat).sort((a, b) => byCat[b] - byCat[a]).slice(0, 5)
         .map(k => `${_esc(catName(k))} ${_fmtY(byCat[k])}（${exp > 0 ? (byCat[k] / exp * 100).toFixed(1) : '0.0'}%）`).join(' · ');
-    const t = totalsFromCat(balancesByCat(month, 'all'));
-    const rmap = returnsAtMonth(month, 'all');
+    const t = totalsFromCat(balancesByCat(month, owner));
+    const rmap = returnsAtMonth(month, owner);
     const profit = Object.keys(rmap).reduce((s, k) => s + (Number(rmap[k]) || 0), 0);
     const days = new Set(txns.map(x => String(x.date).slice(0, 10))).size;
     const noNote = txns.filter(x => !String(x.note || '').trim()).length;
     return `<div class="review-report">
         <div class="rr-row"><span class="rr-k">收支结余</span><span class="rr-v">支出 ${_fmtY(exp)} · 收入 ${_fmtY(inc)} · 结余 ${_fmtY(inc - exp)}${avg6 !== null ? `<em>近 6 个月月均支出 ${_fmtY(avg6)}</em>` : ''}</span></div>
         <div class="rr-row"><span class="rr-k">分类前五</span><span class="rr-v">${top5 || '这个月没有支出记录'}</span></div>
-        <div class="rr-row"><span class="rr-k">家底与投资</span><span class="rr-v">净资产 ${_fmtY(t.net)}（资产 ${_fmtY(t.asset)} / 负债 ${_fmtY(t.liability)}）· 当月投资收益 ${_fmtY(profit)}</span></div>
+        <div class="rr-row"><span class="rr-k">家底与投资</span><span class="rr-v">净资产 ${_fmtY(t.net)}（资产 ${_fmtY(t.asset)} / 负债 ${_fmtY(t.liability)}）· 当月投资收益 ${_fmtY(profit)}<em>${scopeTxt}口径</em></span></div>
         <div class="rr-row"><span class="rr-k">记账习惯</span><span class="rr-v">记了 ${days} 天 · 共 ${txns.length} 笔 · ${noNote} 笔没写备注</span></div>
     </div>`;
 }
 function reviewYearPageHTML(year) {
     const months = [];
     for (let i = 1; i <= 12; i++) months.push(year + '-' + String(i).padStart(2, '0'));
+    // v1.41.77：同月报——口径跟随成员筛选，和净资产桥保持一致
+    const ownerY = state.balanceOwner || 'all';
+    const inScopeY = t => ownerY === 'all' || t.member === ownerY;
     let yearExp = 0, yearInc = 0, yearProfit = 0;
     months.forEach(m => {
         state.transactions.forEach(t => {
-            if (getMonthKey(t.date) !== m) return;
+            if (getMonthKey(t.date) !== m || !inScopeY(t)) return;
             if (t.type === 'expense') yearExp += Number(t.amount) || 0;
             else if (t.type === 'income') yearInc += Number(t.amount) || 0;
         });
-        const rm = returnsAtMonth(m, 'all');
+        const rm = returnsAtMonth(m, ownerY);
         Object.keys(rm).forEach(k => { yearProfit += Number(rm[k]) || 0; });
     });
     const withBal = months.filter(m => monthHasRecords(m));
     let delta = null;
     if (withBal.length > 1) {
-        delta = totalsFromCat(balancesByCat(withBal[withBal.length - 1], 'all')).net
-              - totalsFromCat(balancesByCat(withBal[0], 'all')).net;
+        delta = totalsFromCat(balancesByCat(withBal[withBal.length - 1], ownerY)).net
+              - totalsFromCat(balancesByCat(withBal[0], ownerY)).net;
     }
     const notes = months.filter(m => state.reviews && state.reviews.monthly && state.reviews.monthly[m] && state.reviews.monthly[m].text)
         .map(m => `<div class="review-hist-row"><b>${m}</b><span>${_esc(state.reviews.monthly[m].text)}</span></div>`).join('');
@@ -17721,8 +17938,11 @@ function renderReturnMissing(info) {
     let baseRGB = '0,0,0', baseAlpha = 0.5;   // 遮罩底色，拖动时按位移淡出（翻书效果）
 
     function topModal() {
-        const all = document.querySelectorAll('.modal-overlay:not(.hidden)');
-        return all.length ? all[all.length - 1] : null;
+        // v1.41.77：别再按文档顺序取最后一个。从「分类明细」里点「记一笔」时，
+        // 记一笔的 DOM 更靠前、层级更高，按文档顺序取的正好是身后那层 ——
+        // 侧滑关掉了弹在下面的窗口，前台那个还留着。Esc 一直用的是 topmostOverlay()，这里跟它对齐。
+        const el = topmostOverlay();
+        return (el && el.classList.contains('modal-overlay')) ? el : null;
     }
     function panelOf(modal) {
         return modal.querySelector('.modal') || modal.firstElementChild || modal;

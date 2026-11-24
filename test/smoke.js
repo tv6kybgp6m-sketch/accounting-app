@@ -2689,7 +2689,9 @@ async function run() {
             app52.indexOf("chartMaskFor('balance');") >= 0 &&
             app52.indexOf("chartMaskFor('returns');") >= 0 &&
             app52.indexOf('${mm(e0.raw)}') >= 0 &&
-            (app52.match(/\$\{mm\(c\.raw\)\}/g) || []).length === 3);
+            // v1.41.77：总资产走势那条改成了 null 守卫版本，3 条里 2 条保持原样
+            (app52.match(/\$\{mm\(c\.raw\)\}/g) || []).length === 2 &&
+            app52.indexOf("(c.raw === null || c.raw === undefined) ? '—' : mm(c.raw)") >= 0);
         const trendSeg52 = app52.slice(app52.indexOf('function renderBalanceTrend'), app52.indexOf('function renderBalancePie'));
         ok('资产负债走势图的准星与提示框不再读全局 moneyVisible',
             trendSeg52.indexOf('maskMoney(') < 0 && trendSeg52.indexOf('${mm(e0.raw)}') >= 0);
@@ -3556,6 +3558,153 @@ async function run() {
                 pkg65.scripts.test.indexOf('test/storage-guard.js') >= 0 &&
                 fs.existsSync(path.join(REPO, 'test', 'storage-guard.js')));
         }
+
+        // ---- stage 66（v1.41.77）：第三方复查 4 严重 + 若干中等 ----
+        stage = '66';
+        console.log('\n--- stage 66：遮罩确认 / 保单墓碑 / 云端重写 / 导入回滚 ---');
+        {
+            const src66 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+            const css66 = fs.readFileSync(path.join(REPO, 'css', 'style.css'), 'utf8');
+
+            // ① 点遮罩必须走「关最上层」，不能自己切 class
+            const ovBlock = src66.slice(src66.indexOf("document.querySelectorAll('.modal-overlay').forEach(overlay => {", src66.indexOf('Modal overlay click to close')));
+            ok('① 点遮罩走 closeTopmostOverlay（否则记一笔/月度盘点的草稿点一下就没）',
+                ovBlock.indexOf('closeTopmostOverlay();') > 0 && ovBlock.indexOf("overlay.classList.add('hidden')") < 0);
+
+            // ② 险种/成员改名要给旧保单 id 打墓碑
+            const rnType = src66.slice(src66.indexOf('function renameInsuranceType'), src66.indexOf('function deleteInsuranceType'));
+            const rnMember = src66.slice(src66.indexOf('function renameInsuranceMember'), src66.indexOf('function deleteInsuranceMember'));
+            ok('② 险种改名给旧保单打墓碑（否则别的设备并集合并后保费翻倍）',
+                rnType.indexOf("addTombstone('insurance', p.id)") > 0);
+            ok('② 成员改名同样打墓碑', rnMember.indexOf("addTombstone('insurance', p.id)") > 0);
+            ok('② 数据体检能查出「同一险种同一成员两条保单」',
+                src66.indexOf('同一险种同一成员有两条，保费会算两遍') > 0);
+            ok('② 去重会清掉重复保单，且墓碑进了撤销快照',
+                src66.indexOf("snaps.push({ snapColl: 'deleted'") > 0 && src66.indexOf('droppedIds.forEach(id => addTombstone') > 0);
+
+            // ③ 加密三态必须强制重写云端
+            const rewrite = src66.slice(src66.indexOf('async function rewriteCloudAfterCrypto'), src66.indexOf('async function remoteSyncCycle'));
+            ok('③ 加密重写函数置 __remoteNeedRewrite 并清掉指纹',
+                rewrite.indexOf('__remoteNeedRewrite = true;') > 0 && rewrite.indexOf('__remoteSeenFingerprint = null;') > 0);
+            ok('③ 开加密 / 改口令 / 关加密 三处都调它（共 4 个调用点）',
+                (src66.match(/await rewriteCloudAfterCrypto\(/g) || []).length === 4);
+            ok('③ 加密收尾不再只靠 scheduleRemoteSync（它的指纹短路会把重写挡掉）',
+                src66.indexOf("await rewriteCloudAfterCrypto('加密设置')") > 0 &&
+                src66.indexOf("await rewriteCloudAfterCrypto('口令')") > 0 &&
+                src66.indexOf("await rewriteCloudAfterCrypto('设置')") > 0);
+
+            // ④ Excel 导入：数字型支付方式不能炸 + 异常整体回滚
+            ok('④ 支付方式先 String() 再 trim（单元格是数字 2080 时不再 TypeError）',
+                src66.indexOf("String(row['支付方式'] == null ? '' : row['支付方式']).trim()") > 0);
+            ok('④ applyWorkbook 外面包了快照/回滚',
+                src66.indexOf('const IMPORT_SNAPSHOT_KEYS =') > 0 && src66.indexOf('IMPORT_SNAPSHOT_KEYS.forEach(k => { if (back[k] !== undefined) state[k] = back[k]; });') > 0);
+            {
+                const rollback = ev(`(function () {
+                    var before = JSON.stringify(state.transactions);
+                    var orig = applyWorkbookInner;
+                    applyWorkbookInner = function () { state.transactions.push({ id: 'half_import' }); throw new Error('boom'); };
+                    var threw = false;
+                    try { applyWorkbook({ Sheets: {} }); } catch (e) { threw = true; }
+                    applyWorkbookInner = orig;
+                    return JSON.stringify({ threw: threw, same: before === JSON.stringify(state.transactions) });
+                })()`);
+                const rb = rollback ? JSON.parse(rollback) : {};
+                ok('④ 导入中途抛错 → 内存整体还原（不留半截数据等着被落盘）',
+                    rb.threw === true && rb.same === true, rb);
+            }
+
+            // 中等：侧滑按层级而不是文档顺序
+            {
+                const swipe66 = src66.slice(src66.indexOf('function bindEdgeSwipeBack()'), src66.indexOf('function bindEdgeSwipeBack()') + 4000);
+                ok('中等·侧滑关最上层复用 topmostOverlay（不再按文档顺序取最后一个）',
+                    swipe66.indexOf('const el = topmostOverlay();') > 0 && swipe66.indexOf('all[all.length - 1]') < 0);
+            }
+
+            // 中等：四笔钱没设目标不画满格
+            ok('中等·四笔钱目标没填时不画满格，也不显示"目标 0"',
+                src66.indexOf('const pct = tgt > 0 ? Math.min(act / tgt, 1) : 0;') > 0 &&
+                src66.indexOf("目标 ${tgt > 0 ? maskMoney(tgt) : '—'}") > 0);
+
+            // 中等：趋势图 tooltip 别把没记余额的月份显示成 0
+            ok('中等·总资产走势 tooltip 对 null 显示 —（以前 mm(null) → "0"）',
+                src66.indexOf("(c.raw === null || c.raw === undefined) ? '—' : mm(c.raw)") > 0);
+
+            // 中等：桥的明细行和等式用同一套涨跌配色
+            ok('中等·净资产桥明细行与等式配色一致（增加红 / 减少绿）',
+                css66.indexOf('.bridge-row.up .br-val { color: var(--expense-text); }') > 0 &&
+                css66.indexOf('.bridge-row.down .br-val { color: var(--income-text); }') > 0);
+
+            // 中等：回顾页跟随成员筛选
+            {
+                const rv = ev(`(function () {
+                    var keepOwner = state.balanceOwner;
+                    state.balanceMembers = ['甲', '乙'];
+                    state.balances = [
+                        { id: 'b-a', accountId: (state.accounts[0] || {}).id, month: '2026-03', cat: 'cash', amount: 1000, member: '甲' },
+                        { id: 'b-b', accountId: (state.accounts[0] || {}).id, month: '2026-03', cat: 'cash', amount: 9999, member: '乙' }
+                    ];
+                    state.balanceOwner = '甲';
+                    var one = reviewMonthReportHTML('2026-03');
+                    state.balanceOwner = 'all';
+                    var all = reviewMonthReportHTML('2026-03');
+                    state.balanceOwner = keepOwner;
+                    return JSON.stringify({ one: one, all: all });
+                })()`);
+                const rvo = rv ? JSON.parse(rv) : {};
+                const hasOne = /1,?000/.test(rvo.one || '') || (rvo.one || '').indexOf('1000') >= 0;
+                ok('中等·回顾页净资产跟随成员筛选，并标明口径',
+                    hasOne && (rvo.one || '').indexOf('当前筛选') > 0 && (rvo.all || '').indexOf('全家口径') > 0);
+            }
+
+            // 轻微：touchcancel 不再当松手提交
+            ok('轻微·touchcancel 只收拾现场不落盘（touchmove 会 preventDefault，系统打断不该提交顺序）',
+                src66.indexOf('function onCatTouchCancel()') > 0 && src66.indexOf("endCatDrag(false)") > 0 &&
+                src66.indexOf("list.addEventListener('touchcancel', onCatTouchCancel)") > 0);
+            ok('轻微·点击抑制加了超时上限，不会吞掉用户下一次真实点击',
+                src66.indexOf('setTimeout(() => { catSuppressClick = false; }, 500);') > 0);
+            ok('轻微·全站模态补了 role="dialog" / aria-modal',
+                src66.indexOf("panel.setAttribute('role', 'dialog')") > 0);
+            ok('轻微·后台刷新不再把交易列表踹回顶部（同一份列表保留滚动位置）',
+                src66.indexOf('const keepPos = (txnKey === txnRenderKey) && txnRenderedTo > 0;') > 0 &&
+                src66.indexOf('let txnRenderKey') > 0);
+
+            // v1.41.77：回顾/月报的时间不再是「只能一期期翻」，改成和报表分析同一个年月轮盘
+            {
+                const html66 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+                ok('回顾页时间块换成年月轮盘胶囊（和 #reportYmBtn 同一套 class）',
+                    html66.indexOf('class="filter-select ym-anchor-btn" id="reviewYmBtn"') > 0 &&
+                    src66.indexOf("bindYmAnchorBtn('reviewYmBtn'") > 0);
+                ok('轮盘开在弹窗里时，点遮罩只收轮盘、不顺手关弹窗',
+                    src66.indexOf("e.target.classList.contains('modal-overlay')") > 0 &&
+                    src66.indexOf('e.stopPropagation();') > 0);
+                const rw = ev(`(function () {
+                    openReviewModal('month', '2026-03');
+                    var btn = document.getElementById('reviewYmBtn');
+                    if (!btn) return JSON.stringify({ err: 'no-btn' });
+                    btn.click();
+                    var root = document.getElementById('ymWheelFixed');
+                    var opened = !!root && !root.hidden && !document.getElementById('ymWheelMonths').hidden;
+                    ymWheelPick('year', 2025);
+                    ymWheelPick('month', 7);
+                    var after = reviewMonth;
+                    var label = (document.getElementById('reviewPeriodLabel').textContent || '').trim();
+                    closeYmWheel();
+                    setReviewTab('year');
+                    btn.click();
+                    var yearNoMonth = document.getElementById('ymWheelMonths').hidden === true;
+                    closeYmWheel();
+                    closeReviewModal();
+                    setReviewTab('month');
+                    return JSON.stringify({ opened: opened, after: after, label: label, yearNoMonth: yearNoMonth });
+                })()`);
+                const rwo = rw ? JSON.parse(rw) : {};
+                ok('点开真的弹出轮盘，且默认停在当前选的那一期', rwo.opened === true, rwo);
+                ok('轮盘选 2025 年 7 月 → reviewMonth 与标题一起跟过去（不用点六下）',
+                    rwo.after === '2025-07' && (rwo.label || '').indexOf('2025') >= 0 && (rwo.label || '').indexOf('7 月') >= 0, rwo);
+                ok('年报档不给月份列（月份不参与年度统计）', rwo.yearNoMonth === true, rwo);
+            }
+        }
+
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {

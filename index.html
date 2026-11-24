@@ -1530,7 +1530,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.76').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.77').catch(() => {});
             });
         }
     </script>
@@ -1597,7 +1597,12 @@
                         </div>
                         <div class="review-ym">
                             <button class="secondary-btn" onclick="stepReviewMonth(-1)">‹ 上一期</button>
-                            <span id="reviewPeriodLabel"></span>
+                            <!-- v1.41.77：中间这块以前是纯文字，只能一期期点。改成跟报表分析同一个年月轮盘，
+                                 想跳哪个月 / 哪一年直接选。 -->
+                            <button type="button" class="filter-select ym-anchor-btn" id="reviewYmBtn" title="点这里选年月">
+                                <span id="reviewPeriodLabel"></span>
+                                <i class="fa-solid fa-chevron-down ym-anchor-caret"></i>
+                            </button>
                             <button class="secondary-btn" onclick="stepReviewMonth(1)">下一期 ›</button>
                         </div>
                     </div>
