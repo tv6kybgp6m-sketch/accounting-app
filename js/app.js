@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.74';
+const APP_VERSION = '1.41.75';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -525,6 +525,9 @@ const __usedIds = new Set();   // v1.39.68：已占用的 id，uid() 发号前�
 // 注意 __loadFailed 管的是"读出来了但解析不了"，__loadLost 管的是"根本没东西可读"，两回事。
 const STORAGE_PREV_KEY = 'bookkeeping_app_data_prev';    // 上一次的本地副本（每天轮一份）
 const STORAGE_PREV_DAY = 'bookkeeping_app_data_prev_day'; // 副本是哪天轮的（YYYY-MM-DD）
+// 只有"存档丢了、用户选择了先按空账本打开"这一条罕见路径才会写它，而且永不自动覆盖、永不自动轮换：
+// 那份数据是唯一的救命稻草，不能因为用户第二天随手记了一笔就被换掉。
+const STORAGE_RESCUE_KEY = 'bookkeeping_app_data_rescue';
 let __loadLost = false;
 let __prevCandidate = null;   // 检测到"存档丢失"时，这里存着待恢复的副本原文
 
@@ -546,19 +549,38 @@ function unpackFromStorage(raw) {
 }
 
 // v1.41.74：每天轮一份本地副本（bookkeeping_app_data_prev）。
-// 为什么一天只轮一次：每次保存都写两份会让保存变慢（localStorage 是同步阻塞的），
-// 而"五秒前的副本"对"回到昨天"毫无意义；一天一份，最多丢一天。
-function rotateLocalPrev() {
+// 参数是"写新值之前的主存档原文"——由 saveStateNow 在写盘前读下来、写盘成功后才传进来，
+// 这样副本永远不会抢走主存档需要的配额。
+function rememberLocalPrev(prevRaw) {
     try {
+        if (!prevRaw) return;                                          // 没有旧数据可留
         const today = _ymd(Date.now());
         if (localStorage.getItem(STORAGE_PREV_DAY) === today) return;   // 今天已经轮过
-        const cur = localStorage.getItem(STORAGE_KEY);
-        if (!cur) return;                                              // 没有旧数据可留
-        // 账本特别大时不再翻倍占空间，免得挤爆配额反而让主存档写不进去
-        if (cur.length > 2 * 1024 * 1024) return;
-        localStorage.setItem(STORAGE_PREV_KEY, cur);
+        if (prevRaw.length > 2 * 1024 * 1024) return;                   // 太大就别翻倍占空间
+        // 旧存档是空的、而已有的副本里有真数据 → 绝不能拿空账本盖掉那份能救命的东西。
+        // 场景：存档丢了 → 用户点了"先按空账本打开" → 第二天第一次保存正好走到这里。
+        if (localStorage.getItem(STORAGE_PREV_KEY) && ledgerRawIsEmpty(prevRaw)) return;
+        localStorage.setItem(STORAGE_PREV_KEY, prevRaw);
         localStorage.setItem(STORAGE_PREV_DAY, today);
     } catch (e) { /* 空间不够就放弃这份副本，绝不能挡住正常保存 */ }
+}
+
+// 一份存档原文里到底有没有真数据（解不开就当成"有"，宁可不动副本）
+function ledgerRawIsEmpty(raw) {
+    try {
+        const d = JSON.parse(unpackFromStorage(raw));
+        return !((d.transactions || []).length + (d.balances || []).length + (d.returns || []).length);
+    } catch (e) { return false; }
+}
+
+// 「清空全部」专用：连本机的历史副本一起清掉，并把今天的轮换名额占掉，
+// 免得紧随其后的那次保存又把刚删掉的旧账捞回来当副本。
+function clearLocalPrevCopies() {
+    try {
+        localStorage.removeItem(STORAGE_PREV_KEY);
+        localStorage.removeItem(STORAGE_RESCUE_KEY);
+        localStorage.setItem(STORAGE_PREV_DAY, _ymd(Date.now()));
+    } catch (e) { /* 删不掉也不能挡住清空流程 */ }
 }
 
 // 名字 -> 短码（懒分配，码只进本机存储）。守卫：新码不能撞上任何现存明文名字，
@@ -726,13 +748,39 @@ function saveStateNow() {
     const text = JSON.stringify(data);
     const stored = packForStorage(text);
     __lastSavedBytes = stored.length;
-    rotateLocalPrev();
+    // v1.41.74：先写主存档、成功了再把"上一版"记成副本。
+    // 反过来（先写副本）会在配额将满时用副本把主存档需要的空间先吃掉，
+    // 等于为了保护旧数据而让新数据存不进去。
+    let __prevBeforeWrite = null;
+    try { __prevBeforeWrite = localStorage.getItem(STORAGE_KEY); } catch (e) { __prevBeforeWrite = null; }
     try {
         localStorage.setItem(STORAGE_KEY, stored);
         if (__storageError) { __storageError = ''; renderStorageWarning(); }
     } catch (e) {
         // 写不进去绝不能装作成功：内存里还在，但关掉就没了
         const quota = e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22);
+        // v1.41.74：配额满时先把本地副本丢掉再试一次 —— 当前这笔账必须存进去，
+        // 不能为了保护一天前的副本让今天的记录丢掉。
+        if (quota) {
+            let freed = false;
+            try {
+                if (localStorage.getItem(STORAGE_PREV_KEY)) {
+                    localStorage.removeItem(STORAGE_PREV_KEY);
+                    localStorage.removeItem(STORAGE_PREV_DAY);
+                    freed = true;
+                }
+            } catch (e2) { /* 删不掉就算了 */ }
+            if (freed) {
+                try {
+                    localStorage.setItem(STORAGE_KEY, stored);
+                    __storageError = '';
+                    renderStorageWarning();
+                    showToast('存储空间不足，已清掉本地副本腾出空间，这次的改动保存好了', 'info', 6000);
+                    if (!__suppressSyncSchedule) { scheduleICloudSync(); scheduleRemoteSync(); }
+                    return;
+                } catch (e3) { /* 还是不行，走下面的报错 */ }
+            }
+        }
         __storageError = quota
             ? '浏览器存储空间已满，新改动无法保存！请立刻用「导出备份」存一份，然后删除历史记录。'
             : ('保存失败：' + ((e && e.message) || '未知错误'));
@@ -740,6 +788,8 @@ function saveStateNow() {
         showToast(__storageError, 'error');
         return;                       // 没存成功，不要触发同步
     }
+    // 主存档写成功了，才轮到留副本（失败也不报错，副本只是保险）
+    rememberLocalPrev(__prevBeforeWrite);
     renderStorageWarning();
 
     // Trigger iCloud sync (debounced)
@@ -3963,12 +4013,20 @@ function closeGistHelp() {
 // 为什么需要它：全仓只有 bookkeeping_app_data 一个键。Mac 端有 Swift 的每 10 分钟快照，
 // iPhone 端什么都没有——写坏一次、被单独删一次，就没有任何可回退的东西。
 function localPrevRaw() {
-    try { return localStorage.getItem(STORAGE_PREV_KEY) || null; } catch (e) { return null; }
+    try {
+        // 优先日常副本；没有就看那份"救命副本"（用户选择过"先按空账本打开"时才存在）
+        return localStorage.getItem(STORAGE_PREV_KEY)
+            || localStorage.getItem(STORAGE_RESCUE_KEY)
+            || null;
+    } catch (e) { return null; }
 }
 
 function localPrevDayText() {
     try {
         const d = localStorage.getItem(STORAGE_PREV_DAY) || '';
+        if (!localStorage.getItem(STORAGE_PREV_KEY) && localStorage.getItem(STORAGE_RESCUE_KEY)) {
+            return '之前留的';
+        }
         if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return '某天';
         return `${Number(d.slice(5, 7))} 月 ${Number(d.slice(8, 10))} 日`;
     } catch (e) { return '某天'; }
@@ -3998,17 +4056,28 @@ function restoreFromLocalPrev() {
 }
 
 function dismissLoadLost() {
+    // 先把这份副本单独存成"救命副本"：日常副本第二天就会被新账本轮掉，
+    // 而用户此刻明确说的是"我先按空账本打开"，不等于"我不要那份旧数据了"。
+    try {
+        const keep = localStorage.getItem(STORAGE_PREV_KEY);
+        if (keep) localStorage.setItem(STORAGE_RESCUE_KEY, keep);
+    } catch (e) { /* 空间不够就算了，日常副本还在 */ }
     __loadLost = false;
     __storageError = '';
     renderStorageWarning();
-    showToast('已按空账本打开。本地副本还留着，随时可在「设置 → 恢复本地副本」取回。', 'info', 8000);
+    showToast('已按空账本打开。旧的那份还留着，随时可在「设置 → 恢复本地副本」取回。', 'info', 8000);
 }
 
 // 设置页里的手动入口
 function restoreLocalPrevManual() {
     const raw = localPrevRaw();
     if (!raw) { showToast('还没有本地副本（每天第一次保存时自动留一份）', 'info'); return; }
-    if (!confirm(`把 ${localPrevDayText()} 的本地副本写回本机账本？\n\n当前的账本会被这份副本替换；这份副本是今天第一次保存之前的版本。`)) return;
+    if (!confirm(`把 ${localPrevDayText()} 的本地副本写回本机账本？\n\n`
+        + '⚠️ 整本替换，不是合并：\n'
+        + '· 副本之后新记的流水 / 余额 / 收益会消失\n'
+        + '· 副本之后改过的会变回当时的数值\n'
+        + '· 副本之后删掉的会重新出现\n\n'
+        + '只是想补回被误删的几条，请用「从备份补回缺失的记录」，那个不会覆盖任何东西。')) return;
     restoreFromLocalPrev();
 }
 
@@ -8202,7 +8271,11 @@ function importData(event) {
 
 
 function clearAllData() {
-    if (!confirm('⚠️ 清空全部并同步删除？\n\n这会删除本机、云端和所有同步设备上的账本数据，且不可恢复。\n只想清空本机、不影响其他设备，请改用「重置本机」。')) return;
+    if (!confirm('⚠️ 清空全部并同步删除？\n\n这会删除本机、云端和所有同步设备上的账本数据，且不可恢复。\n本机保存的历史副本也会一起清掉。\n只想清空本机、不影响其他设备，请改用「重置本机」。')) return;
+
+    // v1.41.74：既然说"删除所有设备、不可恢复"，就不能在本机还留一份完整副本。
+    // 同时把今天的轮换名额占掉，紧接着那次"存空账本"才不会又把旧账捞回来当副本。
+    clearLocalPrevCopies();
 
     // 先给每条记录打删除标记，「清空」才能真的同步到别的设备。
     // 之前这里把 state.deleted 直接清空，结果另一台设备一合并就把旧账全灌回来。
@@ -13064,8 +13137,8 @@ function saveMonthlyFor(member, opts) {
     if (!list) return false;
     let savedBal = 0, savedRet = 0, removed = 0;
     // v1.39.33 修掉的坑：撤销快照只在打开弹窗时拍，于是「记了 → 保存 → 再打开 → 撤销」撤了个寂寞
-    // ——快照里装的就是刚保存完的样子。快照必须在这里拍：动 state 之前的那一张，才撤得掉这次保存。
-    snapshotMonthlyForUndo(member, opts.month);
+    // ——快照里装的就是刚保存完的样子。快照必须在动 state 之前拍，才撤得掉这次保存。
+    // v1.41.74：移到校验之后（见下面的 v1.41.74 注释）——保存被拦下时不该把上一次的撤销机会顶掉。
     // 先把这个成员这个月、这些「账户 × 币种」的旧余额整批清掉，再按格子写回去。
     // 不清的话同一笔数会同时留着「老的一条（没有类别）」和「新的一条（有类别）」，
     // 下一次读出来直接翻倍 —— 这是改口径时最容易踩的坑。
@@ -13118,6 +13191,9 @@ function saveMonthlyFor(member, opts) {
         showToast(`有 ${missingRate} 格里填了外币但没填汇率 —— 上面标红的那个汇率框，填了才能保存`, 'error');
         return false;
     }
+    // v1.41.74：校验全过、确定要写了才拍撤销快照。放在校验之前的话，
+    // 一次被拦下的保存会把上一次保存的撤销机会顶掉（快照等于当前状态，按钮点了没反应）。
+    snapshotMonthlyForUndo(member, opts.month);
     // v1.39.37：锁 = 只读，不影响数据。框里显示什么数就存什么数、算什么数；
     // 锁住的格也照常走上面的写入逻辑（disabled 的 input 仍带着显示值）。只有框里是空的才按 0（这渠道这个月没数）。
     // 绝不因"锁"而把已填的数弄丢 / 漏算 —— 锁只是"防手滑改"，不是"不记"。

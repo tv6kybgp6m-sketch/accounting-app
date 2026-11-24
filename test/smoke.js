@@ -3382,30 +3382,49 @@ async function run() {
             const app63 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
             const idx63 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
 
-            ok('保险丝①：每天轮一份本地副本，且写盘时排在主存档前面',
+            ok('保险丝①：每天轮一份本地副本，且副本是在主存档写成功之后才留（不抢配额）',
                 app63.indexOf("const STORAGE_PREV_KEY = 'bookkeeping_app_data_prev';") >= 0 &&
-                app63.indexOf('function rotateLocalPrev()') >= 0 &&
-                app63.indexOf('    rotateLocalPrev();\n    try {\n        localStorage.setItem(STORAGE_KEY, stored);') >= 0);
+                app63.indexOf('function rememberLocalPrev(prevRaw)') >= 0 &&
+                app63.indexOf('let __prevBeforeWrite = null;') >= 0 &&
+                app63.indexOf('rememberLocalPrev(__prevBeforeWrite);') >= 0 &&
+                app63.indexOf('rememberLocalPrev(__prevBeforeWrite);') > app63.indexOf('localStorage.setItem(STORAGE_KEY, stored);'));
+            ok('  ↳ 配额满时先丢掉副本再重试一次：今天的记录优先于一天前的副本',
+                app63.indexOf('已清掉本地副本腾出空间') >= 0 &&
+                app63.indexOf('localStorage.removeItem(STORAGE_PREV_KEY);') >= 0);
+            ok('  ↳ 旧存档是空的就不许盖掉已有的副本（存档丢了→先按空账本打开→第二天正好走到这里）',
+                app63.indexOf('if (localStorage.getItem(STORAGE_PREV_KEY) && ledgerRawIsEmpty(prevRaw)) return;') >= 0 &&
+                app63.indexOf('function ledgerRawIsEmpty(raw)') >= 0);
+            ok('  ↳ 「先按空账本打开」会把副本另存成救命副本，永不被日常轮换盖掉',
+                app63.indexOf("const STORAGE_RESCUE_KEY = 'bookkeeping_app_data_rescue';") >= 0 &&
+                app63.indexOf("if (keep) localStorage.setItem(STORAGE_RESCUE_KEY, keep);") >= 0 &&
+                app63.indexOf('|| localStorage.getItem(STORAGE_RESCUE_KEY)') >= 0);
+            ok('  ↳ 「清空全部」连本机副本一起清（否则"不可恢复"是假的）',
+                app63.indexOf('function clearLocalPrevCopies()') >= 0 &&
+                app63.indexOf('    clearLocalPrevCopies();') >= 0);
 
-            // 真跑一次：主存档有内容 + 今天还没轮过 → 副本应该被写出来，再跑一次不覆盖
+            // 真跑一遍：有内容才留副本；同一天不重复轮；空账本不许盖掉已有副本
             const rot = (() => {
                 try {
-                    w.localStorage.setItem('bookkeeping_app_data', '{"transactions":[],"__probe":"A"}');
                     w.localStorage.removeItem('bookkeeping_app_data_prev');
                     w.localStorage.removeItem('bookkeeping_app_data_prev_day');
-                    ev('rotateLocalPrev()');
+                    w.localStorage.removeItem('bookkeeping_app_data_rescue');
+                    ev('rememberLocalPrev(\'{"transactions":[{"id":"x"}],"balances":[]}\')');
                     const prev1 = w.localStorage.getItem('bookkeeping_app_data_prev');
                     const day1 = w.localStorage.getItem('bookkeeping_app_data_prev_day');
-                    w.localStorage.setItem('bookkeeping_app_data', '{"transactions":[],"__probe":"B"}');
-                    ev('rotateLocalPrev()');
+                    // 同一天再调一次：不覆盖
+                    ev('rememberLocalPrev(\'{"transactions":[{"id":"y"}],"balances":[]}\')');
                     const prev2 = w.localStorage.getItem('bookkeeping_app_data_prev');
-                    return { prev1: prev1, day1: day1, prev2: prev2 };
+                    // 换一天、但这次传入的是空账本：不许盖掉上面那份
+                    w.localStorage.removeItem('bookkeeping_app_data_prev_day');
+                    ev('rememberLocalPrev(\'{"transactions":[],"balances":[],"returns":[]}\')');
+                    const prev3 = w.localStorage.getItem('bookkeeping_app_data_prev');
+                    return { prev1: prev1, day1: day1, prev2: prev2, prev3: prev3 };
                 } catch (e) { return { err: String(e) }; }
             })();
-            ok('  ↳ 实测：今天第一次保存前把上一版存成副本；同一天再保存不覆盖它（最多丢一天）',
-                !!rot && !rot.err && String(rot.prev1 || '').indexOf('"A"') >= 0 &&
+            ok('  ↳ 实测：留副本 / 同日不重复 / 空账本不覆盖已有副本',
+                !!rot && !rot.err && String(rot.prev1 || '').indexOf('"x"') >= 0 &&
                 /^\d{4}-\d{2}-\d{2}$/.test(String(rot.day1 || '')) &&
-                rot.prev2 === rot.prev1, rot);
+                rot.prev2 === rot.prev1 && rot.prev3 === rot.prev1, rot);
 
             ok('保险丝②：主存档整个不见了、副本还在 → 停保存停同步，不再静默当新账本',
                 app63.indexOf('let __loadLost = false;') >= 0 &&
