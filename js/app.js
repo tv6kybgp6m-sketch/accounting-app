@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.75';
+const APP_VERSION = '1.41.76';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -697,6 +697,16 @@ function saveStateNow() {
         insuranceMembers: state.insuranceMembers,
         insuranceMemberAddedAt: state.insuranceMemberAddedAt,
         insurancePolicies: state.insurancePolicies,
+        // v1.41.76：险种清单（v1.41.6 改成可编辑）以前只进了同步载荷、漏了本机这份。
+        // loadState 一直在读 data.insuranceTypes，读不到就种回默认 8 种，于是：
+        //  · 新增的险种：刷新即消失（没有墓碑可救，它压根没落过盘）
+        //  · 改名的险种：旧名被墓碑过滤、新名又没落盘 → 新旧都没了，险种总数还少一个
+        //  · 四笔钱「保险保障」总保额按险种清单逐项加，这些保单的保额会凭空少掉
+        // 而「按成员的年保费」直接遍历保单、不受影响 → 同一页面两个数对不上。
+        // 这是第三次同类问题了（v1.39.65 excludedAnomalies、v1.41.5 closedExclude），
+        // 所以配了 test/storage-guard.js 做静态护栏，第四次不用靠肉眼。
+        insuranceTypes: state.insuranceTypes,
+        insuranceTypeAddedAt: state.insuranceTypeAddedAt,
         balanceMembers: state.balanceMembers,
         memberAddedAt: state.memberAddedAt,
         settings: state.settings,
@@ -4012,29 +4022,42 @@ function closeGistHelp() {
 // ---- v1.41.74：本地副本（上一版存档）的读写与恢复 ----
 // 为什么需要它：全仓只有 bookkeeping_app_data 一个键。Mac 端有 Swift 的每 10 分钟快照，
 // iPhone 端什么都没有——写坏一次、被单独删一次，就没有任何可回退的东西。
-function localPrevRaw() {
+//
+// v1.41.76 修：以前这里的优先级是「日常副本 → 救命副本」，结果那句
+// 「旧的那份还留着，随时可在设置 → 恢复本地副本 取回」只在当天成立 ——
+// 用户在新空账本上继续记账，第二天第一次保存就把日常副本换成那份只有几笔的新账本，
+// 而救命副本没有任何入口能读到，等于承诺的那条退路自己消失了。
+// 更糟的是「恢复」是整本替换：按提示去恢复，恢复的是新的小账本，
+// 还顺手把旧账本盖掉，用户以为已经救回来了。
+// 所以现在：救命副本优先（它才是他被承诺的那一份），日常副本做次选。
+function localPrevSource() {
     try {
-        // 优先日常副本；没有就看那份"救命副本"（用户选择过"先按空账本打开"时才存在）
-        return localStorage.getItem(STORAGE_PREV_KEY)
-            || localStorage.getItem(STORAGE_RESCUE_KEY)
-            || null;
+        const rescue = localStorage.getItem(STORAGE_RESCUE_KEY);
+        if (rescue) return { raw: rescue, kind: 'rescue', day: '' };
+        const prev = localStorage.getItem(STORAGE_PREV_KEY);
+        if (!prev) return null;
+        return { raw: prev, kind: 'prev', day: localStorage.getItem(STORAGE_PREV_DAY) || '' };
     } catch (e) { return null; }
 }
 
+function localPrevRaw() {
+    const s = localPrevSource();
+    return s ? s.raw : null;
+}
+
+// 返回一个能直接塞进句子的定语：「11 月 23 日留的」/「你选择按空账本打开之前留的」
 function localPrevDayText() {
-    try {
-        const d = localStorage.getItem(STORAGE_PREV_DAY) || '';
-        if (!localStorage.getItem(STORAGE_PREV_KEY) && localStorage.getItem(STORAGE_RESCUE_KEY)) {
-            return '之前留的';
-        }
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return '某天';
-        return `${Number(d.slice(5, 7))} 月 ${Number(d.slice(8, 10))} 日`;
-    } catch (e) { return '某天'; }
+    const s = localPrevSource();
+    if (!s) return '';
+    if (s.kind === 'rescue') return '你选择「先按空账本打开」之前留的';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s.day)) return '之前留的';
+    return `${Number(s.day.slice(5, 7))} 月 ${Number(s.day.slice(8, 10))} 日留的`;
 }
 
 // 把副本写回主存档，然后整页重载——比在内存里就地拼状态可靠得多
 function restoreFromLocalPrev() {
-    const raw = localPrevRaw();
+    const src = localPrevSource();
+    const raw = src ? src.raw : null;
     if (!raw) { showToast('没有可用的本地副本', 'error'); return false; }
     // 先验证副本本身解得开，否则恢复出来的还是一场空
     try {
@@ -4049,6 +4072,14 @@ function restoreFromLocalPrev() {
         showToast('恢复失败：浏览器存储空间不足', 'error');
         return false;
     }
+    // v1.41.76：副本已经变成主存档了，把两处副本都清掉。
+    // 不清的话：救命副本会一直被优先返回，下一次「恢复」又把旧账本盖回新账上；
+    // 日常副本留着那份小账本也没用了（下一次保存会从刚恢复的账本重新留一份）。
+    try {
+        localStorage.removeItem(STORAGE_RESCUE_KEY);
+        localStorage.removeItem(STORAGE_PREV_KEY);
+        localStorage.removeItem(STORAGE_PREV_DAY);
+    } catch (e) { /* 删不掉不影响这次恢复 */ }
     __loadLost = false;
     __loadFailed = false;
     location.reload();
@@ -4059,8 +4090,11 @@ function dismissLoadLost() {
     // 先把这份副本单独存成"救命副本"：日常副本第二天就会被新账本轮掉，
     // 而用户此刻明确说的是"我先按空账本打开"，不等于"我不要那份旧数据了"。
     try {
-        const keep = localStorage.getItem(STORAGE_PREV_KEY);
-        if (keep) localStorage.setItem(STORAGE_RESCUE_KEY, keep);
+        // v1.41.76：以「刚才被拒的那一份」为准，且绝不覆盖已经存在的救命副本。
+        // 以前固定拿日常副本去盖：第二次丢存档时，日常副本早已被新小账本顶掉，
+        // 这一盖就把上次留下的真账本换成了一份几乎空的。
+        const keep = __prevCandidate || localPrevRaw();
+        if (keep && !localStorage.getItem(STORAGE_RESCUE_KEY)) localStorage.setItem(STORAGE_RESCUE_KEY, keep);
     } catch (e) { /* 空间不够就算了，日常副本还在 */ }
     __loadLost = false;
     __storageError = '';
@@ -4072,7 +4106,7 @@ function dismissLoadLost() {
 function restoreLocalPrevManual() {
     const raw = localPrevRaw();
     if (!raw) { showToast('还没有本地副本（每天第一次保存时自动留一份）', 'info'); return; }
-    if (!confirm(`把 ${localPrevDayText()} 的本地副本写回本机账本？\n\n`
+    if (!confirm(`把${localPrevDayText()}本地副本写回本机账本？\n\n`
         + '⚠️ 整本替换，不是合并：\n'
         + '· 副本之后新记的流水 / 余额 / 收益会消失\n'
         + '· 副本之后改过的会变回当时的数值\n'
@@ -4086,7 +4120,7 @@ function maybeAskRestoreFromPrev() {
     if (!__loadLost || !__prevCandidate) return;
     const goRestore = confirm(
         '这台设备上的账本不见了（本机存储里找不到账本，可能是被系统清理了）。\n\n' +
-        `发现一份 ${localPrevDayText()} 的本地副本。\n\n` +
+        `发现一份本地副本（${localPrevDayText()}）。\n\n` +
         '点「确定」＝ 恢复那天的副本\n' +
         '点「取消」＝ 先按空账本打开（副本会保留，之后可在 设置 → 恢复本地副本 取回）'
     );

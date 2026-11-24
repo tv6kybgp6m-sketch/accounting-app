@@ -3396,8 +3396,13 @@ async function run() {
                 app63.indexOf('function ledgerRawIsEmpty(raw)') >= 0);
             ok('  ↳ 「先按空账本打开」会把副本另存成救命副本，永不被日常轮换盖掉',
                 app63.indexOf("const STORAGE_RESCUE_KEY = 'bookkeeping_app_data_rescue';") >= 0 &&
-                app63.indexOf("if (keep) localStorage.setItem(STORAGE_RESCUE_KEY, keep);") >= 0 &&
-                app63.indexOf('|| localStorage.getItem(STORAGE_RESCUE_KEY)') >= 0);
+                // v1.41.76：改成「以被拒的那一份为准、且不覆盖已有的救命副本」
+                app63.indexOf('const keep = __prevCandidate || localPrevRaw();') >= 0 &&
+                app63.indexOf('if (keep && !localStorage.getItem(STORAGE_RESCUE_KEY)) localStorage.setItem(STORAGE_RESCUE_KEY, keep);') >= 0 &&
+                app63.indexOf('function localPrevSource()') >= 0 &&
+                app63.indexOf('const rescue = localStorage.getItem(STORAGE_RESCUE_KEY);') >= 0 &&
+                app63.indexOf('const rescue = localStorage.getItem(STORAGE_RESCUE_KEY);')
+                    < app63.indexOf('const prev = localStorage.getItem(STORAGE_PREV_KEY);'));
             ok('  ↳ 「清空全部」连本机副本一起清（否则"不可恢复"是假的）',
                 app63.indexOf('function clearLocalPrevCopies()') >= 0 &&
                 app63.indexOf('    clearLocalPrevCopies();') >= 0);
@@ -3506,6 +3511,50 @@ async function run() {
                 build64.indexOf('bash ./minify.sh ||') < 0 && build64.indexOf('\nbash ./minify.sh') >= 0);
             ok('端口固定 8731：不再偷偷换 8732/8733/随机端口（换端口=换 origin=像数据丢了）',
                 port64.indexOf('tryBind(wantPort: 8731)') >= 0 && port64.indexOf('let candidates') < 0);
+        }
+
+        // ---- stage 65（v1.41.76）：险种清单落盘 + 救命副本优先 ----
+        stage = '65';
+        console.log('\n--- stage 65：险种清单落盘 / 救命副本 ---');
+        {
+            // A. 险种清单必须真能存进本机存档（以前只进了同步载荷，刷新回默认 8 种）
+            ev(`
+                state.insuranceTypes = ['重疾险', '宠物险'];
+                state.insuranceTypeAddedAt = { '重疾险': 111, '宠物险': 222 };
+                state.insurancePolicies = [{ id: 'p65a', type: '重疾险', member: '本人', covered: true, amount: 500000, premium: 3000 },
+                                           { id: 'p65b', type: '宠物险', member: '本人', covered: true, amount: 20000, premium: 1200 }];
+                saveStateNow();
+            `);
+            const back65 = ev(`(function () {
+                var d = JSON.parse(unpackFromStorage(localStorage.getItem('bookkeeping_app_data')));
+                return JSON.stringify({ t: d.insuranceTypes, a: d.insuranceTypeAddedAt });
+            })()`);
+            const parsed65 = back65 ? JSON.parse(back65) : {};
+            ok('险种清单写进了主存档（读得回才谈得上不丢）',
+                (parsed65.t || []).join(',') === '重疾险,宠物险', parsed65.t);
+            ok('险种的 addedAt 也落盘（改名/删除靠它裁决，丢了改名就会被墓碑吞掉）',
+                parsed65.a && parsed65.a['宠物险'] === 222, parsed65.a);
+            ok('总保额按险种清单逐项加，两份保单都算进去',
+                ev('insTotalAmount()') === 520000, ev('insTotalAmount()'));
+
+            // B. 救命副本优先于日常副本
+            ev(`localStorage.setItem('bookkeeping_app_data_rescue', 'RAW_RESCUE');
+                localStorage.setItem('bookkeeping_app_data_prev', 'RAW_PREV');
+                localStorage.setItem('bookkeeping_app_data_prev_day', '2026-11-20');`);
+            ok('有救命副本时，恢复入口拿到的是它（而不是第二天被顶掉的日常副本）',
+                ev('localPrevRaw()') === 'RAW_RESCUE', ev('localPrevRaw()'));
+            ok('提示文案说清这是哪一份', /按空账本打开/.test(ev('localPrevDayText()') || ''), ev('localPrevDayText()'));
+
+            // C. 再丢一次存档时，不能拿几乎空的新账本盖掉上次留的救命副本
+            ev('__prevCandidate = null; dismissLoadLost();');
+            ok('dismissLoadLost 不覆盖已存在的救命副本',
+                ev(`localStorage.getItem('bookkeeping_app_data_rescue')`) === 'RAW_RESCUE');
+
+            // D. 静态护栏已接进 npm test
+            const pkg65 = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
+            ok('护栏③：本机存档字段一致性检查已接进 npm test',
+                pkg65.scripts.test.indexOf('test/storage-guard.js') >= 0 &&
+                fs.existsSync(path.join(REPO, 'test', 'storage-guard.js')));
         }
 
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
