@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bookkeeping-v1.41.73';
+const CACHE_NAME = 'bookkeeping-v1.41.74';
 const PRECACHE = [
   './',
   './index.html',
@@ -115,7 +115,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Own assets and cross-origin CDN files: cache first, network as fallback.
+  // v1.41.74：跨源请求一律不进 Cache，同源动态地址（version.json）也不进。
+  //
+  // 为什么：以前下面那条 cache-first 把「所有 GET」都算进来了，包括跨源的 GitHub
+  // Gist API。于是云同步的 GET /gists/{id} 会先拿到上一次的响应副本 —— app.js 里写的
+  // cache:'no-store' 只绕浏览器 HTTP 缓存，绕不开这里这个 Cache API。
+  // 后果不是"显示旧数据"那么轻：remotePush() 用 __remoteSeenFingerprint 判断「远端已经
+  // 是这份就别写」，基线锚在陈旧值上之后，另一台设备的改动会被永久跳过。
+  //
+  // version.json 单独点名：更新检查特意加了 ?cb= 破缓存，而 cache.match 的
+  // ignoreSearch 会把 ?cb= 忽略掉，等于永远命中第一次那份 —— "永远说已是最新"。
+  if (!isSameOrigin || url.pathname.endsWith('/version.json')) {
+    event.respondWith(fetch(request, NET));
+    return;
+  }
+
+  // Own assets: cache first, network as fallback.
   event.respondWith(
     cacheFirst(request).catch(() => (request.mode === 'navigate' ? caches.match('./index.html') : null))
   );

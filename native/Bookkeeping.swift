@@ -87,8 +87,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         // 本地服务器（localhost 源，localStorage 才能持久化）
         server = MiniHTTPServer(root: resourcesURL)
         let port: UInt16
-        do { port = try server.start() } catch { port = 0 }
-        guard port > 0 else { fatalError("无法启动本地服务器") }
+        // v1.41.74：端口固定 8731。启动失败（端口被占用）时不能再 fatalError 闪退、
+        // 也不能偷偷换端口打开一个空账本 —— 明确告诉用户发生了什么。
+        do {
+            port = try server.start()
+        } catch {
+            let a = NSAlert()
+            a.alertStyle = .critical
+            a.messageText = "打不开记账本"
+            a.informativeText = (error as NSError).localizedDescription
+                + "\n\n你的账本数据还在，这个提示只是说明本机端口被另一个实例占着。"
+            a.addButton(withTitle: "好")
+            a.runModal()
+            NSApp.terminate(nil)
+            return
+        }
 
         let config = WKWebViewConfiguration()
         let uc = WKUserContentController()
@@ -106,7 +119,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.41.73"
+        webView.customUserAgent = "BookkeepingMacApp/1.41.74"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"

@@ -3376,6 +3376,119 @@ async function run() {
             app62.indexOf('点右上角「记收益」开始') < 0 &&
             fs.readFileSync(path.join(REPO, 'index.html'), 'utf8').indexOf('记月度盘点') >= 0);
 
+        // ---------- 63) v1.41.74：数据保险丝（本地副本 / 存档丢失 / 导出拦截 / 备份提醒 / persist） ----------
+        stage = '63';
+        {
+            const app63 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+            const idx63 = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+
+            ok('保险丝①：每天轮一份本地副本，且写盘时排在主存档前面',
+                app63.indexOf("const STORAGE_PREV_KEY = 'bookkeeping_app_data_prev';") >= 0 &&
+                app63.indexOf('function rotateLocalPrev()') >= 0 &&
+                app63.indexOf('    rotateLocalPrev();\n    try {\n        localStorage.setItem(STORAGE_KEY, stored);') >= 0);
+
+            // 真跑一次：主存档有内容 + 今天还没轮过 → 副本应该被写出来，再跑一次不覆盖
+            const rot = (() => {
+                try {
+                    w.localStorage.setItem('bookkeeping_app_data', '{"transactions":[],"__probe":"A"}');
+                    w.localStorage.removeItem('bookkeeping_app_data_prev');
+                    w.localStorage.removeItem('bookkeeping_app_data_prev_day');
+                    ev('rotateLocalPrev()');
+                    const prev1 = w.localStorage.getItem('bookkeeping_app_data_prev');
+                    const day1 = w.localStorage.getItem('bookkeeping_app_data_prev_day');
+                    w.localStorage.setItem('bookkeeping_app_data', '{"transactions":[],"__probe":"B"}');
+                    ev('rotateLocalPrev()');
+                    const prev2 = w.localStorage.getItem('bookkeeping_app_data_prev');
+                    return { prev1: prev1, day1: day1, prev2: prev2 };
+                } catch (e) { return { err: String(e) }; }
+            })();
+            ok('  ↳ 实测：今天第一次保存前把上一版存成副本；同一天再保存不覆盖它（最多丢一天）',
+                !!rot && !rot.err && String(rot.prev1 || '').indexOf('"A"') >= 0 &&
+                /^\d{4}-\d{2}-\d{2}$/.test(String(rot.day1 || '')) &&
+                rot.prev2 === rot.prev1, rot);
+
+            ok('保险丝②：主存档整个不见了、副本还在 → 停保存停同步，不再静默当新账本',
+                app63.indexOf('let __loadLost = false;') >= 0 &&
+                app63.indexOf('function storageBlocked() { return __loadFailed || __loadLost; }') >= 0 &&
+                app63.indexOf('if (!raw) {\n        const prev = localPrevRaw();\n        if (prev) { __loadLost = true; __prevCandidate = prev; }') >= 0 &&
+                app63.indexOf('if (!remoteSyncReady() || __remoteBusy || storageBlocked()) return false;') >= 0 &&
+                app63.indexOf('if (!remoteSyncReady() || storageBlocked()) return;') >= 0);
+            ok('  ↳ 恢复入口：整页重载前先验证副本解得开，设置页也有手动入口',
+                app63.indexOf('function restoreFromLocalPrev()') >= 0 &&
+                app63.indexOf('JSON.parse(unpackFromStorage(raw));') >= 0 &&
+                app63.indexOf('function restoreLocalPrevManual()') >= 0 &&
+                idx63.indexOf('onclick="restoreLocalPrevManual()"') >= 0);
+
+            ok('保险丝③：账本为空时「存为 iCloud 同步文件」先拦一道（它盖的是唯一那份异地副本）',
+                app63.indexOf('function ledgerLooksEmpty()') >= 0 &&
+                app63.indexOf('if (ledgerLooksEmpty()) {') >= 0 &&
+                app63.indexOf('继续会把 iCloud 里那份 ${ICLOUD_SYNC_FILENAME} 盖成空的') >= 0);
+            ok('  ↳ 同一处修掉「假备份」：固定名导出不再重置上次备份时间',
+                app63.indexOf("const asBackup = opts.asBackup !== false;") >= 0 &&
+                app63.indexOf('if (asBackup) markExported();') >= 0 &&
+                app63.indexOf("{ asBackup: false })") >= 0);
+            ok('保险丝④：备份提醒不再因为「开了云同步」就隐藏，改成最近 7 天真的成功过才隐藏',
+                app63.indexOf('const syncFresh = remoteSyncCfg.enabled && remoteSyncCfg.lastSyncAt') >= 0 &&
+                app63.indexOf('if (remoteSyncCfg.enabled) return hide();') < 0 &&
+                app63.indexOf('云同步最近 7 天没有成功过') >= 0);
+            ok('保险丝⑤：启动时向系统申请持久化存储（不支持就静默跳过）',
+                app63.indexOf('function requestPersistentStorage()') >= 0 &&
+                app63.indexOf('navigator.storage.persist') >= 0 &&
+                app63.indexOf('requestPersistentStorage();   // v1.41.74') >= 0);
+        }
+
+        // ---------- 64) v1.41.74：P0/P1 修复 + 发版护栏 ----------
+        stage = '64';
+        {
+            const app64 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+            const sw64 = fs.readFileSync(path.join(REPO, 'sw.js'), 'utf8');
+            const pkg64 = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
+            const mini64 = fs.readFileSync(path.join(REPO, 'minify.sh'), 'utf8');
+            const build64 = fs.readFileSync(path.join(REPO, 'native', 'build.sh'), 'utf8');
+            const port64 = fs.readFileSync(path.join(REPO, 'native', 'MiniHTTPServer.swift'), 'utf8');
+
+            ok('P0-1：云同步不再被 SW 缓存污染——跨源请求和 version.json 都不进 Cache',
+                sw64.indexOf('if (!isSameOrigin || url.pathname.endsWith(\'/version.json\')) {') >= 0 &&
+                sw64.indexOf('event.respondWith(fetch(request, NET));') >= 0);
+            ok('P0-2：分类/预算改名带 updatedAt，合并改成较新胜（两边都没有时间戳才沿用老口径）',
+                app64.indexOf('c.updatedAt = Date.now();') >= 0 &&
+                app64.indexOf('function pickNewer(localItem, remoteItem)') >= 0 &&
+                app64.indexOf('catMap.set(c.id, pickNewer(catMap.get(c.id), c))') >= 0 &&
+                app64.indexOf('budMap.set(b.categoryId, pickNewer(budMap.get(b.categoryId), b))') >= 0 &&
+                app64.indexOf('if (!a && b) return localItem;') >= 0);
+            ok('P0-3：非法输入不再删余额——解析成功才进 touched，失败整批不保存',
+                app64.indexOf("if (raw === '') {\n            touched.add(acctCurKey(accountId, cur));") >= 0 &&
+                app64.indexOf('if (foreign === null || foreign < 0) { badCells++; return; }') >= 0 &&
+                app64.indexOf('return false;\n    }\n    // 没填汇率的格子不能替用户猜') >= 0);
+            ok('P0-4：撤销只撤自己那条——toast 绑序号，不再一律弹栈顶',
+                app64.indexOf('const token = ++__undoSeq;') >= 0 &&
+                app64.indexOf('undoLastDelete(token); toast.remove();') >= 0 &&
+                app64.indexOf("idx = __undoStack.findIndex(op => op && op.token === token);") >= 0);
+            ok('P0-5：收益阶段的汇率校验提前到动 state 之前（不再半改数据就 return）',
+                app64.indexOf('let badRet = 0;') >= 0 &&
+                app64.indexOf('if (badCells || badRet) {') >= 0 &&
+                (app64.match(/有 \$\{missingRate\} 格里填了外币但没填汇率/g) || []).length === 1);
+            ok('P1-1：更新检查地址修对（以前两条都是 1.35/1.28 的老站点，比出来必然是"已是最新"）',
+                app64.indexOf("'https://tv6kybgp6m-sketch.github.io/accounting-app/'") >= 0);
+            ok('P1-2：盘点角标 / 对账单总额改用 parseMonthlyAmount（"1,200" 不再被读成 1）',
+                app64.indexOf('以前这里用裸 parseFloat，"1,200" 会被读成 1，角标当场算错') >= 0 &&
+                app64.indexOf('const t = parseMonthlyAmount(tRaw);') >= 0);
+            ok('P1-3：按 Esc 关「记一笔」「月度盘点」会走未保存确认',
+                app64.indexOf("else if (top.id === 'transactionModal') confirmCloseTransactionModal();") >= 0 &&
+                app64.indexOf("else if (top.id === 'monthlyModal') confirmCloseMonthlyModal();") >= 0);
+            ok('P2：层级到顶重新编号，撤销条不会被弹窗压住',
+                app64.indexOf('const OVERLAY_Z_MAX = 1900;') >= 0 &&
+                app64.indexOf('if (overlayZ >= OVERLAY_Z_MAX) {') >= 0);
+            ok('护栏①：八处版本号一致性检查已接进 npm test',
+                pkg64.scripts.test.indexOf('test/release-guard.js') >= 0 &&
+                fs.existsSync(path.join(REPO, 'test', 'release-guard.js')));
+            ok('护栏②：minify 压不了就报错退出，build.sh 不再用 || 把失败吃掉',
+                mini64.indexOf('exit 1') >= 0 && mini64.indexOf('跳过压缩（将使用已提交的 js/app.min.js）') < 0 &&
+                build64.indexOf('bash ./minify.sh ||') < 0 && build64.indexOf('\nbash ./minify.sh') >= 0);
+            ok('端口固定 8731：不再偷偷换 8732/8733/随机端口（换端口=换 origin=像数据丢了）',
+                port64.indexOf('tryBind(wantPort: 8731)') >= 0 && port64.indexOf('let candidates') < 0);
+        }
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

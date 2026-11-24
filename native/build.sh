@@ -4,10 +4,20 @@ set -e
 cd "$(dirname "$0")/.."
 
 # 发布前先把未压缩的 app.js 压成 app.min.js（仅压缩、不改名，避免行内 onclick 处理函数名被改坏）
-bash ./minify.sh || echo "（minify 跳过，使用已提交的 js/app.min.js）"
+# v1.41.74：这里原来在这句后面跟了一个兜底的 echo —— 那个兜底把 minify 的失败吃掉，
+# 于是压缩没做也照样出包。现在压不了就直接中断（set -e）。
+bash ./minify.sh
 
 APP_NAME=Bookkeeping
-VERSION=1.41.73
+VERSION=1.41.74
+
+# v1.41.74：VERSION 以前定义了却没人用，Info.plist 只能手改 —— 漏一处就打出一个
+# 版本号不对的包（"检查更新说已是最新、装上报旧版本号"就是这么来的）。先在这里卡一道。
+PLIST_VER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' native/Info.plist 2>/dev/null || echo '')"
+if [ "$PLIST_VER" != "$VERSION" ]; then
+    echo "✗ native/Info.plist 版本是 ${PLIST_VER:-读不出来}，build.sh 里是 $VERSION —— 先统一再打包" >&2
+    exit 1
+fi
 APP_DIR="dist/$APP_NAME.app"
 CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
@@ -62,6 +72,9 @@ test -x "$MACOS/$APP_NAME" && echo "executable OK"
 test -f "$RES/index.html"  && echo "index.html OK"
 test -f "$RES/AppIcon.icns" && echo "icon OK"
 test -f "$RES/sw.js" && grep -q "CACHE_NAME" "$RES/sw.js" && echo "sw.js OK"
+# v1.41.74：app.min.js 是页面真正加载的那份 —— 它没更新，改了 app.js 也等于没改
+test -f "$RES/js/app.min.js" && echo "app.min.js OK"
+grep -q "\"version\": \"$VERSION\"" "$RES/version.json" && echo "version.json OK" || { echo "✗ 打进包里的 version.json 不是 $VERSION" >&2; exit 1; }
 spctl -a -vv "$APP_DIR" 2>/dev/null | head -3 || true
 
 echo ""

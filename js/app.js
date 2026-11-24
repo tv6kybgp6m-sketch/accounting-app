@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.73';
+const APP_VERSION = '1.41.74';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -518,6 +518,19 @@ let __loadFailed = false;   // 本机数据读不出来（更新版本写的格�
                             // 绝不能用默认空状态覆盖真数据，更不能把空账本推上云端
 const __usedIds = new Set();   // v1.39.68：已占用的 id，uid() 发号前查重，撞了重发
 
+// ---- v1.41.74 数据保险丝 ----
+// 主存档整个不见了（不是"读不出来"，是键直接没了：被系统清理、被清网站数据、被单独删掉），
+// 而本地副本 bookkeeping_app_data_prev 还在 → 说明这台机器以前有账。
+// 这时候绝不能静默当成"新账本"继续跑：先停保存、停同步，问用户要不要从副本恢复。
+// 注意 __loadFailed 管的是"读出来了但解析不了"，__loadLost 管的是"根本没东西可读"，两回事。
+const STORAGE_PREV_KEY = 'bookkeeping_app_data_prev';    // 上一次的本地副本（每天轮一份）
+const STORAGE_PREV_DAY = 'bookkeeping_app_data_prev_day'; // 副本是哪天轮的（YYYY-MM-DD）
+let __loadLost = false;
+let __prevCandidate = null;   // 检测到"存档丢失"时，这里存着待恢复的副本原文
+
+// 只要有一条成立，就禁止写盘和同步
+function storageBlocked() { return __loadFailed || __loadLost; }
+
 function packForStorage(text) {
     try {
         if (!window.fflate || text.length <= LOCAL_Z_THRESHOLD) return text;
@@ -530,6 +543,22 @@ function unpackFromStorage(raw) {
     if (typeof raw !== 'string' || raw.indexOf(LOCAL_Z_PREFIX) !== 0) return raw;
     if (!window.fflate) throw new Error('缺少解压组件（fflate 未加载）');
     return fflate.strFromU8(fflate.inflateSync(base64ToBytes(raw.slice(LOCAL_Z_PREFIX.length))));
+}
+
+// v1.41.74：每天轮一份本地副本（bookkeeping_app_data_prev）。
+// 为什么一天只轮一次：每次保存都写两份会让保存变慢（localStorage 是同步阻塞的），
+// 而"五秒前的副本"对"回到昨天"毫无意义；一天一份，最多丢一天。
+function rotateLocalPrev() {
+    try {
+        const today = _ymd(Date.now());
+        if (localStorage.getItem(STORAGE_PREV_DAY) === today) return;   // 今天已经轮过
+        const cur = localStorage.getItem(STORAGE_KEY);
+        if (!cur) return;                                              // 没有旧数据可留
+        // 账本特别大时不再翻倍占空间，免得挤爆配额反而让主存档写不进去
+        if (cur.length > 2 * 1024 * 1024) return;
+        localStorage.setItem(STORAGE_PREV_KEY, cur);
+        localStorage.setItem(STORAGE_PREV_DAY, today);
+    } catch (e) { /* 空间不够就放弃这份副本，绝不能挡住正常保存 */ }
 }
 
 // 名字 -> 短码（懒分配，码只进本机存储）。守卫：新码不能撞上任何现存明文名字，
@@ -621,8 +650,11 @@ function saveGeneratedFile(blob, filename) {
 function saveStateNow() {
     // v1.39.67：本机数据读不出来时绝不保存——否则默认空状态会覆盖真数据，
     // 接着同步再把空账本推上去，三台设备一起空。
-    if (__loadFailed) {
-        __storageError = '本机账本格式读不出（可能是更新版本写入的），已停止保存。请更新 App 后重试。';
+    // v1.41.74：__loadLost（存档整个不见了、等他决定要不要从副本恢复）同样禁止写盘。
+    if (storageBlocked()) {
+        __storageError = __loadLost
+            ? '本机账本不见了，已暂停保存和同步，等你决定是否从本地副本恢复。'
+            : '本机账本格式读不出（可能是更新版本写入的），已停止保存。请更新 App 后重试。';
         renderStorageWarning();
         return;
     }
@@ -694,6 +726,7 @@ function saveStateNow() {
     const text = JSON.stringify(data);
     const stored = packForStorage(text);
     __lastSavedBytes = stored.length;
+    rotateLocalPrev();
     try {
         localStorage.setItem(STORAGE_KEY, stored);
         if (__storageError) { __storageError = ''; renderStorageWarning(); }
@@ -748,6 +781,8 @@ const UNDO_BUCKET = {
     recurring: 'recurring',
 };
 let __undoStack = [];
+let __undoSeq = 0;        // v1.41.74：撤销操作的序号（toast 靠它只撤自己那条）
+let __lastUndoToken = null; // 最近一次 pushUndo 的序号，showUndoToast 默认认它
 
 // rowsByCollection 例：{ transactions:[rowObj,...], accounts:[...] }；传对象快照，不传引用
 function pushUndo(label, rowsByCollection) {
@@ -760,13 +795,23 @@ function pushUndo(label, rowsByCollection) {
         any = true;
     });
     if (!any) return false;
-    __undoStack.push({ label, rows, at: Date.now() });
+    // v1.41.74：每次删除发一个 token。以前 toast 上的「撤销」一律调 undoLastDelete()，
+    // 弹的是全局栈顶（后进先出）—— 连删 A、B 两笔后点 A 那条 toast，恢复的其实是 B，
+    // 文案却还写着 A。现在按钮只撤"自己那条"。
+    const token = ++__undoSeq;
+    __undoStack.push({ label, rows, at: Date.now(), token });
+    __lastUndoToken = token;
     if (__undoStack.length > 10) __undoStack.shift();
     return true;
 }
 
-function undoLastDelete() {
-    const op = __undoStack.pop();
+function undoLastDelete(token) {
+    // 指定了 token 就只撤那一条；没指定（老调用点 / 快捷键）才退化成栈顶
+    let idx;
+    if (token === undefined || token === null) idx = __undoStack.length - 1;
+    else idx = __undoStack.findIndex(op => op && op.token === token);
+    if (idx < 0) { showToast('这条删除已经撤销过了', 'info'); return false; }
+    const op = __undoStack.splice(idx, 1)[0];
     if (!op) { showToast('没有可撤销的删除', 'error'); return false; }
     Object.keys(op.rows).forEach(coll => {
         const items = op.rows[coll] || [];
@@ -914,7 +959,9 @@ function showUndoToast(label) {
     toast.innerHTML = `<i class="fa-solid fa-trash-arrow-up"></i> 已删除「${_esc(label)}」`
         + `<button class="toast-undo-btn" type="button">撤销</button>`;
     const btn = toast.querySelector('.toast-undo-btn');
-    if (btn) btn.addEventListener('click', () => { undoLastDelete(); toast.remove(); });
+    // 绑住"这次删除"的序号：连删好几笔时，点哪条就撤哪条，不会撤错
+    const token = __lastUndoToken;
+    if (btn) btn.addEventListener('click', () => { undoLastDelete(token); toast.remove(); });
     container.appendChild(toast);
     setTimeout(() => { toast.classList.add('fade-out'); setTimeout(() => toast.remove(), 300); }, 8000);
 }
@@ -1292,10 +1339,22 @@ function renderRecurringSection() {
 // modal (报表分析 → 分类明细 → 点某笔记录) ended up painted *behind* its parent.
 // Each open now takes the next slot in the stack.
 let overlayZ = 1000;
+const OVERLAY_Z_START = 1000;
+const OVERLAY_Z_MAX = 1900;   // toast 是 2000；弹窗一旦超过它，撤销条就会被盖在下面
 
 function raiseOverlay(id) {
     const el = typeof id === 'string' ? document.getElementById(id) : id;
     if (!el) return;
+    // v1.41.74：overlayZ 以前只增不减，约 100 次开弹窗之后就会爬过 toast 的 2000，
+    // 于是删除后那条带「撤销」的黄条被弹窗压住、看不见也点不到。到顶就重新编号一次。
+    if (overlayZ >= OVERLAY_Z_MAX) {
+        const open = [...document.querySelectorAll('.modal-overlay, .action-sheet-overlay')]
+            .filter(x => !x.classList.contains('hidden'))
+            .map(x => ({ el: x, z: parseInt(x.style.zIndex, 10) || 0 }))
+            .sort((a, b) => a.z - b.z);
+        overlayZ = OVERLAY_Z_START;
+        open.forEach(o => { overlayZ += 10; o.el.style.zIndex = String(overlayZ); });
+    }
     overlayZ += 10;
     el.style.zIndex = String(overlayZ);
 }
@@ -1332,8 +1391,13 @@ function topmostOverlay() {
 function closeTopmostOverlay() {
     const top = topmostOverlay();
     if (!top) return;
+    // v1.41.74：会丢草稿的两个弹窗必须走各自的"未保存确认"。
+    // 以前只特判了两个 id，其余一律 classList.add('hidden') —— 于是按 Esc 关月度盘点会绕过
+    // confirmCloseMonthlyModal，整屏没保存的数就这么没了（鼠标点遮罩是走确认的，只有键盘中招）。
     if (top.id === 'categoryTxnModal') closeCategoryTxnModal();
     else if (top.id === 'accountHistoryModal') closeAccountHistoryModal();
+    else if (top.id === 'transactionModal') confirmCloseTransactionModal();
+    else if (top.id === 'monthlyModal') confirmCloseMonthlyModal();
     else top.classList.add('hidden');
 }
 
@@ -1879,6 +1943,17 @@ function syncFingerprint() {
     return fingerprintOfPayload(buildSyncPayload());
 }
 
+// v1.41.74：分类 / 预算合并用——带时间戳的胜过没时间戳的，都有就比新旧。
+// 两个都没有（本版之前的老数据）才退回"远端覆盖本地"的老口径，避免老账本同步行为突变。
+function pickNewer(localItem, remoteItem) {
+    if (!localItem) return remoteItem;
+    const a = remoteItem.updatedAt || 0, b = localItem.updatedAt || 0;
+    if (a && b) return a > b ? remoteItem : localItem;
+    if (a && !b) return remoteItem;
+    if (!a && b) return localItem;   // 本地刚改过、远端是没时间戳的旧记录 → 别盖掉
+    return remoteItem;
+}
+
 function mergeRemoteData(remoteData) {
     ensureArrayFields();     // v1.39.99：合并前先把数组字段兜成数组
     const remote = remoteData.data;
@@ -1913,14 +1988,18 @@ function mergeRemoteData(remoteData) {
     });
 
     // Merge categories: union by ID
+    // v1.41.74：以前是「远端无条件覆盖本地」，加上 saveCategory 不写 updatedAt，
+    // 结果是改个分类名过一轮同步就悄悄变回去，而且永远推不出去。
+    // 现在按时间戳较新胜；两边都没有时间戳（本版之前的老数据）才沿用旧的远端优先。
     const catMap = new Map();
     state.categories.forEach(c => catMap.set(c.id, c));
-    (remote.categories || []).forEach(c => catMap.set(c.id, c));
+    (remote.categories || []).forEach(c => catMap.set(c.id, pickNewer(catMap.get(c.id), c)));
 
     // Merge budgets: union by categoryId
+    // v1.41.74：预算同样改成较新胜（budgets 以前根本不带 updatedAt，本次一并补上）
     const budMap = new Map();
     state.budgets.forEach(b => budMap.set(b.categoryId, b));
-    (remote.budgets || []).forEach(b => budMap.set(b.categoryId, b));
+    (remote.budgets || []).forEach(b => budMap.set(b.categoryId, pickNewer(budMap.get(b.categoryId), b)));
 
     // Merge accounts: union by ID, newer definition wins
     const accMap = new Map();
@@ -2143,7 +2222,10 @@ function mergeRemoteData(remoteData) {
 // filename 决定落盘名字：iCloud 通道必须用 Mac 端读取的那个固定名字。
 const ICLOUD_SYNC_FILENAME = 'bookkeeping-sync.json';
 
-async function exportSyncJSON(filename, toastText) {
+async function exportSyncJSON(filename, toastText, opts = {}) {
+    // v1.41.74：opts.asBackup === false 表示"这不是备份"（存 iCloud 同步文件是覆盖同一份，
+    // 不算备份），不该重置"上次备份时间"——否则一份会把好数据盖掉的导出，反而让备份提醒静默 7 天。
+    const asBackup = opts.asBackup !== false;
     const syncData = buildSyncPayload();
     syncData.deviceName = isElectron() ? 'Mac-backup' : 'browser-backup';
     const stamp = _ymd(Date.now());   // v1.41.45：备份文件名按设备本地日期，凌晨别写成昨天
@@ -2166,7 +2248,7 @@ async function exportSyncJSON(filename, toastText) {
         if (cancelled) return false;
         iCloudLastSyncTime = Date.now();
         updateICloudSyncUI();
-        markExported();
+        if (asBackup) markExported();
         showToast(toastText || (encrypted ? '已导出加密备份' : '已导出 JSON 备份'), 'success');
         return true;
     });
@@ -2174,7 +2256,31 @@ async function exportSyncJSON(filename, toastText) {
 
 // 存到 iCloud Drive 的「记账本」文件夹时请用这个名字，Mac 端按它读取
 function exportToICloud() {
-    return exportSyncJSON(ICLOUD_SYNC_FILENAME, '已导出，请存入 iCloud 的「记账本」文件夹');
+    // v1.41.74：这道闸是整条丢数据链上唯一由用户手按下去、且不可逆的一步。
+    // 数据在浏览器里没了 → 打开看到空账本 → 顺手点「存一份」→ 唯一那份异地副本被空账本盖掉。
+    // 空的账本没有资格覆盖那份文件，所以先拦一下。
+    if (ledgerLooksEmpty()) {
+        const ok = confirm(
+            '这台设备上的账本现在是空的（没有流水、余额、收益）。\n\n' +
+            `继续会把 iCloud 里那份 ${ICLOUD_SYNC_FILENAME} 盖成空的，而且不能撤销。\n\n` +
+            '如果数据像是丢了：点「取消」，先用「导入 / 合并」挑一份备份，或者到 GitHub 的 gist 里翻上一版再拉回来。\n\n' +
+            '确认这台设备本来就是全新开始 → 点「确定」。'
+        );
+        if (!ok) {
+            showToast('已取消，iCloud 那份文件没有被改动', 'info');
+            return Promise.resolve(false);
+        }
+    }
+    return exportSyncJSON(ICLOUD_SYNC_FILENAME, '已导出，请存入 iCloud 的「记账本」文件夹', { asBackup: false });
+}
+
+// 本机账本是不是空的（用来判断"要不要拦一下覆盖性导出"）
+function ledgerLooksEmpty() {
+    return ((state.transactions || []).length
+        + (state.balances || []).length
+        + (state.returns || []).length
+        + (state.lendings || []).length
+        + (state.insurancePolicies || []).length) === 0;
 }
 
 // ---------------- 加密解锁：口令 / 恢复码输入 ----------------
@@ -2835,6 +2941,10 @@ async function disableEncryptionClick() {
 // 只写站点根地址；版本号从根下的 version.json 读，
 // 不再正则扒首页 HTML —— 改版式把「版本 x.y.z」挪走会让桌面版检查静默失效
 const UPDATE_CHECK_BASES = [
+    // v1.41.74：以前这两条是老地址（/Flow/ 停在 1.35.0、qwenwork 停在 1.28.0），
+    // 于是「检查更新」永远拿一个比当前旧的版本号来比 —— 结论必然是"已是最新"。
+    // 第一条改成真正的发布地址；老地址留作兜底，万一它有一天又能访问。
+    'https://tv6kybgp6m-sketch.github.io/accounting-app/',
     'https://tv6kybgp6m-sketch.github.io/Flow/',
     'https://hghx5zcg.qwenwork.host/',
 ];
@@ -3547,7 +3657,7 @@ async function remotePush() {
 
 // 一次完整同步：先拉后推。串行加锁，避免定时器叠起来。
 async function remoteSyncCycle(reason) {
-    if (!remoteSyncReady() || __remoteBusy || __loadFailed) return false;   // v1.39.67：__loadFailed 时整周期禁止
+    if (!remoteSyncReady() || __remoteBusy || storageBlocked()) return false;   // v1.39.67：读不出/丢了 → 整周期禁止
     __remoteBusy = true;
     try {
         const pulled = await remotePullAndMerge();
@@ -3585,7 +3695,7 @@ function maybeAlertSyncIssue(force) {
 
 // 本地数据有改动后延迟推送（复用 saveState 的调用点）
 function scheduleRemoteSync() {
-    if (!remoteSyncReady() || __loadFailed) return;   // v1.39.67：本机数据读不出时禁止同步（防止把空状态推上去）
+    if (!remoteSyncReady() || storageBlocked()) return;   // v1.39.67：本机数据读不出/丢失时禁止同步（防止把空状态推上去）
     if (__remotePushTimer) clearTimeout(__remotePushTimer);
     __remotePushTimer = setTimeout(() => {
         __remotePushTimer = null;
@@ -3736,7 +3846,7 @@ function updateRemoteSyncUI() {
             </label>
         </div>
         <div class="settings-row settings-row-stack">
-            <div class="settings-label">GitHub Token<div class="settings-sublabel">只需要 gist 权限；只存在这台设备上，不会上传</div></div>
+            <div class="settings-label">GitHub Token<div class="settings-sublabel">只需要 gist 权限。存在这台设备的浏览器存储里（加密的账本密钥保护不了它，所以共用电脑时留意）。不要用带 repo 权限的 Token</div></div>
             <div class="rs-inline">
                 <input type="password" class="text-input" id="remoteSyncToken" placeholder="github_pat_… 或 ghp_…"
                        autocomplete="off" spellcheck="false" value="${esc(remoteSyncCfg.token)}">
@@ -3849,8 +3959,91 @@ function closeGistHelp() {
 }
 
 
+// ---- v1.41.74：本地副本（上一版存档）的读写与恢复 ----
+// 为什么需要它：全仓只有 bookkeeping_app_data 一个键。Mac 端有 Swift 的每 10 分钟快照，
+// iPhone 端什么都没有——写坏一次、被单独删一次，就没有任何可回退的东西。
+function localPrevRaw() {
+    try { return localStorage.getItem(STORAGE_PREV_KEY) || null; } catch (e) { return null; }
+}
+
+function localPrevDayText() {
+    try {
+        const d = localStorage.getItem(STORAGE_PREV_DAY) || '';
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return '某天';
+        return `${Number(d.slice(5, 7))} 月 ${Number(d.slice(8, 10))} 日`;
+    } catch (e) { return '某天'; }
+}
+
+// 把副本写回主存档，然后整页重载——比在内存里就地拼状态可靠得多
+function restoreFromLocalPrev() {
+    const raw = localPrevRaw();
+    if (!raw) { showToast('没有可用的本地副本', 'error'); return false; }
+    // 先验证副本本身解得开，否则恢复出来的还是一场空
+    try {
+        JSON.parse(unpackFromStorage(raw));
+    } catch (e) {
+        showToast('本地副本也读不出来。请用「导入 / 合并」选一份导出过的备份文件。', 'error', 8000);
+        return false;
+    }
+    try {
+        localStorage.setItem(STORAGE_KEY, raw);
+    } catch (e) {
+        showToast('恢复失败：浏览器存储空间不足', 'error');
+        return false;
+    }
+    __loadLost = false;
+    __loadFailed = false;
+    location.reload();
+    return true;
+}
+
+function dismissLoadLost() {
+    __loadLost = false;
+    __storageError = '';
+    renderStorageWarning();
+    showToast('已按空账本打开。本地副本还留着，随时可在「设置 → 恢复本地副本」取回。', 'info', 8000);
+}
+
+// 设置页里的手动入口
+function restoreLocalPrevManual() {
+    const raw = localPrevRaw();
+    if (!raw) { showToast('还没有本地副本（每天第一次保存时自动留一份）', 'info'); return; }
+    if (!confirm(`把 ${localPrevDayText()} 的本地副本写回本机账本？\n\n当前的账本会被这份副本替换；这份副本是今天第一次保存之前的版本。`)) return;
+    restoreFromLocalPrev();
+}
+
+// 启动后问一次：存档不见了，要不要从副本恢复
+function maybeAskRestoreFromPrev() {
+    if (!__loadLost || !__prevCandidate) return;
+    const goRestore = confirm(
+        '这台设备上的账本不见了（本机存储里找不到账本，可能是被系统清理了）。\n\n' +
+        `发现一份 ${localPrevDayText()} 的本地副本。\n\n` +
+        '点「确定」＝ 恢复那天的副本\n' +
+        '点「取消」＝ 先按空账本打开（副本会保留，之后可在 设置 → 恢复本地副本 取回）'
+    );
+    if (goRestore) restoreFromLocalPrev();
+    else dismissLoadLost();
+}
+
+// 让系统别自动回收这份数据（iOS 17+ / Chrome / Edge 有效；不支持就静默跳过）
+function requestPersistentStorage() {
+    try {
+        if (!navigator.storage || typeof navigator.storage.persist !== 'function') return;
+        navigator.storage.persisted()
+            .then(p => (p ? true : navigator.storage.persist()))
+            .catch(() => null);
+    } catch (e) { /* 老浏览器没有 Storage API，忽略 */ }
+}
+
 function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
+    // v1.41.74：主存档整个不见了，但本地副本还在 → 这台机器以前有账，先别当成新账本。
+    // 这是"某天早上打开变成一个空账本"的唯一可判定入口：只有副本活着才判得出来，
+    // 因为整个源被清时副本也一起没了 —— 那种情况只能靠导出拦截兜（见 exportToICloud）。
+    if (!raw) {
+        const prev = localPrevRaw();
+        if (prev) { __loadLost = true; __prevCandidate = prev; }
+    }
     if (raw) {
         // v1.39.68：拆成两段 try。v1.39.67 把"解析"和"迁移"合在一个 try 里的坑：
         // 解析明明成功了（用户看得见全部数据），但后面的历史数据迁移
@@ -5175,7 +5368,7 @@ function renderMemberSelector(def) {
     if (state.balanceMembers.length <= 1) { group.style.display = 'none'; return; }
     group.style.display = '';
     const val = (def && state.balanceMembers.includes(def)) ? def : state.balanceMembers[0];
-    sel.innerHTML = state.balanceMembers.map(m => `<option value="${m}" ${m === val ? 'selected' : ''}>${m}</option>`).join('');
+    sel.innerHTML = state.balanceMembers.map(m => `<option value="${_esc(m)}" ${m === val ? 'selected' : ''}>${_esc(m)}</option>`).join('');
 }
 
 function paymentIconFor(name) {
@@ -5416,10 +5609,10 @@ function renderCategoryPicker() {
     container.innerHTML = cats.map(c => `
         <div class="cat-pick-item ${c.id === state.selectedCategoryId ? 'selected' : ''}"
              onclick="selectCategory('${c.id}')">
-            <div class="cat-pick-icon" style="background:${c.color}22;color:${c.color}">
-                <i class="fa-solid ${c.icon}"></i>
+            <div class="cat-pick-icon" style="background:${_esc(c.color)}22;color:${_esc(c.color)}">
+                <i class="fa-solid ${_esc(c.icon)}"></i>
             </div>
-            <div class="cat-pick-name">${c.name}</div>
+            <div class="cat-pick-name">${_esc(c.name)}</div>
         </div>
     `).join('');
 
@@ -6507,8 +6700,8 @@ function renderPieLegend(entries, gross, metric) {
         const name = cat?.name || e.name || '未知分类';
         const pct = ((e.signed / gross) * 100).toFixed(1);
         return `<div class="pie-legend-item" onclick="openPieLegendEntry(${i})">
-            <span class="pl-dot" style="background:${color}"></span>
-            <span class="pl-name">${name}</span>
+            <span class="pl-dot" style="background:${_esc(color)}"></span>
+            <span class="pl-name">${_esc(name)}</span>
             <span class="pl-pct">${pct}%</span>
         </div>`;
     }).join('');
@@ -6750,7 +6943,7 @@ function renderBudget() {
 function openBudgetModal() {
     const select = document.getElementById('budgetCategorySelect');
     const expenseCats = state.categories.filter(c => c.type === 'expense');
-    select.innerHTML = expenseCats.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    select.innerHTML = expenseCats.map(c => `<option value="${_esc(c.id)}">${_esc(c.name)}</option>`).join('');
     document.getElementById('budgetAmountInput').value = '';
     document.getElementById('budgetModal').classList.remove('hidden');
     raiseOverlay('budgetModal');
@@ -6770,8 +6963,9 @@ function saveBudget() {
     const existing = state.budgets.find(b => b.categoryId === categoryId);
     if (existing) {
         existing.amount = amount;
+        existing.updatedAt = Date.now();   // v1.41.74：不写时间戳就永远是"旧的"，同步时会被盖回去
     } else {
-        state.budgets.push({ id: uid(), categoryId, amount });
+        state.budgets.push({ id: uid(), categoryId, amount, updatedAt: Date.now() });
     }
 
     saveState();
@@ -6807,7 +7001,7 @@ function renderCategories() {
                     <i class="fa-solid ${c.icon}"></i>
                 </div>
                 <div>
-                    <div class="category-card-name">${c.name}</div>
+                    <div class="category-card-name">${_esc(c.name)}</div>
                     <div class="category-card-count">${count} 笔交易</div>
                 </div>
             </div>
@@ -6961,6 +7155,9 @@ function saveCategory() {
             c.icon = state.selectedIcon;
             c.color = state.selectedColor;
             // v1.41.53：类型锁死，不再从弹窗的 selectedCategoryType 回写 c.type
+            // v1.41.74：必须写 updatedAt。同步指纹只认 id:updatedAt，不写的话这次改名
+            // 不进指纹（被当成"内容没变"跳过上传），合并时还会被远端旧值无条件盖回去。
+            c.updatedAt = Date.now();
         }
         showToast('分类已更新', 'success');
     } else {
@@ -6970,6 +7167,7 @@ function saveCategory() {
             icon: state.selectedIcon,
             color: state.selectedColor,
             type: state.selectedCategoryType,
+            updatedAt: Date.now(),   // v1.41.74：新建同样要带时间戳，否则上面那条永远不成立
         });
         showToast('分类已创建', 'success');
     }
@@ -7275,15 +7473,22 @@ async function renderBackupBanner() {
         } catch (e) { /* 读不到就按网页版处理 */ }
     }
     if (hasSnapshot && cloud) return hide();
-    // 手机/PWA 已开启 GitHub Token 云同步：数据已在远端，不再提示本地导出备份
-    if (remoteSyncCfg.enabled) return hide();
+    // 手机/PWA 已开启 GitHub Token 云同步：数据在远端，但"开着同步"不等于"同步成功过"。
+    // v1.41.74：只有最近 7 天内真的成功同步过才不再提醒——同步可能长期静默失败
+    // （token 过期、被限流、SW 拿到陈旧副本），那段时间里本机其实只有一份孤本。
+    const syncFresh = remoteSyncCfg.enabled && remoteSyncCfg.lastSyncAt
+        && (Date.now() - remoteSyncCfg.lastSyncAt) < BACKUP_REMIND_DAYS * 86400000;
+    if (syncFresh) return hide();
 
     const days = state.lastExportAt ? Math.floor((Date.now() - state.lastExportAt) / 86400000) : null;
     if (days !== null && days < BACKUP_REMIND_DAYS) return hide();
 
     const where = hasSnapshot
         ? 'Mac 版没开 iCloud 同步，快照只存在这台电脑上，硬盘坏了就一起没了。'
-        : '数据只存在这台设备的浏览器里，清缓存或换设备会丢失，';
+        : (remoteSyncCfg.enabled
+            // 开了同步却超过 7 天没成功一次：本机实际上只有一份孤本
+            ? '云同步最近 7 天没有成功过，数据目前只在这台设备上，'
+            : '数据只存在这台设备的浏览器里，清缓存或换设备会丢失，');
     banner.classList.remove('hidden');
     banner.innerHTML = `
         <div class="bb-text">
@@ -7823,8 +8028,8 @@ function applyWorkbook(wb) {
                     const categoryId = cat?.id || 'e_other';
                     const amount = parseFloat(row['预算金额']) || 0;
                     const existing = state.budgets.find(b => b.categoryId === categoryId);
-                    if (existing) { existing.amount = amount; }
-                    else { state.budgets.push({ id: uid(), categoryId, amount }); budAdded++; }
+                    if (existing) { existing.amount = amount; existing.updatedAt = Date.now(); }
+                    else { state.budgets.push({ id: uid(), categoryId, amount, updatedAt: Date.now() }); budAdded++; }
                 });
             }
 
@@ -9536,10 +9741,10 @@ function openAccountHistoryForPeriod(month, label) {
     document.getElementById('acctHistList').innerHTML = rows.length
         ? rows.map(a => `
             <div class="breakdown-item" onclick="closeAccountHistoryModal();openAccountHistoryForAccount('${a.id}')">
-                <div class="breakdown-icon" style="background:${a.color}22;color:${a.color}"><i class="fa-solid ${a.icon}"></i></div>
+                <div class="breakdown-icon" style="background:${_esc(a.color)}22;color:${_esc(a.color)}"><i class="fa-solid ${_esc(a.icon)}"></i></div>
                 <div class="breakdown-main">
                     <div class="breakdown-head">
-                        <span class="breakdown-name">${a.name}</span>
+                        <span class="breakdown-name">${_esc(a.name)}</span>
                         <span class="breakdown-amount">${a.kind === 'liability' && moneyVisible ? '-' : ''}${maskMoney(map[a.id])}</span>
                     </div>
                 </div>
@@ -11501,7 +11706,7 @@ function renderMonthlyEntry() {
     const ms = document.getElementById('monthlyMemberSelect');
     if (ms) {
         const want = ms.value || state.balanceMembers[0] || '本人';
-        ms.innerHTML = state.balanceMembers.map(m => `<option ${m === want ? 'selected' : ''}>${m}</option>`).join('');
+        ms.innerHTML = state.balanceMembers.map(m => `<option ${m === want ? 'selected' : ''}>${_esc(m)}</option>`).join('');
         // v1.39.97：下拉框宽度按最长的成员名字算（中文一个字 13px + 右侧箭头和留白），
         // 名字越长越宽，不再固定 128px 留一大片空。
         const mg = ms.closest('.mw-member-group');
@@ -12366,8 +12571,10 @@ function monthlyDraftStats(month, member) {
     list.querySelectorAll('[data-ret]').forEach(inp => {
         const raw = String(inp.value).trim();
         if (raw === '') return;
-        const v = parseFloat(raw);
-        if (!isFinite(v)) return;
+        // v1.41.74：跟保存走同一套解析（去千分位、支持 3000+2000 表达式）。
+        // 以前这里用裸 parseFloat，"1,200" 会被读成 1，角标当场算错。
+        const v = parseMonthlyAmount(raw);
+        if (v === null || !isFinite(v)) return;
         const id = inp.dataset.ret;
         draft[id] = draft[id] || {};
         draft[id].profit = v;
@@ -12376,14 +12583,14 @@ function monthlyDraftStats(month, member) {
         const raw = String(inp.value).trim();
         const id = inp.dataset.flowIn;
         draft[id] = draft[id] || {};
-        draft[id].flow = raw === '' ? '' : (parseFloat(raw) || 0);
+        draft[id].flow = raw === '' ? '' : (parseMonthlyAmount(raw) || 0);
     });
     // 一个账户在好几列里都有数，收益率要拿它的净资产（各类资产 − 负债）去算
     list.querySelectorAll('[data-bal]').forEach(inp => {
         const raw = String(inp.value).trim();
         if (raw === '') return;
-        const v = parseFloat(raw);
-        if (!isFinite(v)) return;
+        const v = parseMonthlyAmount(raw);
+        if (v === null || !isFinite(v)) return;
         const id = inp.dataset.bal;
         const isLiab = isLiabCat(inp.dataset.cat);
         draft[id] = draft[id] || {};
@@ -12454,8 +12661,10 @@ function updateMonthlyDerived() {
         if (!totalEl || !diffEl) return;
         const tRaw = String(totalEl.value).trim();
         if (tRaw === '' || !filled) { diffEl.textContent = ''; diffEl.className = 'mw-diff'; return; }
-        const t = parseFloat(tRaw);
-        if (!isFinite(t)) { diffEl.textContent = ''; return; }
+        // v1.41.74：对账单总额也和保存走同一套解析。以前用裸 parseFloat，
+        // 粘进来的 "120,444.00" 会被读成 120，于是报「差 ¥120,324，是不是漏了一项」的假警报。
+        const t = parseMonthlyAmount(tRaw);
+        if (t === null || !isFinite(t)) { diffEl.textContent = ''; return; }
         // 对账差额按这一行自己的币种比：对账单上写的就是美元/港币，不该拿人民币去比
         const diff = Math.round((netRaw - t) * 100) / 100;
         if (diff === 0) { diffEl.textContent = '对上了'; diffEl.className = 'mw-diff ok'; }
@@ -12864,21 +13073,45 @@ function saveMonthlyFor(member, opts) {
     const touched = new Set();
     const entries = [];
     let missingRate = 0;
+    let badCells = 0;
     list.querySelectorAll('[data-bal]').forEach(inp => {
         const accountId = inp.dataset.bal;
         const cur = inp.dataset.cur || 'CNY';
         const cat = inp.dataset.cat || 'other';
-        touched.add(acctCurKey(accountId, cur));
         const raw = String(inp.value).trim();
-        if (raw === '') return;
+        // v1.41.74：touched.add 以前在解析之前就执行，于是敲了 abc / - / 全角数字这类解析不出来的
+        // 内容时，这一格既进了 touched、又没进 willWrite → 被下面那段清理当成"用户清空了"→
+        // 打墓碑删掉，然后弹"已保存"。现在：留空才算清空，解析不出来只报错、一格不动。
+        if (raw === '') {
+            touched.add(acctCurKey(accountId, cur));   // 留空 = 这格这个月没数（设计如此）
+            return;
+        }
         const foreign = parseMonthlyAmount(raw);
-        if (foreign === null || foreign < 0) return;
+        if (foreign === null || foreign < 0) { badCells++; return; }
         const known = fxRateKnown(month, cur);
         if (!known) { missingRate++; return; }
+        touched.add(acctCurKey(accountId, cur));
         const rate = fxRate(month, cur);
         const amount = Math.round(fxToCNY(foreign, rate) * 100) / 100;
         entries.push({ id: balanceRecordId(member, accountId, cur, cat, month), accountId, cur, cat, amount, foreign, rate });
     });
+    // v1.41.74：收益格也在动 state 之前先扫一遍。
+    // 以前这个检查写在收益写完之后（第二个 missingRate 判断），那时 state.balances 已经删过写过、
+    // state.returns 也改了一半，然后 return —— 内存半改、界面没刷、磁盘没写，下一次任何存盘
+    // 都会把这半套写进去。现在所有校验都在改数据之前一次做完。
+    let badRet = 0;
+    list.querySelectorAll('[data-ret]').forEach(inp => {
+        const raw = String(inp.value).trim();
+        if (raw === '') return;                     // 留空 = 清掉这条收益（原有设计）
+        const foreign = parseMonthlyAmount(raw);
+        if (foreign === null) { badRet++; return; }
+        if (!fxRateKnown(month, inp.dataset.cur || 'CNY')) missingRate++;
+    });
+    // 有任何一格不合法就整批不保存：钱不能靠猜，更不能靠"悄悄删掉那格"蒙混过去
+    if (badCells || badRet) {
+        showToast(`有 ${badCells + badRet} 格填的内容看不懂（字母 / 减号 / 全角数字等）。没有保存，一格都没动 —— 请改成数字，或者清空那一格。`, 'error', 8000);
+        return false;
+    }
     // 没填汇率的格子不能替用户猜（1:1 换算等于把 1000 美元当成 1000 人民币）。
     // 直接拦下来让人先填汇率 —— 草稿还在弹窗里，填完再保存就行。
     if (missingRate) {
@@ -12968,10 +13201,6 @@ function saveMonthlyFor(member, opts) {
         }
         savedRet++;
     });
-    if (missingRate) {
-        showToast(`有 ${missingRate} 格里填了外币但没填汇率 —— 上面标红的那个汇率框，填了才能保存`, 'error');
-        return;
-    }
     if (!savedBal && !savedRet && !removed && !removedRet) { if (!opts.quiet) showToast('没有需要保存的数', 'error'); return true; }
     // 老数据（一个账户一个月只有一个数、没有类别）顺手升级成新口径，老的那条作废
     normalizeBalanceCats();
@@ -16648,6 +16877,7 @@ async function init() {
     try { localStorage.setItem('bk_init', 'start|' + Date.now()); } catch (e) { /* 排障标记，失败无所谓 */ }
     loadRemoteSyncConfig();
     loadState();
+    requestPersistentStorage();   // v1.41.74：跟系统申请"别自动回收这份数据"（不支持就静默跳过）
     // v1.41.64：每次冷启动（右键退出再开），资产负债页和投资收益页都回到「月档 + 上个月」。
     // 当月钱还没记、要下月才填，显示当月/今年意义不大；年月本来就不落盘（启动即 null），
     // 但「月/年/全部」档位是落盘的 —— 上次停在年档就会显示「2026年」。这里把两个档位归一到月，
@@ -16673,6 +16903,8 @@ async function init() {
     switchView(state.settings.defaultView || 'transactions');
     // 启动骨架：第一屏渲染完立刻移除，避免白屏（B 优化）
     const _bl = document.getElementById('bootLoading'); if (_bl) _bl.remove();
+    // v1.41.74：第一屏画完再问"账本不见了，要不要从本地副本恢复"，免得挡在加载动画前面
+    setTimeout(maybeAskRestoreFromPrev, 500);
 
     // v1.41.10：加密开着就先盖锁屏、只输一次口令，再往下跑同步。
     // 放在首屏渲染之后、任何同步链路之前：底下已经是完整的界面（会被糊掉），

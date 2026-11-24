@@ -829,6 +829,12 @@
                                     <i class="fa-solid fa-clock-rotate-left"></i> 选文件覆盖
                                 </button>
                             </div>
+                            <div class="settings-row">
+                                <div class="settings-label">恢复本地副本<div class="settings-sublabel">每天第一次保存之前，本机会自动留一份上一版（只留一份，最多丢一天）。本机账本被清空或写坏时，用这里把它换回来</div></div>
+                                <button class="secondary-btn" onclick="restoreLocalPrevManual()">
+                                    <i class="fa-solid fa-clock-rotate-left"></i> 恢复
+                                </button>
+                            </div>
                             <div class="settings-row" id="backupHistoryRow">
                                 <div class="settings-label">备份历史<div class="settings-sublabel" id="backupHistorySub">加载中…</div></div>
                                 <button class="secondary-btn hidden" id="backupFolderBtn" onclick="openBackupFolderClick()">
@@ -1524,7 +1530,7 @@
                 location.reload();
             });
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=1.41.73').catch(() => {});
+                navigator.serviceWorker.register('sw.js?v=1.41.74').catch(() => {});
             });
         }
     </script>

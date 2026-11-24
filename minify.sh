@@ -11,8 +11,12 @@ if [ -z "$T" ] && [ -x "$HOME/.workbuddy/binaries/node/workspace/node_modules/.b
   T="$HOME/.workbuddy/binaries/node/workspace/node_modules/.bin/terser"
 fi
 if [ -z "$T" ]; then
-  echo "terser 未安装，跳过压缩（将使用已提交的 js/app.min.js）"
-  exit 0
+  # v1.41.74：以前这里 exit 0 装作成功，继续用仓库里旧的 app.min.js ——
+  # 于是"改了代码、装上新版、行为没变"，而且一声不响。这是最坑的一种假失败。
+  echo "✗ 找不到 terser，无法生成 js/app.min.js。" >&2
+  echo "  请不要用旧的 app.min.js 发版：index.html 加载的是它，你改的 js/app.js 根本上不了页面。" >&2
+  echo "  解决：npm i -g terser    或者    export TERSER_BIN=/path/to/terser" >&2
+  exit 1
 fi
 
 "$T" js/app.js --compress --no-mangle -o js/app.min.js

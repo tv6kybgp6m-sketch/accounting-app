@@ -19,23 +19,23 @@ final class MiniHTTPServer {
     init(root: URL) { self.root = root }
 
     func start() throws -> UInt16 {
-        // 固定端口，保证每次启动的网页 origin (http://127.0.0.1:PORT) 一致，
-        // 否则 WKWebView 的 localStorage 会因端口变化而失效、数据丢失。
-        // 优先 8731，被占用（如已有实例）时依次尝试 8732/8733，最后才让系统分配（极少见）。
-        let candidates: [UInt16] = [8731, 8732, 8733, 0]
-        for want in candidates {
-            if let bound = tryBind(wantPort: want) {
-                listenSock = bound.sock
-                port = bound.port
-                let src = DispatchSource.makeReadSource(fileDescriptor: bound.sock, queue: .global())
-                src.setEventHandler { [weak self] in self?.acceptLoop(sock: bound.sock) }
-                src.resume()
-                acceptSource = src
-                fputs("MiniHTTP listening on 127.0.0.1:\(port)\n", stderr)
-                return port
-            }
+        // v1.41.74：端口固定 8731，绝不再退到 8732/8733/系统分配。
+        // 原因：网页 origin 是 http://127.0.0.1:PORT，而 localStorage 按 origin 分柜子 ——
+        // 端口一变就等于换了一个存储位置，用户看到的是"我三年的账全没了"。
+        // 8731 被占用说明已经有一个实例在跑（双击了两次 / 旧实例没退干净），
+        // 那种情况应该明确告诉用户，而不是偷偷换个号打开一个空账本。
+        if let bound = tryBind(wantPort: 8731) {
+            listenSock = bound.sock
+            port = bound.port
+            let src = DispatchSource.makeReadSource(fileDescriptor: bound.sock, queue: .global())
+            src.setEventHandler { [weak self] in self?.acceptLoop(sock: bound.sock) }
+            src.resume()
+            acceptSource = src
+            fputs("MiniHTTP listening on 127.0.0.1:\(port)\n", stderr)
+            return port
         }
-        throw NSError(domain: "MiniHTTP", code: 2, userInfo: [NSLocalizedDescriptionKey: "bind(127.0.0.1) 失败"])
+        throw NSError(domain: "MiniHTTP", code: 2, userInfo: [NSLocalizedDescriptionKey:
+            "端口 8731 被占用：可能已经有一个记账本在运行。请先退出那个窗口再打开这个。"])
     }
 
     // 尝试绑定指定端口（0 = 系统分配）；成功返回 (socket, 实际端口)，失败返回 nil
