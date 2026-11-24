@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.72';
+const APP_VERSION = '1.41.73';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -8787,8 +8787,14 @@ function closeChecklist(month) {
                 act: { label: '去记收益', run: () => openReturnModal(month) },
             });
 
-    if (!b.openKnown) {
+    if (!b.openKnown && !b.closeKnown) {
+        items.push({ state: 'info', text: '上个月和这个月的余额都没记，暂时无法核对对不对得上', act: null });
+    } else if (!b.openKnown) {
         items.push({ state: 'info', text: '缺少上个月的余额，暂时无法核对这个月对不对得上', act: null });
+    } else if (!b.closeKnown) {
+        // v1.41.73：这个月一个余额都没记时，期末净资产会被当成 0，
+        // 差额等于把整份家底报成「对不上」——数字吓人且毫无意义。缺期末就不给结论。
+        items.push({ state: 'info', text: '这个月还没记余额，暂时无法核对对不对得上', act: null });
     } else {
         items.push(b.balanced
             ? { state: 'ok', text: '流水与余额对得上', act: null }
@@ -8875,9 +8881,28 @@ function closeChecklist(month) {
     return { items, bridge: b, month, excludedCount };
 }
 
+// v1.41.73：结账候选月不再只认「记过余额」的月份。
+// 以前只拿 balanceMonths()，于是「这个月记了流水、还没来得及记余额」的月份根本进不了
+// 结账口径，清单会悄悄指回上一个月 —— 用户以为在看本月，其实在对上月。
+// 现在：记过余额 / 记过收益 / 有流水 / 有借出款余额，任一命中都算候选月。
+function closeCandidateMonths() {
+    const set = new Set(balanceMonths());
+    (state.returns || []).forEach(r => { if (r && r.month) set.add(r.month); });
+    (state.transactions || []).forEach(t => {
+        const k = t && t.date ? getMonthKey(t.date) : '';
+        if (k) set.add(k);
+    });
+    (lendingList() || []).forEach(l => {
+        // 借出款从借出那个月起就一直占着净资产，直到还清 —— 至少把起始月算进来
+        const k = l && l.lendDate ? getMonthKey(l.lendDate) : '';
+        if (k) set.add(k);
+    });
+    return [...set].sort();
+}
+
 // 结账清单默认盯"最近一个已经过完的月"：当月还没过完，催结账没意义。
 function closeCheckMonth() {
-    const months = balanceMonths();
+    const months = closeCandidateMonths();
     if (!months.length) return null;
     if (state.closeMonth && months.indexOf(state.closeMonth) >= 0) return state.closeMonth;
     const now = new Date();
@@ -8915,7 +8940,7 @@ function renderCloseCard() {
     if (toggle) toggle.setAttribute('aria-expanded', state.closeCollapsed ? 'false' : 'true');
     const ms = document.getElementById('closeMonthSelect');
     if (ms) {
-        const opts = balanceMonths().slice(-24).reverse();
+        const opts = closeCandidateMonths().slice(-24).reverse();
         ms.innerHTML = opts.map(m => `<option value="${m}" ${m === month ? 'selected' : ''}>${m.replace('-', '年')}月</option>`).join('');
         if (!ms.$wired) {
             ms.$wired = true;
@@ -10441,6 +10466,19 @@ function ymWheelSyncScroll() {
     }, 80);
 }
 
+// v1.41.73：把某一列滚到「值 v 那一格在正中」。
+// 桌面端以前只有 scroll 事件 —— 鼠标点某一格什么都不会发生（手指拖动才管用），
+// 等于这个轮盘在 Mac 上只能靠滚轮。点击 / 方向键都走这里定位。
+function ymWheelCenter(col, v) {
+    if (!col || col.hidden || !col.children.length) return;
+    let idx = Array.prototype.findIndex.call(col.children, el => Number(el.dataset.v) === v);
+    if (idx < 0) idx = 0;
+    col._sync = true;
+    clearTimeout(col._syncT);
+    col.scrollTop = idx * YM_WHEEL_ITEM_H;
+    col._syncT = setTimeout(() => { col._sync = false; }, 120);
+}
+
 // 一列滚停了：正中那格就是选中值
 function ymWheelSettle(col, kind) {
     if (col._sync) return;
@@ -10518,6 +10556,44 @@ function openYmWheel(anchorEl, opts) {
         if (!col || col.hidden) return;
         col._ymh = () => ymWheelSettle(col, kind);
         col.addEventListener('scroll', col._ymh);
+        // v1.41.73：桌面端补上「点一下就直接选中」+ 方向键。
+        // 之前这几列只有 scroll 监听，鼠标点某年某月完全没反应，只能滚轮一格格滚。
+        col.setAttribute('tabindex', '0');
+        col._ymclick = (e) => {
+            const item = e.target && e.target.closest ? e.target.closest('[role="option"]') : null;
+            if (!item || !col.contains(item)) return;
+            const v = Number(item.dataset.v);
+            if (!Number.isFinite(v)) return;
+            ymWheelPick(kind, v);
+            ymWheelCenter(col, v);            // 点完把这一格滚到正中，视觉上「选中了」
+            if (kind === 'year' && col.hidden === false) {
+                // 年份会重填月份列，月份列也要跟着归位
+                ymWheelCenter(root.querySelector('#ymWheelMonths'), ymWheelState ? ymWheelState.m : null);
+            }
+            if (ymWheelState && ymWheelState.opts.withDay) {
+                ymWheelCenter(root.querySelector('#ymWheelDays'), ymWheelState.d);
+            }
+        };
+        col.addEventListener('click', col._ymclick);
+        col._ymkey = (e) => {
+            if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            const items = col.children;
+            if (!items.length) return;
+            if (e.key === 'Enter' || e.key === ' ') {
+                const cur = ymWheelState && (kind === 'year' ? ymWheelState.y : kind === 'month' ? ymWheelState.m : ymWheelState.d);
+                ymWheelPick(kind, Number(cur));
+                return;
+            }
+            const sel = ymWheelState && (kind === 'year' ? ymWheelState.y : kind === 'month' ? ymWheelState.m : ymWheelState.d);
+            let idx = Array.prototype.findIndex.call(items, el => Number(el.dataset.v) === Number(sel));
+            if (idx < 0) idx = 0;
+            idx = Math.max(0, Math.min(items.length - 1, idx + (e.key === 'ArrowUp' ? -1 : 1)));
+            const v = Number(items[idx].dataset.v);
+            ymWheelPick(kind, v);
+            ymWheelCenter(col, v);
+        };
+        col.addEventListener('keydown', col._ymkey);
     });
     const clearRow = root.querySelector('#ymWheelClear');
     if (clearRow) {
@@ -10542,7 +10618,11 @@ function closeYmWheel() {
     root.hidden = true;
     ['#ymWheelYears', '#ymWheelMonths', '#ymWheelDays'].forEach(sel => {
         const col = root.querySelector(sel);
-        if (col && col._ymh) { col.removeEventListener('scroll', col._ymh); col._ymh = null; }
+        if (!col) return;
+        if (col._ymh) { col.removeEventListener('scroll', col._ymh); col._ymh = null; }
+        if (col._ymclick) { col.removeEventListener('click', col._ymclick); col._ymclick = null; }
+        if (col._ymkey) { col.removeEventListener('keydown', col._ymkey); col._ymkey = null; }
+        clearTimeout(col._syncT);
     });
     const clearRow = root.querySelector('#ymWheelClear');
     if (clearRow && clearRow._ymc) { clearRow.removeEventListener('click', clearRow._ymc); clearRow._ymc = null; }
@@ -14778,8 +14858,10 @@ function portfolioIrr(months, member, accountId) {
     cfs.push({ period: 0, amount: -rows2[0].v0 });
     rows2.forEach((r, i) => {
         const per = monthIndex(r.month, base) + 1;
-        const last = (i === rows2.length - 1);
-        cfs.push({ period: per, amount: last ? r.v1 : -r.flow });
+        // 每一期都要扣掉当月净入金（最后一期同样要扣）——投入的钱不是收益
+        cfs.push({ period: per, amount: -r.flow });
+        // 最后一期再补上期末变现；它与上面那条同 period，靠 merged 合并
+        if (i === rows2.length - 1) cfs.push({ period: per, amount: r.v1 });
     });
     // 合并同一期的现金流（上面会产生同 period 的两条）
     const merged = [];
@@ -15423,7 +15505,7 @@ function renderReturnChart() {
     if (pieBtn) pieBtn.classList.toggle('hidden', state.returnMetric === 'rate');
 
     if (!returnMonths().length) {
-        returnShowEmpty('还没有记录过收益，点右上角「记收益」开始');
+        returnShowEmpty('还没有记录过收益，点右上角「记月度盘点」开始');
         return;
     }
     const token = ++returnRenderToken;
@@ -17233,10 +17315,17 @@ function reviewAutoHTML(month, year) {
     const focus = `<div class="rr-focus">${reviewFocusHTML(from, month, isYear, rows, exp, inc, bridge, prevBridge, retStats)}</div>`;
     const rmap = returnsAtMonth(month, 'all');
     const profit = Object.keys(rmap).reduce((s, k) => s + (Number(rmap[k]) || 0), 0);
+    // v1.41.73：没记的东西不能显示成 ¥0。
+    // 以前「没盘点家底」直接印「月末净资产 ¥0」、「没录收益」印「¥0」，
+    // 读起来就像「这个月家底归零 / 一分没赚」——是结论，不是空白。
+    const netText = rows.length ? _fmtY(net) : '没记流水';
+    const balCat = balancesByCat(month, 'all');
+    const balText = Object.keys(balCat).length ? _fmtY(totalsFromCat(balCat).net) : '未盘点';
+    const profitText = Object.keys(rmap).length ? _fmtY(profit) : '未录入';
     const minor = isYear ? '' : `<div class="rr-minor">
-        <div class="rr-mini"><span>这个月结余</span><b>${_fmtY(net)}</b></div>
-        <div class="rr-mini"><span>月末净资产</span><b>${_fmtY(totalsFromCat(balancesByCat(month, 'all')).net)}</b></div>
-        <div class="rr-mini"><span>当月投资收益</span><b>${_fmtY(profit)}</b></div>
+        <div class="rr-mini"><span>这个月结余</span><b>${netText}</b></div>
+        <div class="rr-mini"><span>月末净资产</span><b>${balText}</b></div>
+        <div class="rr-mini"><span>当月投资收益</span><b>${profitText}</b></div>
     </div>`;
     // 老的一屏四行 / 年报四数原样保留，收进次要区，既不丢事实也不跟重点抢视线。
     const legacy = isYear ? reviewYearPageHTML(year) : reviewMonthReportHTML(month);

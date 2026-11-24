@@ -6580,3 +6580,11 @@ html.mac-app #view-returns .view-header .report-controls .ym-review-btn {
     html:not(.mac-app) .hm-day { font-size: 11px; }
     html:not(.mac-app) .hm-amt { font-size: 10px; }
 }
+
+/* ===== v1.41.73：年月轮盘支持鼠标点击 / 键盘，列变成可聚焦元素 ===== */
+/* 列现在带 tabindex="0"，鼠标点一下会拿到焦点。默认焦点环是个黑色方框， */
+/* 套在滚动的轮盘上很突兀 —— 只给键盘操作（:focus-visible）留可见提示。 */
+.ym-wheel-col:focus { outline: none; }
+.ym-wheel-col:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; border-radius: 8px; }
+/* 点某格时给一下按压反馈，让「点了就选中」这件事有手感 */
+.ym-wheel-col > div:active { color: var(--primary); }

@@ -3216,6 +3216,166 @@ async function run() {
                 return !!r && !r.err && r.shown === true && r.cellCount === 31;
             })());
 
+        // ================= v1.41.73：审查报告 6 条修复的回归锁 =================
+        stage = '62';
+
+        // ---- P0：IRR 最后一期漏减净入金（投进去的钱被当成收益，2026-11 审查报告 P0）----
+        ok('P0 修好：IRR 现金流每期都扣净入金、最后一期同时加期末市值（中途绝不加 profit）',
+            app62.indexOf('cfs.push({ period: per, amount: -r.flow });') >= 0 &&
+            app62.indexOf('if (i === rows2.length - 1) cfs.push({ period: per, amount: r.v1 });') >= 0 &&
+            app62.indexOf('last ? r.v1 : -r.flow') < 0);
+        ok('实测 IRR：最后一期加投 500 / 取出 500 / 全部清仓，都不再被当成收益',
+            (function () {
+                const r = ev(`(function(){
+                    try {
+                        var oA = state.accounts, oB = state.balances, oR = state.returns,
+                            oW = state.balanceOwner, oT = state.transactions;
+                        state.accounts = [{ id:'audit_fund', name:'测试基金', kind:'asset', bucket:'growth' }];
+                        state.balanceOwner = 'all'; state.transactions = [];
+                        function calc(closing, flow) {
+                            state.balances = [
+                                {accountId:'audit_fund', month:'2026-08', amount:1000, member:'本人', cat:'stock'},
+                                {accountId:'audit_fund', month:'2026-09', amount:1000, member:'本人', cat:'stock'},
+                                {accountId:'audit_fund', month:'2026-10', amount:closing, member:'本人', cat:'stock'}
+                            ];
+                            state.returns = [
+                                {accountId:'audit_fund', month:'2026-09', amount:0, flow:0, member:'本人'},
+                                {accountId:'audit_fund', month:'2026-10', amount:0, flow:flow, member:'本人'}
+                            ];
+                            return portfolioIrr(['2026-09','2026-10'], 'all', 'audit_fund').irr;
+                        }
+                        var out = {
+                            steady: calc(1000, 0),        // 没投没取、市值没变 → 0
+                            deposit: calc(1500, 500),     // 最后一月加投 500，收益仍是 0（改前算成 +50%）
+                            withdraw: calc(500, -500),    // 最后一月取 500，收益仍是 0（改前算成 -50%）
+                            exit: calc(0, -1000)          // 全部清仓，投 1000 取 1000 → 0
+                        };
+                        state.accounts = oA; state.balances = oB; state.returns = oR;
+                        state.balanceOwner = oW; state.transactions = oT;
+                        return out;
+                    } catch(e){ return {err:String(e)}; }
+                })()`);
+                const near0 = v => typeof v === 'number' && Math.abs(v) < 1e-9;
+                ok('  ↳ 四例全部回到 0（改前：加投 +0.5、取出 −0.5、清仓算不出）',
+                    !!r && !r.err && near0(r.steady) && near0(r.deposit) && near0(r.withdraw) && near0(r.exit), r);
+                return !!r && !r.err && near0(r.deposit) && near0(r.withdraw);
+            })());
+
+        // ---- P1-1：本月一个余额都没记时，不准报「有 X 对不上」----
+        ok('P1-1 修好：结账清单分开判断期初 / 期末是否已知，缺期末不给对账结论',
+            app62.indexOf("} else if (!b.closeKnown) {") >= 0 &&
+            app62.indexOf('这个月还没记余额，暂时无法核对对不对得上') >= 0);
+        ok('实测结账清单：本月缺余额时只提示「还没记余额」，不再出现「有 *** 对不上」',
+            (function () {
+                const r = ev(`(function(){
+                    try {
+                        var oB = state.balances, oA = state.accounts, oR = state.returns, oT = state.transactions;
+                        state.accounts = [{ id:'audit_fund', name:'测试基金', kind:'asset', bucket:'growth' }];
+                        state.returns = []; state.transactions = [];
+                        state.balances = [{accountId:'audit_fund', month:'2026-09', amount:1000, member:'本人', cat:'stock'}];
+                        var items = closeChecklist('2026-10').items.map(function(it){ return it.state + '|' + it.text; });
+                        state.balances = oB; state.accounts = oA; state.returns = oR; state.transactions = oT;
+                        return items;
+                    } catch(e){ return {err:String(e)}; }
+                })()`);
+                const list = Array.isArray(r) ? r : [];
+                const hasMissing = list.some(x => String(x).indexOf('这个月还没记余额') >= 0);
+                const hasBogus = list.some(x => String(x).indexOf('对不上：') >= 0);
+                ok('  ↳ 有「还没记余额」提示、没有「对不上」结论', hasMissing && !hasBogus, list);
+                return hasMissing && !hasBogus;
+            })());
+
+        // ---- P1-2：只有流水、还没记余额的月份也要能进结账 ----
+        ok('P1-2 修好：结账候选月合并「余额 / 收益 / 流水 / 借出款」，不再只认 balanceMonths()',
+            app62.indexOf('function closeCandidateMonths()') >= 0 &&
+            app62.indexOf('closeCandidateMonths().slice(-24)') >= 0);
+        ok('实测：账本里只有一笔流水、一条余额都没记时，结账默认月就落在那个月',
+            (function () {
+                const r = ev(`(function(){
+                    try {
+                        var oB = state.balances, oT = state.transactions, oR = state.returns,
+                            oL = state.lendings, oC = state.closeMonth;
+                        state.balances = []; state.returns = []; state.lendings = []; state.closeMonth = null;
+                        state.transactions = [{ date:'2026-10-13', type:'expense', amount:35 }];
+                        var m = closeCheckMonth();
+                        state.balances = oB; state.transactions = oT; state.returns = oR;
+                        state.lendings = oL; state.closeMonth = oC;
+                        return m;
+                    } catch(e){ return 'ERR:' + e; }
+                })()`);
+                ok('  ↳ 返回 2026-10（改前是 null，整张结账卡直接不显示）', r === '2026-10', r);
+                return r === '2026-10';
+            })());
+
+        // ---- P1-3：月回顾没记的东西不能印成 ¥0 ----
+        ok('P1-3 修好：月回顾次要区三格分「有记录 / 没记录」，没记录写文字不写 0',
+            app62.indexOf("const balText = Object.keys(balCat).length ? _fmtY(totalsFromCat(balCat).net) : '未盘点';") >= 0 &&
+            app62.indexOf("const profitText = Object.keys(rmap).length ? _fmtY(profit) : '未录入';") >= 0 &&
+            app62.indexOf("const netText = rows.length ? _fmtY(net) : '没记流水';") >= 0);
+        ok('实测月回顾：什么都没记的月份显示「没记流水 / 未盘点 / 未录入」，不是三个 ¥0',
+            (function () {
+                const r = ev(`(function(){
+                    try {
+                        var oB = state.balances, oR = state.returns, oT = state.transactions,
+                            oTab = reviewTab, oFrom = reviewFrom;
+                        state.balances = []; state.returns = [];
+                        state.transactions = [{ date:'2026-03-05', type:'expense', amount:20 }];
+                        reviewTab = 'month'; reviewFrom = 'reports';
+                        var h = reviewAutoHTML('2026-05', 2026);
+                        state.balances = oB; state.returns = oR; state.transactions = oT;
+                        reviewTab = oTab; reviewFrom = oFrom;
+                        return h;
+                    } catch(e){ return 'ERR:' + e; }
+                })()`);
+                const h = typeof r === 'string' ? r : '';
+                const good = h.indexOf('没记流水') >= 0 && h.indexOf('未盘点') >= 0 && h.indexOf('未录入') >= 0;
+                ok('  ↳ 三格都是文字说明', good, { len: h.length, has: [h.indexOf('没记流水') >= 0, h.indexOf('未盘点') >= 0, h.indexOf('未录入') >= 0] });
+                return good;
+            })());
+
+        // ---- P2-1：年月轮盘桌面端点击 / 方向键 ----
+        ok('P2-1 修好：轮盘每一列同时绑 scroll / click / keydown，收起时三个都解绑',
+            app62.indexOf("col.addEventListener('click', col._ymclick);") >= 0 &&
+            app62.indexOf("col.addEventListener('keydown', col._ymkey);") >= 0 &&
+            app62.indexOf("if (col._ymclick) { col.removeEventListener('click', col._ymclick); col._ymclick = null; }") >= 0 &&
+            app62.indexOf('function ymWheelCenter(col, v)') >= 0);
+        ok('实测轮盘：鼠标点「7月」立刻选中 7 月（改前只能靠滚轮）',
+            (function () {
+                const r = ev(`(function(){
+                    try {
+                        var picked = null;
+                        var anchor = document.createElement('button');
+                        document.body.appendChild(anchor);
+                        openYmWheel(anchor, { year: 2026, month: 5, onPick: function(y, m){ picked = y + '-' + m; } });
+                        var col = document.querySelector('#ymWheelMonths');
+                        var target = null;
+                        for (var i = 0; i < col.children.length; i++) {
+                            if (Number(col.children[i].dataset.v) === 7) { target = col.children[i]; break; }
+                        }
+                        var res = { hasClick: !!col._ymclick, hasKey: !!col._ymkey, tabindex: col.getAttribute('tabindex') };
+                        if (target) target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                        res.picked = picked;
+                        // 再测方向键：从 7 月往下走一格 → 8 月（年份列从新到旧，月份列是正序）
+                        col.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+                        res.afterKey = picked;
+                        closeYmWheel();
+                        var n = document.getElementById('ymWheelFixed'); if (n) n.remove();
+                        anchor.remove();
+                        return res;
+                    } catch(e){ return {err:String(e)}; }
+                })()`);
+                ok('  ↳ 点 7 月 → 2026-7；方向键 ↓ → 2026-8',
+                    !!r && !r.err && r.hasClick === true && r.hasKey === true && r.tabindex === '0' &&
+                    r.picked === '2026-7' && r.afterKey === '2026-8', r);
+                return !!r && !r.err && r.picked === '2026-7';
+            })());
+
+        // ---- P2-2：投资页空态按钮文案跟真实按钮对齐 ----
+        ok('P2-2 修好：投资页空态提示写「记月度盘点」，不再是早就改掉的「记收益」',
+            app62.indexOf('点右上角「记月度盘点」开始') >= 0 &&
+            app62.indexOf('点右上角「记收益」开始') < 0 &&
+            fs.readFileSync(path.join(REPO, 'index.html'), 'utf8').indexOf('记月度盘点') >= 0);
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));
