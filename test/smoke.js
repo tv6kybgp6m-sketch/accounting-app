@@ -3448,7 +3448,8 @@ async function run() {
             ok('保险丝③：账本为空时「存为 iCloud 同步文件」先拦一道（它盖的是唯一那份异地副本）',
                 app63.indexOf('function ledgerLooksEmpty()') >= 0 &&
                 app63.indexOf('if (ledgerLooksEmpty()) {') >= 0 &&
-                app63.indexOf('继续会把 iCloud 里那份 ${ICLOUD_SYNC_FILENAME} 盖成空的') >= 0);
+                // v1.41.78：文件名改成一天一份，文案里跟着显示今天那份的名字
+                app63.indexOf('继续会把 iCloud 里那份今天的账本（${icloudSyncFileName()}）盖成空的') >= 0);
             ok('  ↳ 同一处修掉「假备份」：固定名导出不再重置上次备份时间',
                 app63.indexOf("const asBackup = opts.asBackup !== false;") >= 0 &&
                 app63.indexOf('if (asBackup) markExported();') >= 0 &&
@@ -3703,6 +3704,95 @@ async function run() {
                     rwo.after === '2025-07' && (rwo.label || '').indexOf('2025') >= 0 && (rwo.label || '').indexOf('7 月') >= 0, rwo);
                 ok('年报档不给月份列（月份不参与年度统计）', rwo.yearNoMonth === true, rwo);
             }
+        }
+
+        // ---- stage 67（v1.41.78）：空账本不许盖 iCloud + 一天一份的文件名 + 空账本引导 ----
+        stage = '67';
+        console.log('\n--- stage 67：iCloud 空账本闸 / 按天命名 / 本机空时指路 ---');
+        {
+            const src67 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+            const swift67 = fs.readFileSync(path.join(REPO, 'native', 'Bookkeeping.swift'), 'utf8');
+
+            // 文件名：一天一份、带日期
+            ok('iCloud 同步文件名带日期（一天一份，打开文件夹就知道是哪天的）',
+                ev(`icloudSyncFileName(new Date(2026, 10, 25))`) === 'bookkeeping-sync-2026-11-25.json',
+                ev(`icloudSyncFileName(new Date(2026, 10, 25))`));
+
+            // 计数：只数真正跟钱有关的几类
+            ok('判断「一份载荷里有没有账」只数流水/余额/收益/借出/保单',
+                ev(`icloudPayloadRowCount({ transactions: [1,2], balances: [1], returns: [], lending: [9], lendings: [1], insurancePolicies: [1,2,3] })`) === 7,
+                ev(`icloudPayloadRowCount({ transactions: [1,2], balances: [1], returns: [], lending: [9], lendings: [1], insurancePolicies: [1,2,3] })`));
+
+            // 空账本闸：源码形态 + 实测「不写」
+            ok('自动写 iCloud 前有「本机空 + iCloud 读到过账 → 不许盖」这道闸',
+                src67.indexOf('if (ledgerLooksEmpty() && __icloudHasRecords && !__icloudAllowEmptyWrite) {') > 0 &&
+                src67.indexOf('__icloudEmptyBlocked = true;') > 0);
+            ok('「清空全部」给 iCloud 自动写一次性放行（不然清空传不出去）',
+                src67.indexOf('__icloudAllowEmptyWrite = true;') > 0);
+
+            const gate = await ev(`(function () {
+                window.__writes = [];
+                window.electronAPI = {
+                    isElectron: true,
+                    icloud: {
+                        writeData: function (p, e, n) { window.__writes.push({ name: n }); return Promise.resolve('ok'); }
+                    }
+                };
+                iCloudSyncEnabled = true;
+                state.transactions = []; state.balances = []; state.returns = [];
+                state.lendings = []; state.insurancePolicies = [];
+                __icloudHasRecords = true; __icloudAllowEmptyWrite = false; __icloudEmptyBlocked = false;
+                return syncToICloud().then(function () {
+                    var blockedWrites = window.__writes.length;
+                    var blockedFlag = __icloudEmptyBlocked;
+                    __icloudAllowEmptyWrite = true;
+                    return syncToICloud().then(function () {
+                        var allowedWrites = window.__writes.length;
+                        var name = window.__writes.length ? window.__writes[window.__writes.length - 1].name : '';
+                        var once = __icloudAllowEmptyWrite;
+                        iCloudSyncEnabled = false;
+                        delete window.electronAPI;
+                        return JSON.stringify({ blockedWrites: blockedWrites, blockedFlag: blockedFlag,
+                            allowedWrites: allowedWrites, name: name, once: once });
+                    });
+                });
+            })()`);
+            const g = gate ? JSON.parse(gate) : {};
+            ok('本机是空的 → 一次都没往 iCloud 写（以前 3 秒后就把那份盖成空的）',
+                g.blockedWrites === 0 && g.blockedFlag === true, g);
+            ok('「清空全部」放行时确实写了，文件名是今天的日期，且放行只用一次',
+                g.allowedWrites === 1 && /^bookkeeping-sync-\d{4}-\d{2}-\d{2}\.json$/.test(g.name || '') && g.once === false, g);
+
+            ok('设置里会写明「本机是空的，已停止覆盖 iCloud」+ 当前文件名',
+                src67.indexOf('本机是空的，已停止覆盖 iCloud') > 0 && src67.indexOf('文件名: ${fileStr}') > 0);
+
+            // 本机空时的指路条
+            const banner = await ev(`(function () {
+                state.transactions = []; state.balances = []; state.returns = [];
+                state.lastExportAt = 0;
+                remoteSyncCfg.enabled = false; remoteSyncCfg.token = ''; remoteSyncCfg.gistId = '';
+                return renderBackupBanner().then(function () {
+                    var b = document.getElementById('backupBanner');
+                    return JSON.stringify({
+                        hidden: b.classList.contains('hidden'),
+                        text: (b.textContent || '').replace(/\\s+/g, ' ').trim()
+                    });
+                });
+            })()`);
+            const bn = banner ? JSON.parse(banner) : {};
+            ok('账本空 + 云同步没配 → 首页说清「去哪儿把云端那份拉回来」',
+                bn.hidden === false && (bn.text || '').indexOf('云同步') >= 0 && (bn.text || '').indexOf('同步库') >= 0, bn);
+
+            // Mac 端：读最新那份、写按名字、合并只取最近 30 份
+            ok('Mac 端写 iCloud 接受文件名参数（老版网页不给就退回固定名）',
+                swift67.indexOf('if args.count > 2, let n = args[2] as? String, !n.isEmpty,') > 0);
+            ok('Mac 端「当前这份」= 目录里最新的那份（兼容老的 bookkeeping-sync.json）',
+                swift67.indexOf('for url in icloudSyncFiles() {') > 0 &&
+                swift67.indexOf('hasPrefix(SYNC_PREFIX)') > 0);
+            ok('Mac 端启动合并只取最近 30 份（一天一份之后不会越读越慢）',
+                swift67.indexOf('.prefix(30)') > 0);
+            ok('桥接层把文件名传到 Swift（老参数两段仍然能用）',
+                swift67.indexOf("writeData: function (p, e, name) { return api._call('icloud.writeData', name ? [p, e, name] : [p, e]); },") > 0);
         }
 
 

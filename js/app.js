@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.77';
+const APP_VERSION = '1.41.78';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1734,6 +1734,20 @@ function mergeTombstoneList(local, remote) {
 let iCloudSyncTimer = null;
 let iCloudSyncEnabled = false;
 let iCloudLastSyncTime = null;
+// v1.41.78：三个标记，专治「本机变空了却把 iCloud 那份盖掉」
+//  · __icloudHasRecords：这次打开后真的从 iCloud 读到过账（读到过 = 那边有东西，不能拿空账本盖）
+//  · __icloudAllowEmptyWrite：「清空全部」这种"我就是要清空"的一次性放行
+//  · __icloudEmptyBlocked：上一次自动写被拦住了（设置里要说明白，别静默）
+let __icloudHasRecords = false;
+let __icloudAllowEmptyWrite = false;
+let __icloudEmptyBlocked = false;
+
+// v1.41.78：iCloud 那份改成「一天一个文件」，文件名带日期 —— 打开文件夹就知道是哪天同步的。
+// 以前是固定名 bookkeeping-sync.json，每次整份覆盖，事后分不清是哪天的。
+// 读取端（Mac）取文件夹里最新的一份，所以旧的固定名文件仍然认，不用手动改名。
+function icloudSyncFileName(d) {
+    return 'bookkeeping-sync-' + _ymd(d || Date.now()) + '.json';
+}
 
 function isElectron() {
     return typeof window.electronAPI !== 'undefined' && window.electronAPI.isElectron;
@@ -1839,11 +1853,24 @@ function buildSyncPayload() {
 async function syncToICloud() {
     if (!iCloudSyncEnabled || !isElectron()) return;
 
+    // v1.41.78：自动写也要有「空账本不许盖」这道闸。
+    // 手动点「存为 iCloud 同步文件」早就有一道（ledgerLooksEmpty() 先问一句），
+    // 自动这条路以前没有 —— 于是「本机数据丢了变空 + iCloud 那份恰好读不到」这两个条件撞在
+    // 一起时，3 秒后就把唯一那份异地副本整份盖成空的。现在：只要这次打开后确实从 iCloud
+    // 读到过账，就不许拿空账本去盖它；「清空全部」那种"我就是要清"走一次性放行。
+    if (ledgerLooksEmpty() && __icloudHasRecords && !__icloudAllowEmptyWrite) {
+        __icloudEmptyBlocked = true;
+        updateICloudSyncUI();
+        return;
+    }
+    __icloudEmptyBlocked = false;
+
     try {
         const payload = buildSyncPayload();
         const envelope = await buildCloudEnvelope(payload);
         if (LedgerCrypto.isEnabled() && !envelope) return;      // 拿不到密钥就这次不写云，绝不退回明文
-        await window.electronAPI.icloud.writeData(payload, envelope);
+        await window.electronAPI.icloud.writeData(payload, envelope, icloudSyncFileName());
+        __icloudAllowEmptyWrite = false;                        // 放行只给一次
         iCloudLastSyncTime = Date.now();
         updateICloudSyncUI();
     } catch (e) {
@@ -1908,6 +1935,14 @@ async function resolveCloudPayload(raw) {
 // 以前只挑 lastModified 最大的那一份，而 Mac 每次保存都会刷新自己那份的时间戳，
 // 手机导出的那份（以及 iOS 生成的"副本"）几乎永远竞争不过 → 看起来"识别不了"。
 // 从旧到新逐个合并：并集 + 墓碑后写优先，多合几份是幂等的，最后的删除也能生效。
+// v1.41.78：一份同步载荷里到底有没有"账"。只数真正跟钱有关的几类，
+// 内置账户/分类/支付方式这些清空后会自动恢复的默认项不算 —— 否则新装设备永远"看起来有账"。
+function icloudPayloadRowCount(d) {
+    if (!d || typeof d !== 'object') return 0;
+    const n = k => (Array.isArray(d[k]) ? d[k].length : 0);
+    return n('transactions') + n('balances') + n('returns') + n('lendings') + n('insurancePolicies');
+}
+
 async function mergeAllCloud(reason) {
     beginAskCycle(1);          // 整批文件合起来最多问一次口令
     let list = null;
@@ -1933,6 +1968,9 @@ async function mergeAllCloud(reason) {
             if (!data) { locked++; continue; }        // 解不开的那些已经累计在 __remoteLastError 里
         }
         if (!data || !data.data) continue;
+        // v1.41.78：只要 iCloud 那边真读到过记录，就记一笔 —— 之后本机要是变空了，
+        // 自动写会被拦住，不会把这份唯一的异地副本盖成空账本。
+        if (icloudPayloadRowCount(data.data) > 0) __icloudHasRecords = true;
         if (data.deviceId && data.deviceId === DEVICE_ID && list.length > 1) continue;  // 自己写的那份不必再合
         if (mergeRemoteData(data)) changed = true;
         merged++;
@@ -2324,7 +2362,7 @@ function exportToICloud() {
     if (ledgerLooksEmpty()) {
         const ok = confirm(
             '这台设备上的账本现在是空的（没有流水、余额、收益）。\n\n' +
-            `继续会把 iCloud 里那份 ${ICLOUD_SYNC_FILENAME} 盖成空的，而且不能撤销。\n\n` +
+            `继续会把 iCloud 里那份今天的账本（${icloudSyncFileName()}）盖成空的，而且不能撤销。\n\n` +
             '如果数据像是丢了：点「取消」，先用「导入 / 合并」挑一份备份，或者到 GitHub 的 gist 里翻上一版再拉回来。\n\n' +
             '确认这台设备本来就是全新开始 → 点「确定」。'
         );
@@ -2333,7 +2371,8 @@ function exportToICloud() {
             return Promise.resolve(false);
         }
     }
-    return exportSyncJSON(ICLOUD_SYNC_FILENAME, '已导出，请存入 iCloud 的「记账本」文件夹', { asBackup: false });
+    // v1.41.78：跟自动写用同一套命名（一天一份、带日期），手动存和自动写落在同一个文件上。
+    return exportSyncJSON(icloudSyncFileName(), '已导出，请存入 iCloud 的「记账本」文件夹', { asBackup: false });
 }
 
 // 本机账本是不是空的（用来判断"要不要拦一下覆盖性导出"）
@@ -3447,13 +3486,18 @@ function updateICloudSyncUI() {
             const timeStr = iCloudLastSyncTime
                 ? new Date(iCloudLastSyncTime).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
                 : '尚未同步';
+            // v1.41.78：写上文件名（一天一份、带日期），才发现"哪天的账本在这台机器上"；
+            // 被空账本闸拦住时也要明说，不能静默地什么都不写。
+            const fileStr = icloudSyncFileName();
             container.innerHTML = `
                 <div class="icloud-status">
                     <div class="icloud-status-row">
-                        <span class="icloud-status-dot active"></span>
-                        <span class="icloud-status-text">iCloud 自动同步已启用</span>
+                        <span class="icloud-status-dot ${__icloudEmptyBlocked ? 'inactive' : 'active'}"></span>
+                        <span class="icloud-status-text">${__icloudEmptyBlocked ? '本机是空的，已停止覆盖 iCloud' : 'iCloud 自动同步已启用'}</span>
                     </div>
                     <div class="icloud-status-info">上次同步: ${timeStr}</div>
+                    <div class="icloud-status-info">文件名: ${fileStr}</div>
+                    ${__icloudEmptyBlocked ? `<div class="icloud-status-info">这台设备上的账本现在没有记录，iCloud 里那份（或者备份）还在。<b>要么先点「恢复本地副本」，要么点「立即同步」从 iCloud 拉回来</b>，确认数据回来了再继续记。</div>` : ''}
                     <button class="secondary-btn" onclick="syncFromICloudNow()">
                         <i class="fa-solid fa-rotate"></i> 立即同步
                     </button>
@@ -3477,7 +3521,7 @@ function updateICloudSyncUI() {
         container.innerHTML = `
             <div class="icloud-status">
                 <div class="settings-row">
-                    <div class="settings-label">存为 iCloud 同步文件<div class="settings-sublabel">存成固定的 ${ICLOUD_SYNC_FILENAME}，Mac 端会自动读到；同名会盖掉上一次，所以它只是"最新一份"，想留历史请用上面的「导出备份」</div></div>
+                    <div class="settings-label">存为 iCloud 同步文件<div class="settings-sublabel">一天一份、文件名带日期（如 ${icloudSyncFileName()}），Mac 端自动读最新那份；同一天再存会盖掉当天那份，想留更细的历史请用上面的「导出备份」</div></div>
                     <button class="secondary-btn" onclick="exportToICloud()">
                         <i class="fa-solid fa-cloud-arrow-up"></i> 存一份
                     </button>
@@ -7688,7 +7732,21 @@ async function renderBackupBanner() {
     if (!banner) return;
     const hide = () => { banner.classList.add('hidden'); banner.innerHTML = ''; };
     const hasData = state.transactions.length > 0 || state.balances.length > 0 || state.returns.length > 0;
-    if (!hasData) return hide();
+
+    // v1.41.78：反过来的情况 —— 本机是空的，但很可能只是"还没接上云端"。
+    // 清缓存 / 换手机 / 重装之后，账本、Token、同步库 ID 会一起没，程序原先一声不响地
+    // 摆一本空账本给你，看着像数据被吃掉了。这里至少把"去哪儿拿回来"写在脸上。
+    if (!hasData) {
+        if (remoteSyncReady()) return hide();       // 已经配好了，同步自己会拉回来，不用啰嗦
+        if (state.lastExportAt) return hide();      // 导过备份 = 用户在管这件事，别挡着
+        banner.classList.remove('hidden');
+        banner.innerHTML = `
+            <i class="fa-solid fa-circle-info"></i>
+            这台设备上还没有账本。如果以前记过账：<b>设置 → 云同步</b> 填回 GitHub Token 和「同步库 ID」，
+            点「校验」再点「立即同步」，云端那份会拉回来。
+            <a href="javascript:void(0)" onclick="openGistHelp()">怎么填</a>`;
+        return;
+    }
 
     // Mac 版：每次改动都会留一份本机快照，开了 iCloud 就等于已经在异地备份了，不用提醒
     let cloud = false, hasSnapshot = false;
@@ -8467,6 +8525,10 @@ function clearAllData() {
     // v1.41.74：既然说"删除所有设备、不可恢复"，就不能在本机还留一份完整副本。
     // 同时把今天的轮换名额占掉，紧接着那次"存空账本"才不会又把旧账捞回来当副本。
     clearLocalPrevCopies();
+
+    // v1.41.78：这是"我就是要清空"，给 iCloud 自动写放行一次 —— 否则刚加的空账本闸
+    // 会把这次清空拦下来，云端留着旧数据，而删除标记又没传上去，下次合并全回来了。
+    __icloudAllowEmptyWrite = true;
 
     // 先给每条记录打删除标记，「清空」才能真的同步到别的设备。
     // 之前这里把 state.deleted 直接清空，结果另一台设备一合并就把旧账全灌回来。

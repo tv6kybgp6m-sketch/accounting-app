@@ -7,13 +7,25 @@ import UniformTypeIdentifiers
 // MARK: - 路径常量
 let ICLOUD_BASE = ("~/Library/Mobile Documents/com~apple~CloudDocs" as NSString).expandingTildeInPath
 let ICLOUD_DIR_NAME = "记账本"
+// v1.41.78：iCloud 那份改成「一天一个文件」，名字里带日期（bookkeeping-sync-2026-11-25.json），
+// 打开文件夹就知道哪天的。SYNC_FILENAME 只剩兼容用途：老版本、以及以前留下的固定名文件仍然要能读。
 let SYNC_FILENAME = "bookkeeping-sync.json"
+let SYNC_PREFIX = "bookkeeping-sync"
 
 func icloudDirURL() -> URL {
     return URL(fileURLWithPath: (ICLOUD_BASE as NSString).appendingPathComponent(ICLOUD_DIR_NAME))
 }
-func icloudFileURL() -> URL {
-    return icloudDirURL().appendingPathComponent(SYNC_FILENAME)
+// 目录里所有同步用的账本文件（含老的固定名），按修改时间从新到旧
+func icloudSyncFiles() -> [URL] {
+    let dir = icloudDirURL()
+    guard let files = try? FileManager.default.contentsOfDirectory(
+        at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return [] }
+    let mtime: (URL) -> Date = { url in
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+    }
+    return files
+        .filter { $0.pathExtension.lowercased() == "json" && $0.lastPathComponent.hasPrefix(SYNC_PREFIX) }
+        .sorted { mtime($0) > mtime($1) }
 }
 func backupsDirURL() -> URL {
     let base = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true)[0]
@@ -43,7 +55,7 @@ let BRIDGE_JS = """
         isAvailable: function () { return api._call('icloud.isAvailable', []); },
         readData: function () { return api._call('icloud.readData', []); },
         readAll: function () { return api._call('icloud.readAll', []); },
-        writeData: function (p, e) { return api._call('icloud.writeData', [p, e]); },
+        writeData: function (p, e, name) { return api._call('icloud.writeData', name ? [p, e, name] : [p, e]); },
         onFileChange: function (cb) { window.__icloudChangeCb = cb; return api._call('icloud.onFileChange', []); }
       }
     };
@@ -119,7 +131,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.41.77"
+        webView.customUserAgent = "BookkeepingMacApp/1.41.78"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"
@@ -372,9 +384,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
     }
 
     // 原始文本（用于变更检测与快照）
+    // v1.41.78：一天一个文件之后，"当前这份"= 目录里最新的那一份。
+    // 仍然兼容老的固定名 bookkeeping-sync.json（它也是同前缀，自然进入候选）。
     func readICloudString() -> String? {
-        let url = icloudFileURL()
-        return try? String(contentsOf: url, encoding: .utf8)
+        for url in icloudSyncFiles() {
+            if let str = try? String(contentsOf: url, encoding: .utf8), !str.isEmpty { return str }
+        }
+        return nil
     }
 
     // 返回已解析的对象——网页的 looksEncrypted(obj) 要求传对象而非字符串
@@ -389,6 +405,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
     // 网页的 mergeAllCloud() 会逐份合并；只挑"最新那一份"的老做法会被自己每次保存
     // 刷新的时间戳压住，手机导出的那份（以及 iOS 生成的"副本"）就永远合不进来。
     // 解析失败的文件直接跳过，不因为一个坏文件把整批同步拖垮。
+    // v1.41.78：一天一个文件之后这里会越攒越多（每份都是全量），所以只取最近 30 份来合并。
+    // 每份本身就是完整快照，30 份足够覆盖"另一台设备最近一个月写过的东西"，
+    // 启动时也不会因为攒了两年而要读几百个文件。
     func readICloudAll() -> [Any] {
         let dir = icloudDirURL()
         guard let files = try? FileManager.default.contentsOfDirectory(
@@ -396,9 +415,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         let mtime: (URL) -> Date = { url in
             (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
         }
-        let jsons = files
+        let newestFirst = files
             .filter { $0.pathExtension.lowercased() == "json" }
-            .sorted { mtime($0) < mtime($1) }
+            .sorted { mtime($0) > mtime($1) }
+            .prefix(30)
+        let jsons = Array(newestFirst).reversed()          // 仍然从旧到新合并
         var out: [Any] = []
         for f in jsons {
             guard let str = try? String(contentsOf: f, encoding: .utf8),
@@ -415,6 +436,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         let envelope = args.count > 1 ? args[1] : nil
         let chosen = (envelope is NSNull || envelope == nil) ? payload : envelope
         guard let obj = chosen else { respond(id: id, ok: false, result: "没有可写内容"); return }
+        // v1.41.78：第三个参数是文件名（网页给的是带日期的一天一份）。老版网页不给就退回固定名。
+        var name = SYNC_FILENAME
+        if args.count > 2, let n = args[2] as? String, !n.isEmpty,
+           !n.contains("/"), n.hasSuffix(".json") {
+            name = n
+        }
         do {
             let data: Data
             if let str = obj as? String {
@@ -423,7 +450,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
                 data = try JSONSerialization.data(withJSONObject: jsonSafeValue(obj), options: [.prettyPrinted, .fragmentsAllowed])
             }
             try FileManager.default.createDirectory(at: icloudDirURL(), withIntermediateDirectories: true)
-            try data.write(to: icloudFileURL(), options: [.atomic])
+            let dest = icloudDirURL().appendingPathComponent(name)
+            try data.write(to: dest, options: [.atomic])
             lastIcloudContent = String(data: data, encoding: .utf8)
             respond(id: id, ok: true, result: "ok")
         } catch {
