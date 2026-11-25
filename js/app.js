@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.78';
+const APP_VERSION = '1.41.79';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -1745,8 +1745,11 @@ let __icloudEmptyBlocked = false;
 // v1.41.78：iCloud 那份改成「一天一个文件」，文件名带日期 —— 打开文件夹就知道是哪天同步的。
 // 以前是固定名 bookkeeping-sync.json，每次整份覆盖，事后分不清是哪天的。
 // 读取端（Mac）取文件夹里最新的一份，所以旧的固定名文件仍然认，不用手动改名。
+// v1.41.79：日期挪到最前面（2026-11-25-记账本.json）。原来的 bookkeeping-sync-2026-11-25.json
+// 前面 27 个字符都是固定前缀，iCloud/Finder 里列宽一窄就把日期截掉了，等于没达到目的。
+// 日期打头还有个好处：按名称排序就是按天排。老名字的文件不删也不改，Mac 端两种都认。
 function icloudSyncFileName(d) {
-    return 'bookkeeping-sync-' + _ymd(d || Date.now()) + '.json';
+    return _ymd(d || Date.now()) + '-记账本.json';
 }
 
 function isElectron() {
@@ -2319,8 +2322,8 @@ function mergeRemoteData(remoteData) {
 
 // PWA: Export to iCloud (download JSON)
 // 导出一份完整的账本备份（JSON）。桌面版走原生存储面板。
-// filename 决定落盘名字：iCloud 通道必须用 Mac 端读取的那个固定名字。
-const ICLOUD_SYNC_FILENAME = 'bookkeeping-sync.json';
+// 文件名由 icloudSyncFileName() 给（一天一份、日期打头）。
+// 历史上的固定名 bookkeeping-sync.json 由 Mac 端继续认，这里不用再引用。
 
 async function exportSyncJSON(filename, toastText, opts = {}) {
     // v1.41.74：opts.asBackup === false 表示"这不是备份"（存 iCloud 同步文件是覆盖同一份，

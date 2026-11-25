@@ -3714,8 +3714,8 @@ async function run() {
             const swift67 = fs.readFileSync(path.join(REPO, 'native', 'Bookkeeping.swift'), 'utf8');
 
             // 文件名：一天一份、带日期
-            ok('iCloud 同步文件名带日期（一天一份，打开文件夹就知道是哪天的）',
-                ev(`icloudSyncFileName(new Date(2026, 10, 25))`) === 'bookkeeping-sync-2026-11-25.json',
+            ok('iCloud 同步文件名日期打头（列宽窄也不会把日期截掉）',
+                ev(`icloudSyncFileName(new Date(2026, 10, 25))`) === '2026-11-25-记账本.json',
                 ev(`icloudSyncFileName(new Date(2026, 10, 25))`));
 
             // 计数：只数真正跟钱有关的几类
@@ -3760,8 +3760,8 @@ async function run() {
             const g = gate ? JSON.parse(gate) : {};
             ok('本机是空的 → 一次都没往 iCloud 写（以前 3 秒后就把那份盖成空的）',
                 g.blockedWrites === 0 && g.blockedFlag === true, g);
-            ok('「清空全部」放行时确实写了，文件名是今天的日期，且放行只用一次',
-                g.allowedWrites === 1 && /^bookkeeping-sync-\d{4}-\d{2}-\d{2}\.json$/.test(g.name || '') && g.once === false, g);
+            ok('「清空全部」放行时确实写了，文件名是日期打头的，且放行只用一次',
+                g.allowedWrites === 1 && /^\d{4}-\d{2}-\d{2}-记账本\.json$/.test(g.name || '') && g.once === false, g);
 
             ok('设置里会写明「本机是空的，已停止覆盖 iCloud」+ 当前文件名',
                 src67.indexOf('本机是空的，已停止覆盖 iCloud') > 0 && src67.indexOf('文件名: ${fileStr}') > 0);
@@ -3785,10 +3785,15 @@ async function run() {
 
             // Mac 端：读最新那份、写按名字、合并只取最近 30 份
             ok('Mac 端写 iCloud 接受文件名参数（老版网页不给就退回固定名）',
-                swift67.indexOf('if args.count > 2, let n = args[2] as? String, !n.isEmpty,') > 0);
-            ok('Mac 端「当前这份」= 目录里最新的那份（兼容老的 bookkeeping-sync.json）',
-                swift67.indexOf('for url in icloudSyncFiles() {') > 0 &&
-                swift67.indexOf('hasPrefix(SYNC_PREFIX)') > 0);
+                swift67.indexOf('if args.count > 2, let n = args[2] as? String, isICloudSyncFileName(n)') > 0);
+            ok('Mac 端「当前这份」= 目录里最新的那份',
+                swift67.indexOf('for url in icloudSyncFiles() {') > 0);
+            ok('改名后三种文件名都认（新日期打头 / v1.41.78 日期在后 / 更早的固定名）',
+                swift67.indexOf('func isICloudSyncFileName(') > 0 &&
+                swift67.indexOf('if name.hasPrefix(SYNC_PREFIX) { return true }') > 0 &&
+                swift67.indexOf('guard name.hasSuffix(SYNC_SUFFIX_DATED) else { return false }') > 0);
+            ok('非同步文件不会被当成「当前那份」（用户导出的 json 排在外）',
+                swift67.indexOf('if datePart.count != 10 { return false }') > 0);
             ok('Mac 端启动合并只取最近 30 份（一天一份之后不会越读越慢）',
                 swift67.indexOf('.prefix(30)') > 0);
             ok('桥接层把文件名传到 Swift（老参数两段仍然能用）',

@@ -7,14 +7,37 @@ import UniformTypeIdentifiers
 // MARK: - 路径常量
 let ICLOUD_BASE = ("~/Library/Mobile Documents/com~apple~CloudDocs" as NSString).expandingTildeInPath
 let ICLOUD_DIR_NAME = "记账本"
-// v1.41.78：iCloud 那份改成「一天一个文件」，名字里带日期（bookkeeping-sync-2026-11-25.json），
-// 打开文件夹就知道哪天的。SYNC_FILENAME 只剩兼容用途：老版本、以及以前留下的固定名文件仍然要能读。
+// iCloud 那份现在是「一天一个文件、日期打头」：2026-11-25-记账本.json
+// v1.41.79 把日期挪到最前面（原来 bookkeeping-sync-2026-11-25.json 前缀太长，列宽一窄日期就被截掉）。
+// 下面三个常量只为"以前留下的文件仍然要能读"：老固定名 + v1.41.78 那一版日期在后的名字。
 let SYNC_FILENAME = "bookkeeping-sync.json"
 let SYNC_PREFIX = "bookkeeping-sync"
+let SYNC_SUFFIX_DATED = "-记账本.json"
 
 func icloudDirURL() -> URL {
     return URL(fileURLWithPath: (ICLOUD_BASE as NSString).appendingPathComponent(ICLOUD_DIR_NAME))
 }
+
+// 这个文件名是不是"同步用的那份账本"。三种都算：
+//   · 2026-11-25-记账本.json          ← v1.41.79 起
+//   · bookkeeping-sync-2026-11-25.json ← v1.41.78 那一版
+//   · bookkeeping-sync.json            ← 更早的固定名
+// 别的 json（手机导出的、用户自己放的）不算，免得把它们当成"当前那份"。
+func isICloudSyncFileName(_ name: String) -> Bool {
+    guard name.lowercased().hasSuffix(".json") else { return false }
+    if name.hasPrefix(SYNC_PREFIX) { return true }
+    guard name.hasSuffix(SYNC_SUFFIX_DATED) else { return false }
+    // 剩下这段必须是 YYYY-MM-DD 才能认（避免把「随便什么-记账本.json」当成同步文件）
+    let datePart = String(name.dropLast(SYNC_SUFFIX_DATED.count))
+    if datePart.count != 10 { return false }
+    let chars = Array(datePart)
+    for (i, c) in chars.enumerated() {
+        if i == 4 || i == 7 { if c != "-" { return false } }
+        else if !c.isNumber { return false }
+    }
+    return true
+}
+
 // 目录里所有同步用的账本文件（含老的固定名），按修改时间从新到旧
 func icloudSyncFiles() -> [URL] {
     let dir = icloudDirURL()
@@ -24,7 +47,7 @@ func icloudSyncFiles() -> [URL] {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
     }
     return files
-        .filter { $0.pathExtension.lowercased() == "json" && $0.lastPathComponent.hasPrefix(SYNC_PREFIX) }
+        .filter { isICloudSyncFileName($0.lastPathComponent) }
         .sorted { mtime($0) > mtime($1) }
 }
 func backupsDirURL() -> URL {
@@ -131,7 +154,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         webView = WKWebView(frame: rect, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.customUserAgent = "BookkeepingMacApp/1.41.78"
+        webView.customUserAgent = "BookkeepingMacApp/1.41.79"
 
         window = NSWindow(contentRect: rect, styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "记账本 Bookkeeping"
@@ -438,8 +461,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         guard let obj = chosen else { respond(id: id, ok: false, result: "没有可写内容"); return }
         // v1.41.78：第三个参数是文件名（网页给的是带日期的一天一份）。老版网页不给就退回固定名。
         var name = SYNC_FILENAME
-        if args.count > 2, let n = args[2] as? String, !n.isEmpty,
-           !n.contains("/"), n.hasSuffix(".json") {
+        if args.count > 2, let n = args[2] as? String, isICloudSyncFileName(n) {
             name = n
         }
         do {
