@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 bash ./minify.sh
 
 APP_NAME=Bookkeeping
-VERSION=1.41.79
+VERSION=1.41.80
 
 # v1.41.74：VERSION 以前定义了却没人用，Info.plist 只能手改 —— 漏一处就打出一个
 # 版本号不对的包（"检查更新说已是最新、装上报旧版本号"就是这么来的）。先在这里卡一道。

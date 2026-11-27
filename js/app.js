@@ -6,7 +6,7 @@
 // 当前版本号。逐版本的改动记录在仓库根目录的 CHANGELOG.md（从 git 历史生成），
 // 这里只留当前版本 —— 以前是把几千字的更新日志挤在这一行的注释里，
 // 读代码第一眼看到的全是历史，真正要看的东西反而找不到。
-const APP_VERSION = '1.41.79';
+const APP_VERSION = '1.41.80';
 
 // 对账容差：按"这个月动过多少钱"的 1% 算，下限 50 元、上限 500 元。
 // 上限是必须的：不封顶时净资产月增 30 万会放过 3000 元漏记，体检结论不可信；
@@ -17085,8 +17085,25 @@ function initEventListeners() {
     });
 
     // Custom number pad: numbers, decimal, operators, backspace
+    // v1.41.80：输入改到「按下那一刻」。原来这里只等 click，而按键变灰走的是 touchstart ——
+    // 两条通道互相独立，于是出现用户连报三次的症状：按键明明亮了（touchstart 执行过），
+    // 数字却没进（click 没到）。根因是 iOS 在 touchend 之后要留一小段时间判断「这是不是
+    // 双击的第一下」，这段时间里下一根手指落下，这次的 click 就被判成多击手势的一部分丢掉。
+    // 所以输入越快丢得越多，按一下停一下反而不丢 —— 与启动时间、手指是否滑动都无关。
+    // 现在：有 Pointer Events 就按下即输入（与变灰同一时刻）；click 只留给没有 Pointer
+    // Events 的老环境。数字键不再绑 click，天然不会重复计数。
+    // 桌面键盘输入的路径不受影响（下面 keydown 里对数字键另有处理）。
+    const __padHasPointer = typeof window.PointerEvent === 'function';
     document.querySelectorAll('.numpad-num, .numpad-op').forEach(btn => {
-        btn.addEventListener('click', () => numpadPress(btn.dataset.key));
+        const key = btn.dataset.key;
+        if (__padHasPointer) {
+            btn.addEventListener('pointerdown', (e) => {
+                if (e.pointerType === 'mouse' && e.button !== 0) return;   // 只认鼠标左键
+                numpadPress(key);
+            });
+        } else {
+            btn.addEventListener('click', () => numpadPress(key));
+        }
     });
     document.getElementById('numpadBack').addEventListener('click', numpadBack);
 

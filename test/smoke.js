@@ -3801,6 +3801,59 @@ async function run() {
         }
 
 
+        // ---------- 68) v1.41.80：数字键改成「按下即输入」，快速连按不再丢数字 ----------
+        // 用户 11-26/27 连报三次：按键明显亮了（变灰走 touchstart），数字却没进（click 没到）。
+        // 根因是 iOS 在 touchend 后要留一小段时间判断双击，这段时间里下一根手指落下，
+        // 这次的 click 就被当成多击手势的一部分丢掉 —— 打得越快丢得越多。所以输入不能再等 click。
+        stage = '68';
+        console.log('\n--- stage 68：数字键按下即输入（快速连按不丢数字） ---');
+        {
+            const src68 = fs.readFileSync(path.join(REPO, 'js', 'app.js'), 'utf8');
+            ok('源码：数字/运算符键的主通道是 pointerdown，按下那一刻就调 numpadPress',
+                /addEventListener\('pointerdown', \(e\) => \{[\s\S]{0,200}?numpadPress\(key\)/.test(src68));
+            ok('源码：没有 Pointer Events 的老环境仍退回 click（不会彻底不能输入）',
+                src68.indexOf("const __padHasPointer = typeof window.PointerEvent === 'function';") > 0 &&
+                src68.indexOf("btn.addEventListener('click', () => numpadPress(key));") > 0);
+            const padFast = ev(`(function(){
+                resetCalc();
+                var k = function(n){ return document.querySelector('.numpad-num[data-key="' + n + '"]'); };
+                ['1','2','4','5','7','8'].forEach(function(n){
+                    k(n).dispatchEvent(new MouseEvent('pointerdown', {bubbles:true, button:0}));
+                });
+                return calc.expr;
+            })()`);
+            ok('连按 6 个键（中间没有任何停顿）→ 6 位全进，一位不丢', padFast === '124578', padFast);
+            const padNoDouble = ev(`(function(){
+                resetCalc();
+                var b = document.querySelector('.numpad-num[data-key="5"]');
+                b.dispatchEvent(new MouseEvent('pointerdown', {bubbles:true, button:0}));
+                b.dispatchEvent(new MouseEvent('click', {bubbles:true}));
+                return calc.expr;
+            })()`);
+            ok('按下之后浏览器补发的 click 不会再算一遍（不会变成 55）', padNoDouble === '5', padNoDouble);
+            const padDecimal = ev(`(function(){
+                resetCalc();
+                var k = function(n){ return document.querySelector('.numpad-num[data-key="' + n + '"]'); };
+                ['2','2','.','5'].forEach(function(n){
+                    k(n).dispatchEvent(new MouseEvent('pointerdown', {bubbles:true, button:0}));
+                });
+                return [calc.expr, document.getElementById('amountInput').value].join('|');
+            })()`);
+            ok('小数连着按也对：22.5 四个键全进、显示也是 22.5', padDecimal === '22.5|22.5', padDecimal);
+            const padRightBtn = ev(`(function(){
+                resetCalc();
+                var b = document.querySelector('.numpad-num[data-key="7"]');
+                var e2 = new MouseEvent('pointerdown', {bubbles:true, button:2});
+                Object.defineProperty(e2, 'pointerType', {value:'mouse'});
+                b.dispatchEvent(e2);
+                return calc.expr;
+            })()`);
+            ok('鼠标右键点键盘不会输入数字', padRightBtn === '', padRightBtn);
+            ok('键盘区关掉了滚动/缩放手势（想滑动不会误进一个数字）',
+                /\.numpad\s*\{[^}]*touch-action:\s*none/m.test(cssText));
+        }
+
+
         console.log('\n=== 结束' + (failures ? '（有 ' + failures + ' 项失败）' : '（全过）') + ' ===');
     } catch (e) {
         console.log('  [FATAL @ ' + stage + '] ' + (e && e.stack || e));

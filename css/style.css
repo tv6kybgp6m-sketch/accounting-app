@@ -2355,6 +2355,12 @@ body.cat-dragging {
     margin: 8px -14px -8px;
     border-top: 0.5px solid var(--divider, var(--border));
     border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    /* v1.41.80：键盘上不做任何滚动/缩放手势。
+       数字键改成「按下即输入」（pointerdown）之后，如果手指在键上划一下还能把
+       整块正文滚起来，就会出现「想滚动却误进一个数字」。这里把键盘区的手势一次性
+       关掉：手势不会接管，指针事件也就不会被 pointercancel 打断，按下必定成立。
+       正文区域（键盘上方）照旧可以滑动。 */
+    touch-action: none;
 }
 
 .numpad-row {
